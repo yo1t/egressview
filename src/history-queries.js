@@ -126,11 +126,50 @@ function connectionSource(scope, alias = 'c', { from = null, to = null } = {}) {
   };
 }
 
+// The browser never sends an upper bound: every rolling range is `from = now -
+// N` with `to` left null. That makes the time filter one-sided, and SQLite
+// then drops the time index and drives from whichever index serves the GROUP
+// BY instead -- scanning the whole table to answer a question about the last
+// hour.
+//
+// Measured on the production Hub 2026-09-20, a one-hour summary:
+//
+//   SCAN connections USING INDEX idx_dst              746.1 ms
+//   SEARCH connections USING INDEX idx_lastSeen        19.0 ms
+//
+// and the cost did not move with the range -- 750 ms for an hour, 765 ms for a
+// day -- which is what "not filtering by time" looks like from outside.
+//
+// The bound below cannot exclude a row: no lastSeen can exceed the largest
+// integer JavaScript can represent, and the row counts are identical with and
+// without it. It exists only so the planner sees a range it can search.
+const OPEN_ENDED_LAST_SEEN = Number.MAX_SAFE_INTEGER;
+
+/**
+ * The time conditions for a query, always two-sided when there is a lower
+ * bound. Same rows as before; a plan that can use the time index.
+ */
+function timeRangeConditions(from, to) {
+  const conditions = [];
+  const params = [];
+  if (from != null) {
+    conditions.push('lastSeen >= ?');
+    params.push(from);
+    conditions.push('lastSeen <= ?');
+    params.push(to != null ? to : OPEN_ENDED_LAST_SEEN);
+  } else if (to != null) {
+    conditions.push('lastSeen <= ?');
+    params.push(to);
+  }
+  return { conditions, params };
+}
+
 function buildWhereAndParams(from, to, filterConditions, sourceScope = null, alias = 'connections') {
   const conditions = [];
   const params = [];
-  if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
-  if (to != null) { conditions.push('lastSeen <= ?'); params.push(to); }
+  const timeRange = timeRangeConditions(from, to);
+  conditions.push(...timeRange.conditions);
+  params.push(...timeRange.params);
   conditions.push(...filterConditions.conditions);
   params.push(...filterConditions.params);
   const scoped = sourceScopeCondition(sourceScope, alias);
@@ -312,8 +351,9 @@ function createHistoryQueries({
     const placeholders = capped.map(() => '?').join(',');
     const conditions = [];
     const params = [];
-    if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
-    if (to != null) { conditions.push('lastSeen <= ?'); params.push(to); }
+    const timeRange = timeRangeConditions(from, to);
+    conditions.push(...timeRange.conditions);
+    params.push(...timeRange.params);
     conditions.push(`dst IN (${placeholders})`);
     params.push(...capped);
     const scoped = sourceScopeCondition(sourceScope, 'c');
@@ -408,8 +448,9 @@ function createHistoryQueries({
     const source = connectionSource(sourceScope, 'connections', { from, to });
     const conditions = [];
     const params = [];
-    if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
-    if (to != null) { conditions.push('lastSeen <= ?'); params.push(to); }
+    const timeRange = timeRangeConditions(from, to);
+    conditions.push(...timeRange.conditions);
+    params.push(...timeRange.params);
     if (src != null) { conditions.push('src = ?'); params.push(src); }
     const scoped = sourceScopeCondition(sourceScope, 'connections');
     if (scoped.condition) conditions.push(scoped.condition);
