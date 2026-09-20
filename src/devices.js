@@ -5,6 +5,7 @@
 const Database = require('better-sqlite3');
 const path     = require('path');
 const crypto   = require('crypto');
+const { applyWalPragmas } = require('./sqlite-wal');
 
 const DB_PATH = path.join(__dirname, '..', '.egressview.db');
 
@@ -126,7 +127,7 @@ function getDiscardedRedirects() {
 function initDb(dbPath) {
   _dbPath = dbPath || DB_PATH;
   db = new Database(_dbPath);
-  db.pragma('journal_mode = WAL');
+  applyWalPragmas(db);
   db.pragma('busy_timeout = 5000');
 
   // ── Core devices table ───────────────────────────────────────────────────────
