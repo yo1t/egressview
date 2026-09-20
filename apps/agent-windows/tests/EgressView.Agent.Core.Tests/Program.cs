@@ -367,6 +367,35 @@ try
             "and a build that is already newer is still simply up to date");
     }
 
+    // A release the reader installs themselves, with the package still
+    // published so the download page has something to offer.
+    //
+    // This is the shape the publisher writes for an unsigned platform: the
+    // page needs the URL, and the agent must not act on it. Keying the
+    // agent's behaviour on the package being absent would have forced the
+    // page to go blank.
+    {
+        var manual = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            platform = "windows",
+            version = "9.8.7",
+            releasedAt = DateTimeOffset.UtcNow,
+            install = "manual",
+            packages = new[] { new { arch = WindowsAgentUpdateClient.HostArch, packageType = "msi",
+                url = "https://dl.egressview.com/windows/EgressView.msi",
+                sha256 = new string('b', 64), sizeBytes = 2048 } },
+        });
+        var verifier = new TestPackageVerifier();
+        using var client = new WindowsAgentUpdateClient(new UpdateHandler(manual, []),
+            verifier: verifier, manifestVerifier: new AcceptManifestVerifier());
+        var decision = await client.CheckAsync("1.0.0", "10.0.26100");
+        Assert(decision.Kind == AgentUpdateDecisionKind.DownloadManually && decision.PublishedVersion == "9.8.7",
+            "a release marked for manual installation reports the version and hands over nothing to install");
+        Assert(decision.Candidate is null && verifier.Calls == 0,
+            "the package is not downloaded and not verified, however complete it looks");
+    }
+
     // The relaxation goes exactly this far. A package that IS offered has to
     // be wholly valid: turning a malformed or unsigned one into "fetch it
     // yourself" would hide a manifest fault behind a helpful-looking message.
@@ -2171,6 +2200,78 @@ try
             var issue = AgentHealth.Evaluate(losing, "ok").Issues.SingleOrDefault();
             Assert(issue is { Code: "etw-events-lost" } && !issue.Action.Contains("restart", StringComparison.OrdinalIgnoreCase),
                 "events lost since then do, and the advice is not the restart that causes them");
+        }
+
+        // Which end of an event is this machine.
+        //
+        // The bug this pins was one of order. The inbound-multicast test used
+        // to sit inside the sorting branch and was reached only when the group
+        // was the destination; on a receive event the group is the source, so
+        // "the destination is ours and the source is not" matched first. Every
+        // process listening on 5353 was then charged for the same datagram --
+        // 490 MiB an hour on one PC, which is what made an application look
+        // like it was moving half a gigabyte.
+        {
+            const string local = "192.168.41.50";
+            const string group4 = "224.0.0.251";
+            const string group6 = "ff02::fb";
+
+            // The shape that leaked: received, group as the SOURCE, this
+            // machine as the destination.
+            Assert(EtwNetworkCollector.SortEndpoints(group4, 5353, local, 5353,
+                    sourceHasInterface: false, destinationHasInterface: true,
+                    sourceMulticast: true, destinationMulticast: false, received: true) is null,
+                "an inbound group datagram is left out even when the group is the source");
+
+            Assert(EtwNetworkCollector.SortEndpoints(group6, 5353, local, 5353,
+                    false, true, true, false, true) is null,
+                "and over IPv6, where the same shape arrives as ff02::fb");
+
+            // The shape that was already handled: group as the destination.
+            Assert(EtwNetworkCollector.SortEndpoints("192.168.41.9", 5353, group4, 5353,
+                    false, false, false, true, true) is null,
+                "an inbound group datagram addressed to the group is still left out");
+
+            // Outbound multicast is this machine announcing itself, and is kept.
+            var announced = EtwNetworkCollector.SortEndpoints(local, 5353, group4, 5353,
+                sourceHasInterface: true, destinationHasInterface: false,
+                sourceMulticast: false, destinationMulticast: true, received: false);
+            Assert(announced is { LocalAddress: local, RemoteAddress: group4, LocalIsSource: true },
+                "what this machine sent to the group is traffic it sent, and is kept");
+
+            // Ordinary traffic is unaffected, in both directions.
+            var outbound = EtwNetworkCollector.SortEndpoints(local, 52000, "8.8.8.8", 443,
+                true, false, false, false, false);
+            Assert(outbound is { LocalAddress: local, RemoteAddress: "8.8.8.8", RemotePort: 443 },
+                "an ordinary outbound flow still names the far end as the remote");
+            var inbound = EtwNetworkCollector.SortEndpoints("8.8.8.8", 443, local, 52000,
+                false, true, false, false, true);
+            Assert(inbound is { LocalAddress: local, RemoteAddress: "8.8.8.8", LocalIsSource: false },
+                "and an ordinary inbound flow names it the same way round");
+        }
+
+        // A trace session that is up and delivering nothing.
+        //
+        // Subscribing to two keywords the network provider does not define
+        // produced exactly this: the session ran, process and DNS events kept
+        // arriving, no network event did, and the agent reported "healthy" for
+        // three minutes because nothing had been lost -- nothing had arrived.
+        {
+            var silent = new CollectorSnapshot("healthy", 0, 0, 0, 0, null, null, 0)
+            { EtwSessionActive = true, EtwEventsSeen = 0, NamesFromStartEvents = 874, DnsEventsSeen = 329 };
+            var health = AgentHealth.Evaluate(silent, "ok");
+            Assert(health.Issues.Any(issue => issue.Code == "etw-network-silent") && health.Status != "healthy",
+                "a monitor recording nothing is never the same colour as one that is working");
+
+            // The control: all three quiet is a quiet machine, not a fault.
+            var quiet = silent with { NamesFromStartEvents = 0, DnsEventsSeen = 0 };
+            Assert(!AgentHealth.Evaluate(quiet, "ok").Issues.Any(issue => issue.Code == "etw-network-silent"),
+                "a machine with no traffic at all is not reported as broken");
+
+            // And a session that is delivering is not reported either.
+            var working = silent with { EtwEventsSeen = 1 };
+            Assert(!AgentHealth.Evaluate(working, "ok").Issues.Any(issue => issue.Code == "etw-network-silent"),
+                "one network event is enough to show the subscription is right");
         }
 
         // Public threat feeds, for agents with no Hub.

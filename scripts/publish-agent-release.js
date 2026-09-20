@@ -91,10 +91,25 @@ function parseArgs(argv) {
     profile: options.profile,
     output: options.output ? path.resolve(options.output) : null,
     dryRun: Boolean(options.dryRun),
-    publisher: options.publisher || (options.platform === 'windows' ? 'EgressView' : null),
+    // "manual" publishes the package and tells the agent not to install it.
+    //
+    // It is for a platform whose packages are not yet code-signed. The agent
+    // refuses to install what it cannot verify, and should: anyone able to
+    // answer for this origin could otherwise hand a machine an installer to
+    // run as administrator. Without this the daily check would fail every day
+    // with a cryptographic reason nobody can act on.
+    install: options.install || null,
+    // The publisher is the name the agent checks the Authenticode signature
+    // against, so it belongs on a package the agent will actually verify. On a
+    // manual release it would be a claim about a signature that is not there.
+    publisher: options.publisher
+      || (options.platform === 'windows' && options.install !== 'manual' ? 'EgressView' : null),
   };
 
   const problems = [];
+  if (config.install !== null && config.install !== 'manual') {
+    problems.push("--install accepts only 'manual'");
+  }
   if (!PLATFORMS.includes(config.platform)) {
     problems.push(`--platform must be one of ${PLATFORMS.join(', ')}`);
   }
@@ -137,6 +152,7 @@ function buildManifest(config, now = new Date()) {
     platform: config.platform,
     version: config.version,
     releasedAt: now.toISOString(),
+    ...(config.install ? { install: config.install } : {}),
     packages: config.packages.map((entry) => {
       const name = path.basename(entry.file);
       return {
