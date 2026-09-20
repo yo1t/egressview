@@ -153,3 +153,48 @@ describe('高くついた答えほど長く使い回す（P3-139）', () => {
     assert.equal(calls, 1);
   });
 });
+
+// P3-139 again. Raising the TTL was the wrong fix, and the hit rate could not
+// have told anyone that: an entry that expired and a key that never repeats
+// look identical from a percentage. They want opposite fixes.
+describe('外れた理由を、外れた数と一緒に記録する（P3-139）', () => {
+  it('鍵が動いていれば、期限切れではなく「見たことのない鍵」と数える', async () => {
+    connectionsRoutes._resetReadCacheForTest();
+    const app = mount({ summarizeByTimeRange: () => ({ byDst: [], byDevice: [], total: 0 }) });
+
+    // Two rolling requests far enough apart to land in different quanta.
+    const base = freshBase();
+    await request(app, `/api/connections/summary?from=${base}`);
+    await request(app, `/api/connections/summary?from=${base + 20_000}`);
+
+    const snapshot = connectionsRoutes.summaryCacheSnapshot();
+    assert.equal(snapshot.misses, 2);
+    assert.equal(snapshot.movingKey, 2);
+    assert.equal(snapshot.expired, 0);
+  });
+
+  it('同じ鍵が戻ってきて外れたなら、期限切れと数える', async () => {
+    connectionsRoutes._resetReadCacheForTest();
+    const app = mount({ summarizeByTimeRange: () => ({ byDst: [], byDevice: [], total: 0 }) });
+
+    await request(app, '/api/connections/summary');
+    // Drop the entry but keep the memory of the key, the way an expiry does.
+    connectionsRoutes._expireSummaryEntriesForTest();
+    await request(app, '/api/connections/summary');
+
+    const snapshot = connectionsRoutes.summaryCacheSnapshot();
+    assert.equal(snapshot.expired, 1);
+    assert.equal(snapshot.movingKey, 1);
+  });
+
+  it('聞かれた範囲は、幅だけを名前にして記録する', () => {
+    const label = connectionsRoutes._summaryRangeLabel;
+    const now = Date.now();
+    assert.equal(label(null, null), 'all');
+    assert.equal(label(now - 3_600_000, null), '<=1h');
+    assert.equal(label(now - 86_400_000, null), '<=24h');
+    assert.equal(label(now - 14 * 86_400_000, null), '<=14d');
+    assert.equal(label(now - 30 * 86_400_000, null), '>14d');
+    assert.equal(label(null, now), 'open-start');
+  });
+});
