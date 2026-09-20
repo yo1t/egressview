@@ -168,12 +168,17 @@ public static class DiagnosticsReport
         value.EtwConnectionDisconnected, value.EtwConnectionClosed,
         value.InterfaceUnresolved, value.InboundMulticastIgnored, value.EtwEventsLost, value.EtwEventsLostAtStart,
         collectorError = SafeCode(value.CollectorError), persistenceError = SafeCode(value.PersistenceError),
-        value.NamesFromStartEvents, value.NamesFromCache, value.NamesNeverSeen, value.NamesNeverSeenAtStartup,
+        value.NamesFromStartEvents, value.NamesFromCache, value.NamesFromLiveQueries, value.NamesNeverSeen, value.NamesNeverSeenAtStartup,
         value.NamesNeverSeenAfterStartup, value.NamesNeverSeenAfterStartProbeMiss, value.NamesNeverSeenWithoutStartEvent,
         value.NamesInvalidProcessId, value.NamesExpired, value.NamesPidReuseRejected, value.NamesDeferredPending,
         value.NamesDeferred, value.NamesRecoveredFromStop, value.NamesDeferredExpired, value.NamesDeferredOverflow,
         processNameSourceError = SafeCode(value.ProcessNameSourceError), value.HostnamesResolved, value.HostnamesUnavailable,
         value.DnsEventsSeen, hostnameSourceError = SafeCode(value.HostnameSourceError),
+        // Counts, so nothing about the traffic itself. Left out of the first
+        // version of the summing and therefore unmeasurable: the report is
+        // where the compression has to be visible, or the next person has to
+        // take it on trust.
+        value.EventsFolded, value.ObservationsEmitted, value.CoalescerOverflows, value.CoalescerOpenFlows,
     };
 
     private static object ReadInstallerState()

@@ -83,8 +83,14 @@
 
     <Component Id="UiExecutable" Directory="UIFOLDER" Guid="*">
       <File Id="UiExe" Source="$(var.UiPublishDir)\EgressView.Agent.Ui.exe" KeyPath="yes">
+        <!-- An advertised shortcut holds a Windows Installer descriptor rather
+             than a path, so Explorer cannot take the icon from the target the
+             way it would for an ordinary one: it has to be named here, from
+             the Icon table. Without it the shortcut installed with an empty
+             IconLocation and drew the generic default. -->
         <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuEgressView" Name="EgressView Agent"
-                  Description="Open EgressView Agent" WorkingDirectory="UIFOLDER" Advertise="yes" />
+                  Description="Open EgressView Agent" WorkingDirectory="UIFOLDER" Advertise="yes"
+                  Icon="AgentIcon.ico" IconIndex="0" />
       </File>
     </Component>
 

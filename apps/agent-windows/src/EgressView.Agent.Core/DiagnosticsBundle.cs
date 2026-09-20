@@ -50,6 +50,7 @@ public static class DiagnosticsBundle
             $"Collector: {Value(root, "collector", "State")}",
             $"ETW session active: {Value(root, "collector", "EtwSessionActive")}",
             $"ETW events seen: {Value(root, "collector", "EtwEventsSeen")}",
+            $"Process names from cache / live queries: {Value(root, "collector", "NamesFromCache")} / {Value(root, "collector", "NamesFromLiveQueries")}",
             $"ETW events lost: {Value(root, "collector", "EtwEventsLost")}",
             $"Collector queue drops: {Value(root, "collector", "QueueFullDrops")}",
             $"Persistence failures: {Value(root, "collector", "PersistenceFailures")}",

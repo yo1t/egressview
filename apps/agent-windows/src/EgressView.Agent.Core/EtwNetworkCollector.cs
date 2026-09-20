@@ -29,6 +29,34 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private static readonly Guid KernelProcess = new("22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716");
     private static readonly Guid DnsClient = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
 
+    /// The two keywords this Agent reads: IPv4 and IPv6 traffic.
+    ///
+    /// The values are the provider's own, from `logman query providers
+    /// Microsoft-Windows-Kernel-Network`. Guessed as 0x1 and 0x2 first, which
+    /// are bits this provider does not define: the session stayed up, the
+    /// other two providers kept delivering, and not one network event arrived
+    /// for three minutes. Keywords are not positional.
+    private const ulong NetworkKeywords = 0x10 | 0x20;   // IPV4 | IPV6
+
+    /// Total buffer space for the session, and the size of one buffer.
+    ///
+    /// These were raised to 64 MB to cure event loss, and that was the wrong
+    /// answer to a correct measurement. Widening the receptacle does not make
+    /// the consumer faster; it converts loss into delay, and the delay was
+    /// unbounded. Measured after that change: 7,119,190 events lost anyway,
+    /// and what survived was written so far behind the clock that the Agent
+    /// showed traffic from thirty-eight minutes earlier while reporting itself
+    /// as running -- event time advancing at about one part in a thousand of
+    /// real time, which never catches up. Loss is the better failure of the
+    /// two, because the Agent stays current and says so.
+    ///
+    /// The consumer is now fast enough not to need either, because it no
+    /// longer writes a row per packet -- see ObservationCoalescer. Back to a
+    /// modest, bounded reserve: enough to ride out a burst, too small to hide
+    /// a consumer that has stopped keeping up.
+    private const int SessionBufferMB = 16;
+    private const int SessionBufferQuantumKB = 64;
+
     /// Whether destination names are read from Windows DNS metadata.
     ///
     /// Turning this off costs more than the names: destinations show as
@@ -125,6 +153,10 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     /// short enough that a real shortfall is not hidden for long.
     private static readonly TimeSpan StartupSettlingPeriod = TimeSpan.FromSeconds(30);
 
+    /// Sums a flow's packet events within a second into one row. See
+    /// ObservationCoalescer for why a row per packet could not work.
+    private readonly ObservationCoalescer coalescer = new();
+
     private int startingEventsLost;
     private bool startupSettled;
     private DateTimeOffset sessionStartedAt;
@@ -146,7 +178,12 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         try { TraceEventSession.GetActiveSession(sessionName)?.Stop(); } catch { }
         try
         {
-            session = new TraceEventSession(sessionName) { StopOnDispose = true };
+            session = new TraceEventSession(sessionName)
+            {
+                StopOnDispose = true,
+                BufferSizeMB = SessionBufferMB,
+                BufferQuantumKB = SessionBufferQuantumKB,
+            };
             // The consumer starts before anything is turned on.
             //
             // Enabling the providers first and reading afterwards leaves a gap
@@ -161,7 +198,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
                 try { session.Source.Process(); }
                 catch (Exception ex) { error = $"{ex.GetType().Name}: {ex.Message}"; }
             });
-            session.EnableProvider(KernelNetwork, TraceEventLevel.Verbose, ulong.MaxValue);
+            session.EnableProvider(KernelNetwork, TraceEventLevel.Verbose, NetworkKeywords);
             sessionStartedAt = DateTimeOffset.UtcNow;
             startupSettled = false;
             startingEventsLost = 0;
@@ -219,6 +256,10 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         EtwConnectionAccepted = ConnectionAccepted,
         EtwConnectionDisconnected = ConnectionDisconnected,
         EtwConnectionClosed = ConnectionClosed,
+        EventsFolded = coalescer.Folded,
+        ObservationsEmitted = coalescer.Emitted,
+        CoalescerOverflows = coalescer.Overflows,
+        CoalescerOpenFlows = coalescer.OpenFlows,
         InterfaceUnresolved = InterfaceUnresolved,
         InboundMulticastIgnored = InboundMulticastIgnored,
         EtwEventsLost = EventsLost,
@@ -226,6 +267,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         CollectorError = Error,
         NamesFromStartEvents = processNames.ObservedStarts,
         NamesFromCache = processNames.CacheHits,
+        NamesFromLiveQueries = processNames.LiveLookups,
         NamesNeverSeen = processNames.NeverSeen,
         NamesNeverSeenAtStartup = processNames.NeverSeenAtStartup,
         NamesNeverSeenAfterStartup = processNames.NeverSeenAfterStartup,
@@ -268,6 +310,11 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             return;
         }
         Record(e);
+        // On the event timeline, not the wall clock, for the same reason the
+        // deferred names expire that way: under load the callback arrives well
+        // after the event, and a bucket judged against now would be closed
+        // before the events that belong in it had been handed over.
+        Submit(coalescer.Expire(eventAt));
         Submit(deferredNames.Expire(eventAt));
     }
 
@@ -356,39 +403,16 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         var sourceInterface = FindInterface(sourceAddress);
         var destinationInterface = FindInterface(destinationAddress);
 
-        string localAddress, remoteAddress;
-        int localPort, remotePort;
-        InterfaceInfo? localInterface;
-        if (sourceInterface is not null && destinationInterface is null && !sourceMulticast)
-            (localAddress, localPort, remoteAddress, remotePort, localInterface) = (sourceAddress, sourcePort, destinationAddress, destinationPort, sourceInterface);
-        else if (destinationInterface is not null && sourceInterface is null && !destinationMulticast)
-            (localAddress, localPort, remoteAddress, remotePort, localInterface) = (destinationAddress, destinationPort, sourceAddress, sourcePort, destinationInterface);
-        else if (sourceMulticast || destinationMulticast)
+        var sorted = SortEndpoints(sourceAddress, sourcePort, destinationAddress, destinationPort,
+            sourceInterface is not null, destinationInterface is not null,
+            sourceMulticast, destinationMulticast, direction == Direction.Receive);
+        if (sorted is null)
         {
-            // An inbound group datagram is another device announcing itself.
-            // It is not this machine sending anything, which is what this
-            // product watches. It also names the sender and the group but not
-            // the interface that received it, so it has no local address and
-            // can never satisfy the Hub's contract -- it would be stored and
-            // then dropped, every time.
-            //
-            // Outbound multicast is a different thing and is kept: this
-            // machine announcing itself is traffic it sent.
-            if (direction == Direction.Receive)
-            {
-                Interlocked.Increment(ref inboundMulticastIgnored);
-                return;
-            }
-            (localAddress, localPort, remoteAddress, remotePort, localInterface) =
-                (sourceAddress, sourcePort, destinationAddress, destinationPort, sourceInterface);
+            Interlocked.Increment(ref inboundMulticastIgnored);
+            return;
         }
-        else
-        {
-            var received = direction == Direction.Receive;
-            (localAddress, localPort, remoteAddress, remotePort, localInterface) = received
-                ? (destinationAddress, destinationPort, sourceAddress, sourcePort, destinationInterface)
-                : (sourceAddress, sourcePort, destinationAddress, destinationPort, sourceInterface);
-        }
+        var (localAddress, localPort, remoteAddress, remotePort, localIsSource) = sorted.Value;
+        var localInterface = localIsSource ? sourceInterface : destinationInterface;
 
         if (localInterface is null) Interlocked.Increment(ref interfaceUnresolved);
         // The event timestamp, not the current time: events reach here through
@@ -407,7 +431,11 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             && processNames.TryGetUnresolvedStart(pid, out var processStartedAt)
             && deferredNames.TryDefer(observation, processStartedAt, observation.ObservedAt))
             return;
-        pipeline.TrySubmit(observation);
+        // Deferred observations go straight to the pipeline when they are
+        // released, and are left out of the summing on purpose: they are a few
+        // hundred against millions, and folding a row whose bucket has already
+        // been emitted would be work for no reduction.
+        Submit(coalescer.Add(observation));
     }
 
     private static bool IsVpnTransport(string? processName, InterfaceInfo? localInterface)
@@ -467,6 +495,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             catch (TimeoutException) { StopTimedOut = true; }
         }
         Submit(deferredNames.Drain());
+        Submit(coalescer.Drain());
         session.Dispose();
         session = null;
         processing = null;
@@ -476,6 +505,47 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     {
         NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
         await StopAsync();
+    }
+
+    /// Which end of an event is this machine, or null to leave it out.
+    ///
+    /// Pulled out of Record because the bug it had was a bug of order: the
+    /// inbound-multicast test sat inside the branch that sorts the ends, and
+    /// was reached only when the group was the destination. On a receive event
+    /// the group is the *source*, so the branch above it -- "the destination is
+    /// ours and the source is not" -- matched first and stored the event.
+    ///
+    /// The cost was not small. Every process listening on the group is handed
+    /// the same datagram, so one broadcast was counted once per listener:
+    /// measured on one PC, 490 MiB an hour of the same mDNS traffic charged to
+    /// svchost, chrome and ChatGPT alike, which is what made an application
+    /// look like it was moving half a gigabyte.
+    ///
+    /// <returns>
+    /// The local end, the remote end, and whether the local end was the
+    /// source; null when the event is an inbound group datagram and belongs to
+    /// nobody on this machine.
+    /// </returns>
+    internal static (string LocalAddress, int LocalPort, string RemoteAddress, int RemotePort, bool LocalIsSource)?
+        SortEndpoints(string sourceAddress, int sourcePort, string destinationAddress, int destinationPort,
+            bool sourceHasInterface, bool destinationHasInterface,
+            bool sourceMulticast, bool destinationMulticast, bool received)
+    {
+        // Asked before the sorting, so the answer cannot depend on which side
+        // the group address landed on.
+        if (received && (sourceMulticast || destinationMulticast)) return null;
+
+        if (sourceHasInterface && !destinationHasInterface && !sourceMulticast)
+            return (sourceAddress, sourcePort, destinationAddress, destinationPort, true);
+        if (destinationHasInterface && !sourceHasInterface && !destinationMulticast)
+            return (destinationAddress, destinationPort, sourceAddress, sourcePort, false);
+        // Outbound multicast is kept: this machine announcing itself is
+        // traffic it sent.
+        if (sourceMulticast || destinationMulticast)
+            return (sourceAddress, sourcePort, destinationAddress, destinationPort, true);
+        return received
+            ? (destinationAddress, destinationPort, sourceAddress, sourcePort, false)
+            : (sourceAddress, sourcePort, destinationAddress, destinationPort, true);
     }
 
     private void Submit(IEnumerable<NetworkObservation> observations)

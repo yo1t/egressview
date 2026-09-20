@@ -12,7 +12,22 @@ using Org.BouncyCastle.Crypto.Signers;
 namespace EgressView.Agent.Core;
 
 public sealed record AgentUpdatePackage(string Arch, string PackageType, Uri Url, string Sha256, long SizeBytes, string? Publisher);
-public sealed record AgentUpdateManifest(int SchemaVersion, string Platform, string Version, DateTimeOffset ReleasedAt, IReadOnlyList<AgentUpdatePackage> Packages);
+/// <param name="Install">
+/// "manual" when the reader installs this release themselves, and the agent
+/// must not. Anything else, including absent, means the agent installs it as
+/// before.
+///
+/// It exists because the page and the agent want different things from the
+/// same manifest while the packages are unsigned: the page needs the URL to
+/// offer, and the agent must not act on it. Keying the agent's behaviour on
+/// the package being absent would have forced the page to go blank.
+///
+/// Fail-safe by construction: the only thing this field can do is stop an
+/// installation. The manifest is signed, so it cannot be set by anyone else,
+/// and if it could be it would still only prevent an install.
+/// </param>
+public sealed record AgentUpdateManifest(int SchemaVersion, string Platform, string Version, DateTimeOffset ReleasedAt,
+    IReadOnlyList<AgentUpdatePackage> Packages, string? Install = null);
 public sealed record AgentUpdateCandidate(string Version, AgentUpdatePackage Package, string UserAgent);
 public sealed record VerifiedAgentUpdate(string Version, string Path, string Publisher, long SizeBytes, string Sha256);
 
@@ -125,11 +140,17 @@ public sealed class WindowsAgentUpdateClient : IDisposable
         if (!AgentSemanticVersion.TryParse(manifest.Version, out var published) || !AgentSemanticVersion.TryParse(currentVersion, out var installed))
             throw new InvalidDataException("manifest-version-invalid");
         if (published.CompareTo(installed) <= 0) return new(AgentUpdateDecisionKind.UpToDate, manifest.Version, null);
+        // A release marked for manual installation is not examined further:
+        // the agent is not going to act on the package, so a fault in a
+        // package it will not touch is not this check's business.
+        if (string.Equals(manifest.Install, "manual", StringComparison.Ordinal))
+            return new(AgentUpdateDecisionKind.DownloadManually, manifest.Version, null);
         var package = manifest.Packages.SingleOrDefault(item => string.Equals(item.Arch, HostArch, StringComparison.Ordinal));
-        // No package offered for this machine is not a fault: it is a release
-        // the reader installs themselves. A package that is offered must still
-        // be wholly valid -- degrading a malformed or unsigned one into "go and
-        // fetch it yourself" would turn a manifest fault into silence.
+        // No package offered for this machine is not a fault either: it is a
+        // release with nothing for this architecture. A package that is
+        // offered must still be wholly valid -- degrading a malformed or
+        // unsigned one into "go and fetch it yourself" would turn a manifest
+        // fault into silence.
         if (package is null) return new(AgentUpdateDecisionKind.DownloadManually, manifest.Version, null);
         ValidatePackage(package);
         return new(AgentUpdateDecisionKind.UpdateAvailable, manifest.Version, new(manifest.Version, package, userAgent));
