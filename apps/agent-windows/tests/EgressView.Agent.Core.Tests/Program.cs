@@ -2212,7 +2212,11 @@ try
         // 490 MiB an hour on one PC, which is what made an application look
         // like it was moving half a gigabyte.
         {
-            const string local = "192.168.41.50";
+            // Documentation ranges, not the machine this was found on. The
+            // addresses that prompted this were somebody's real subnet, and a
+            // test file is published; the secret scan has caught me writing
+            // them down once already today.
+            const string local = "192.168.0.50";
             const string group4 = "224.0.0.251";
             const string group6 = "ff02::fb";
 
@@ -2228,7 +2232,7 @@ try
                 "and over IPv6, where the same shape arrives as ff02::fb");
 
             // The shape that was already handled: group as the destination.
-            Assert(EtwNetworkCollector.SortEndpoints("192.168.41.9", 5353, group4, 5353,
+            Assert(EtwNetworkCollector.SortEndpoints("192.168.0.9", 5353, group4, 5353,
                     false, false, false, true, true) is null,
                 "an inbound group datagram addressed to the group is still left out");
 
