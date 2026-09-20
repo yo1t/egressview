@@ -1048,6 +1048,27 @@ public partial class MainWindow : Window
             : LocalizationManager.Text("Checking");
     }
 
+    /// The card widths, worked out from the height the way the Mac Agent
+    /// works them out.
+    ///
+    /// The globe is drawn from the smaller side of its box, so a card much
+    /// wider than it is tall spends the difference on nothing: it is given
+    /// very nearly a square. The sankey keeps its name columns at a fixed
+    /// width, so narrowing the card takes width off the ribbons and not off
+    /// the names -- which is the point, the ribbons had more room than they
+    /// needed once the names moved out of the canvas.
+    ///
+    /// Done here rather than in the XAML because both numbers depend on the
+    /// height, and a star column cannot be told about one.
+    private void DashboardGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var width = Math.Max(1, DashboardGrid.ActualWidth);
+        var topHeight = DashboardTopRow.ActualHeight;
+        if (topHeight > 1)
+            GlobeColumn.Width = new GridLength(Math.Min(topHeight + 14, width * 0.5));
+        SankeyColumn.Width = new GridLength(Math.Min(Math.Max(width * 0.48, 336), Math.Max(340, width - 340)));
+    }
+
     private void Rotate_Click(object sender, RoutedEventArgs e)
     {
         Globe.IsRotating = !Globe.IsRotating;
@@ -1172,7 +1193,7 @@ public partial class MainWindow : Window
         PopulateAiModels();
         ShowAgentVersion();
         Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
-        Globe.DegreesPerSecond = AgentSettings.GlobeSpinSpeed switch { "slow" => 2, "fast" => 14, _ => 6 };
+        Globe.DegreesPerSecond = AgentSettings.GlobeSpinSpeed switch { "slow" => 2, "fast" => 16, _ => 6 };
         loadingSettings = false;
     }
 

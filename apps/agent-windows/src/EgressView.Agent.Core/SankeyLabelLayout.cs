@@ -3,14 +3,6 @@ namespace EgressView.Agent.Core;
 /// <summary>Pure layout decisions shared by the rendered Sankey and its tests.</summary>
 public static class SankeyLabelLayout
 {
-    public static int NamedCapacity(double height, double lineHeight)
-    {
-        if (!double.IsFinite(height) || !double.IsFinite(lineHeight) || height <= 0 || lineHeight <= 0) return 1;
-        // Keep one row available for the explicit folded remainder. If there
-        // is no remainder the caller can still use the spare breathing room.
-        return Math.Max(1, (int)Math.Floor(height / lineHeight) - 1);
-    }
-
     public static IReadOnlyList<string> FitDistinct(
         IReadOnlyList<string> values,
         IReadOnlyList<double> maxWidths,

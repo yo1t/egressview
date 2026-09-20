@@ -217,8 +217,6 @@ try
         statusStore.EndCoverage(statusCoverage, healthConfirmedAt.AddMinutes(1));
     }
 
-    Assert(SankeyLabelLayout.NamedCapacity(340, 14) > SankeyLabelLayout.NamedCapacity(170, 14),
-        "a taller Sankey names more rows instead of retaining a fixed seven-item ceiling");
     static double MonospaceMeasure(string value) => value.Length;
     var similarLabels = SankeyLabelLayout.FitDistinct(
         ["api.cluster-east.example.net", "api.cluster-west.example.net", "2606:4700:4408::ac40:9bd1", "2606:4700:4408::ac40:9bd2"],
