@@ -813,15 +813,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 21, "v1 database migrates through v2-v21");
+        Assert(migrated.SchemaVersion == 22, "v1 database migrates through v2-v22");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v21.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v22.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 21, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 22, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -913,6 +913,27 @@ try
         Assert(timeline.Connections == 1 && timeline.Timeline.Sum(item => item.Connections) == 2 &&
             timeline.Timeline.Select(item => item.Bucket).ToHashSet().SetEquals([0, 2]),
             "timeline uses each observation time instead of moving one long-lived flow into its last-seen bucket");
+
+        // The same correction applied to the numbers above the chart, which had
+        // it wrong in a way the chart did not. A flow row carries its whole
+        // life's byte total, so summing the flows that overlap a period charged
+        // the period for traffic that moved outside it. This flow lived from
+        // +10m to +2h10m and moved 30 bytes in its first hour and 70 in its
+        // third; the old total reported all 100 in each of them, and 100 again
+        // in the hour between, when it moved nothing at all.
+        var firstHour = timelineStore.ReadPeriodAnalysis(from, from.AddHours(1));
+        Assert(firstHour.Connections == 1 && firstHour.Bytes == 30 &&
+            firstHour.BytesSent == 10 && firstHour.BytesReceived == 20,
+            "a period reports the bytes that moved inside it, not the whole life of every flow overlapping it");
+        var quietHour = timelineStore.ReadPeriodAnalysis(from.AddHours(1), from.AddHours(2));
+        Assert(quietHour.Connections == 1 && quietHour.Bytes == 0,
+            "an hour in which an open flow moved nothing reports that nothing moved");
+        var thirdHour = timelineStore.ReadPeriodAnalysis(from.AddHours(2), from.AddHours(3));
+        Assert(thirdHour.Bytes == 70 && thirdHour.Links.Single().Bytes == 70,
+            "per-destination bytes are cut to the period as well, so the chart and its rows agree");
+        var wholePeriod = timelineStore.ReadPeriodAnalysis(from, from.AddHours(12), bucketCount: 12);
+        Assert(wholePeriod.Bytes == 100 && wholePeriod.Links.Sum(link => link.Bytes) == 100,
+            "the periods still add up to everything the flow actually moved");
         timelineStore.WriteBatch([
             new NetworkObservation(from.AddHours(3).AddMinutes(10), 43, "UDP", "10.0.0.1", 51001,
                 "198.51.100.43", 443, null, null, ObservationLayer.Logical, null, "etw", "CurrentHour")
@@ -920,6 +941,56 @@ try
         timeline = timelineStore.ReadPeriodAnalysis(from, from.AddHours(12), bucketCount: 12);
         Assert(timeline.Timeline.Sum(item => item.Connections) == 3 && timeline.Timeline.Any(item => item.Bucket == 3),
             "timeline combines folded complete hours with the current raw hour without gaps or duplicates");
+    }
+
+        // The chart counts connections, because that is what its legend says.
+    //
+    // It plotted observation_count. While the collector wrote a row per packet
+    // those were nowhere near each other: measured on one machine, a single
+    // minute held 310,764 rows and 215 connections, and the chart drew the
+    // first -- a bar 1,445 times the truth, flattening every other hour on the
+    // screen, while the summary directly above it read 2,647 connections for
+    // the same period. The summing in the collector narrows the gap and does
+    // not close it: a row is now a flow-second, and a connection open for a
+    // minute is still sixty of them.
+    using (var chartStore = new ObservationStore(Path.Combine(directory, "chart-counts-connections.db")))
+    {
+        var from = new DateTimeOffset(2026, 9, 21, 0, 0, 0, TimeSpan.Zero);
+        NetworkObservation Row(int seconds, int port, long sent) =>
+            new(from.AddSeconds(seconds), 7, "TCP", "10.0.0.1", port, "203.0.113.7", 443, sent, 0,
+                ObservationLayer.Logical, null, "etw", "Chatty");
+        // Two connections, seven rows: five seconds of one, two of the other.
+        chartStore.WriteBatch([
+            Row(1, 40001, 1), Row(2, 40001, 1), Row(3, 40001, 1), Row(4, 40001, 1), Row(5, 40001, 1),
+            Row(6, 40002, 1), Row(7, 40002, 1),
+        ]);
+
+        // Raw hour: buckets narrower than an hour read the observations.
+        var raw = chartStore.ReadPeriodAnalysis(from, from.AddHours(1), bucketCount: 12);
+        Assert(raw.Timeline.Sum(item => item.Connections) == 2 && raw.Connections == 2,
+            "the chart and the summary above it agree on how many connections a period held");
+
+        // Folded hour: the same answer has to survive being summarised.
+        Assert(chartStore.FoldCompletedHoursForCharts(from.AddHours(2)) > 0, "the hour folds");
+        var folded = chartStore.ReadPeriodAnalysis(from, from.AddHours(12), bucketCount: 12);
+        Assert(folded.Timeline.Sum(item => item.Connections) == 2,
+            "a folded hour remembers its connections rather than its rows");
+        Assert(folded.Timeline.Sum(item => item.Bytes) == 7,
+            "and still remembers every byte those rows carried");
+
+        // StartupSnapshot.FlowKey identifies a UDP connection by its local
+        // socket because the Windows snapshot has no remote endpoint for UDP.
+        // The chart must use that same identity or its total disagrees with
+        // the summary above it when one socket talks to several peers.
+        chartStore.WriteBatch([
+            new NetworkObservation(from.AddHours(2).AddMinutes(1), 8, "UDP", "10.0.0.1", 5353,
+                "203.0.113.8", 5353, 1, 0, ObservationLayer.Logical, null, "etw", "Responder"),
+            new NetworkObservation(from.AddHours(2).AddMinutes(2), 8, "UDP", "10.0.0.1", 5353,
+                "203.0.113.9", 5353, 1, 0, ObservationLayer.Logical, null, "etw", "Responder"),
+        ]);
+        var udp = chartStore.ReadPeriodAnalysis(from.AddHours(2), from.AddHours(3), bucketCount: 12);
+        Assert(udp.Connections == 1 && udp.Timeline.Sum(item => item.Connections) == 1,
+            "one UDP socket is one connection in both the summary and the chart even when it reaches several peers");
     }
 
     using (var geoStore = new ObservationStore(Path.Combine(directory, "geo.db")))
@@ -2254,6 +2325,87 @@ try
                 "and an ordinary inbound flow names it the same way round");
         }
 
+        // A row per packet, which the store could not absorb.
+        //
+        // An ETW network event is a packet, and the collector wrote one
+        // observation for each. Measured on one machine: a single chrome
+        // connection to a CDN produced 132,928 rows in 1.4 seconds against a
+        // store that manages about a hundred a second. Widening the session
+        // buffers, which was the previous answer, only turned the loss into a
+        // delay -- event time advanced at one part in a thousand of real time,
+        // so the Agent showed traffic from thirty-eight minutes earlier and
+        // called itself healthy. The summing is what makes the write rate a
+        // function of how many flows are active rather than how fast the link
+        // is.
+        {
+            var start = new DateTimeOffset(2026, 9, 20, 12, 0, 0, TimeSpan.Zero);
+            NetworkObservation Packet(DateTimeOffset at, long sent, long received, int port = 51000, string? name = "chrome") =>
+                new(at, 42, "TCP", "10.0.0.1", port, "203.0.113.42", 443, sent, received,
+                    ObservationLayer.Logical, null, "etw", name);
+
+            var coalescer = new ObservationCoalescer();
+            var emitted = new List<NetworkObservation>();
+            // Ten thousand packets inside one second, as a saturated
+            // connection delivers them.
+            for (var i = 0; i < 10_000; i++)
+                emitted.AddRange(coalescer.Add(Packet(start.AddTicks(i * 100), 10, 20)));
+            Assert(emitted.Count == 0 && coalescer.OpenFlows == 1,
+                "packets of one flow inside one second are held as one row, not ten thousand");
+
+            // The bucket closes once the event timeline has moved past it and
+            // the tolerance for out-of-order callbacks with it.
+            emitted.AddRange(coalescer.Expire(start.AddSeconds(3)));
+            Assert(emitted.Count == 1 && emitted[0].BytesSent == 100_000 && emitted[0].BytesReceived == 200_000,
+                "the row that comes out carries the sum of what it replaced");
+            Assert(emitted[0].ObservedAt == start && emitted[0].ProcessName == "chrome" &&
+                emitted[0].RemoteAddress == "203.0.113.42" && emitted[0].Protocol == "TCP",
+                "and is otherwise the flow it came from, timed when its traffic began");
+            Assert(coalescer.Folded == 9_999 && coalescer.Emitted == 1,
+                "the counters report the compression rather than leaving it to be assumed");
+
+            // Different seconds are different rows, and different flows are
+            // never summed together.
+            var perSecond = new ObservationCoalescer();
+            var rows = new List<NetworkObservation>();
+            rows.AddRange(perSecond.Add(Packet(start, 1, 0)));
+            rows.AddRange(perSecond.Add(Packet(start.AddMilliseconds(999), 2, 0)));
+            rows.AddRange(perSecond.Add(Packet(start.AddSeconds(1), 4, 0)));
+            rows.AddRange(perSecond.Add(Packet(start.AddSeconds(1), 8, 0, port: 51001)));
+            rows.AddRange(perSecond.Drain());
+            Assert(rows.Count == 3 && rows.Sum(row => row.BytesSent) == 15,
+                "a second boundary and a different local port each start their own row, and nothing is lost");
+
+            // An unmeasured packet must not be turned into a measured zero:
+            // the store and the screen both distinguish "we do not know" from
+            // "none", and the period totals count the first separately.
+            var unknown = new ObservationCoalescer();
+            var unknownRows = new List<NetworkObservation>();
+            // Two of them, so the summing is actually reached: one packet
+            // alone never calls it, and a test that never calls it passed a
+            // version that turned every unmeasured byte count into zero.
+            unknownRows.AddRange(unknown.Add(Packet(start, 0, 0) with { BytesSent = null, BytesReceived = null }));
+            unknownRows.AddRange(unknown.Add(Packet(start, 0, 0) with { BytesSent = null, BytesReceived = null }));
+            unknownRows.AddRange(unknown.Drain());
+            Assert(unknownRows.Single() is { BytesSent: null, BytesReceived: null },
+                "a flow whose bytes were never reported still reads as unmeasured after summing");
+            var partial = new ObservationCoalescer();
+            partial.Add(Packet(start, 0, 0) with { BytesSent = null, BytesReceived = null });
+            partial.Add(Packet(start, 5, 0) with { BytesReceived = null });
+            Assert(partial.Drain().Single() is { BytesSent: 5, BytesReceived: null },
+                "and one measured packet among unmeasured ones gives the row what is known, and no more");
+
+            // The bound has to do something rather than grow without limit,
+            // and what it does must not be to drop traffic -- a port scan is
+            // the shape that reaches it.
+            var flooded = new ObservationCoalescer();
+            var flushed = new List<NetworkObservation>();
+            for (var i = 0; i <= ObservationCoalescer.MaximumOpenFlows; i++)
+                flushed.AddRange(flooded.Add(Packet(start, 1, 0, port: 20_000 + i)));
+            Assert(flooded.Overflows == 1 && flushed.Count == ObservationCoalescer.MaximumOpenFlows + 1 &&
+                flooded.OpenFlows == 0,
+                "reaching the ceiling on open flows emits what is held instead of dropping it");
+        }
+
         // A trace session that is up and delivering nothing.
         //
         // Subscribing to two keywords the network provider does not define
@@ -2512,7 +2664,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 21 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 22 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }

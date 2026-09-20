@@ -10,6 +10,8 @@ const {
   parseArgs,
   buildManifest,
   serializeManifest,
+  assertPublishableTree,
+  releaseTag,
   MANIFEST_SCHEMA_VERSION,
 } = require('../../scripts/publish-agent-release');
 
@@ -208,5 +210,70 @@ describe('agent release publication', () => {
     // Not inside the branch: it runs whether or not the cache was invalidated.
     const between = source.slice(invalidation, verify);
     assert.doesNotMatch(between, /process\.exit|throw /);
+  });
+});
+
+describe('a release must be the tag it claims to be', () => {
+  // Agent packages had no such check. The offline bundle's publisher learned
+  // it the hard way -- 2.0.0, 2.0.1 and 2.0.2 all went out with no signed
+  // assets and nothing failed, because releasing and signing were two things
+  // a person had to remember in order. The record for the agent path says the
+  // same in fewer words: the two distribution paths drifted "because it is
+  // manual".
+  const asking = (_cmd, args) => args[0];
+  const clean = (cmd, args) => (asking(cmd, args) === 'status' ? '' : 'agent-windows/v0.1.86');
+  const base = {
+    platform: 'windows',
+    version: '0.1.86',
+    dryRun: false,
+    packages: [{ arch: 'x64', file: '/tmp/EgressView-Agent-Windows-0.1.86-unsigned.msi' }],
+  };
+
+  it('タグの上でクリーンなら通す', () => {
+    assert.doesNotThrow(() => assertPublishableTree(base, clean));
+  });
+
+  it('作業ツリーが汚れていれば拒む', () => {
+    const dirty = (cmd, args) => (asking(cmd, args) === 'status' ? ' M src/thing.cs' : 'agent-windows/v0.1.86');
+    assert.throws(() => assertPublishableTree(base, dirty), /uncommitted changes/);
+  });
+
+  it('HEADにそのタグが無ければ拒む', () => {
+    const untagged = () => '';
+    assert.throws(() => assertPublishableTree(base, untagged), /not tagged agent-windows/);
+    const wrongTag = (cmd, args) => (asking(cmd, args) === 'status' ? '' : 'agent-windows/v0.1.85');
+    assert.throws(() => assertPublishableTree(base, wrongTag), /not tagged/);
+  });
+
+  it('別のバージョンのファイルを指していれば拒む', () => {
+    // The mistake that looks right in every log line: this version's manifest
+    // pointing at the previous version's package.
+    const mismatched = {
+      ...base,
+      packages: [{ arch: 'x64', file: '/tmp/EgressView-Agent-Windows-0.1.85-unsigned.msi' }],
+    };
+    assert.throws(() => assertPublishableTree(mismatched, clean), /does not carry the version/);
+  });
+
+  it('dry runは免除する', () => {
+    // Producing a manifest to look at is how you check the shape of a release
+    // before making one. Requiring a tag for that would teach people to tag
+    // early, which is worse than not checking.
+    const refuseEverything = () => { throw new Error('git should not have been consulted'); };
+    assert.doesNotThrow(() => assertPublishableTree({ ...base, dryRun: true }, refuseEverything));
+  });
+
+  it('macOSにも同じ規則が当たる', () => {
+    // One script, one rule. The agent versions differ from the repository's
+    // own vX.Y.Z tags and from each other, so the tag names the platform too.
+    assert.equal(releaseTag('macos', '0.5.59'), 'agent-macos/v0.5.59');
+    assert.equal(releaseTag('windows', '0.1.86'), 'agent-windows/v0.1.86');
+    const mac = {
+      ...base,
+      platform: 'macos',
+      version: '0.5.59',
+      packages: [{ arch: 'arm64', file: '/tmp/egressview-agent-0.5.59.pkg' }],
+    };
+    assert.throws(() => assertPublishableTree(mac, clean), /not tagged agent-macos/);
   });
 });

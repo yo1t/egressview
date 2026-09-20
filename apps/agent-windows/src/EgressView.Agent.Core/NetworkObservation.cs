@@ -204,7 +204,16 @@ public sealed record CollectorSnapshot(
     long EtwConnectionAttempted = 0,
     long EtwConnectionAccepted = 0,
     long EtwConnectionDisconnected = 0,
-    long EtwConnectionClosed = 0);
+    long EtwConnectionClosed = 0,
+    // How many packet events were summed into a row that already existed, and
+    // how many rows that produced. The ratio between them is what says the
+    // store is being asked for something it can keep up with; before the
+    // summing existed it was one to one, and a single saturated connection
+    // asked for ninety thousand rows a second.
+    long EventsFolded = 0,
+    long ObservationsEmitted = 0,
+    long CoalescerOverflows = 0,
+    int CoalescerOpenFlows = 0);
 
 public enum StoreFailureKind
 {

@@ -42,6 +42,18 @@ const ARCHES = ['arm64', 'x64'];
 const PACKAGE_TYPES = { '.pkg': 'pkg', '.dmg': 'dmg', '.msi': 'msi', '.exe': 'exe', '.deb': 'deb', '.rpm': 'rpm' };
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
+/**
+ * The tag a published agent build must be sitting on.
+ *
+ * The repository's own tags are `vX.Y.Z` and track the Hub; the agents have
+ * their own version lines, so they need their own names. One tag per platform
+ * and version, because macOS 0.5.59 and Windows 0.1.86 are not the same
+ * release and never ship together.
+ */
+function releaseTag(platform, version) {
+  return `agent-${platform}/v${version}`;
+}
+
 function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
@@ -52,6 +64,52 @@ function run(command, args, options = {}) {
     encoding: 'utf8',
     stdio: options.stdio || ['ignore', 'pipe', 'pipe'],
   });
+}
+
+/**
+ * Refuse to publish anything that is not the tag it claims to be.
+ *
+ * The macOS offline bundle learned this the hard way: 2.0.0, 2.0.1 and 2.0.2
+ * all went out with no signed assets and the pipeline never failed, because
+ * releasing and signing were two things a person had to remember in order.
+ * Agent packages had no equivalent check at all -- a build from a dirty tree,
+ * or from no tag at all, published exactly as readily as a real one.
+ *
+ * A dry run is exempt. Producing a manifest to look at is how you check the
+ * shape of a release before you make one, and requiring a tag for that would
+ * only teach people to tag early.
+ */
+function assertPublishableTree(config, run_ = run) {
+  if (config.dryRun) return;
+  const problems = [];
+
+  const dirty = run_('git', ['status', '--porcelain']).trim();
+  if (dirty) {
+    problems.push(
+      `the working tree has uncommitted changes, so this build is not what any tag names:\n${dirty}`
+    );
+  }
+
+  const wanted = releaseTag(config.platform, config.version);
+  const tags = run_('git', ['tag', '--points-at', 'HEAD']).split('\n').map((line) => line.trim());
+  if (!tags.includes(wanted)) {
+    problems.push(
+      `HEAD is not tagged ${wanted}. Tag the commit this package was built from, then publish from it.`
+    );
+  }
+
+  // Weak on purpose, and worth having: it catches publishing one version's
+  // manifest pointing at another version's file, which is the mistake that
+  // looks right in every log line.
+  for (const entry of config.packages) {
+    if (!path.basename(entry.file).includes(config.version)) {
+      problems.push(`package does not carry the version being published: ${path.basename(entry.file)}`);
+    }
+  }
+
+  if (problems.length) {
+    throw new Error(`Refusing to publish:\n  - ${problems.join('\n  - ')}`);
+  }
 }
 
 function parseArgs(argv) {
@@ -262,6 +320,9 @@ async function verifyPublished(config, manifestBytes, io = {}) {
 
 async function publish(config, io = {}) {
   const log = io.log || ((message) => process.stdout.write(`${message}\n`));
+  // Before anything is built, hashed or signed: a release that is not the
+  // tag it claims to be should cost nothing to refuse.
+  assertPublishableTree(config, io.run || run);
   const work = config.output || fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-agent-release-'));
   fs.mkdirSync(work, { recursive: true });
   const manifestPath = path.join(work, 'manifest.json');
@@ -350,5 +411,7 @@ module.exports = {
   parseArgs,
   buildManifest,
   serializeManifest,
+  assertPublishableTree,
+  releaseTag,
   MANIFEST_SCHEMA_VERSION,
 };
