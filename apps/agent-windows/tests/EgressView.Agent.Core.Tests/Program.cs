@@ -1375,6 +1375,40 @@ try
             "the name is not reused indefinitely after the process is gone");
         Assert(resolver.Expired == 1, "expiry is counted rather than silent");
 
+        // Network ETW is a packet stream. Crossing into the process API for
+        // every packet made the callback run ten times behind wall clock on a
+        // real machine and overflowed millions of ETW events. The lifecycle
+        // provider updates this cache immediately; the live probe is only a
+        // bounded fallback when that provider misses an event.
+        var probeNow = now;
+        var probeCalls = 0;
+        var cachedResolver = new ProcessNameResolver(
+            TimeSpan.FromMinutes(2),
+            _ => { probeCalls++; return new ProcessNameResolver.LiveProcess("browser", started); },
+            clock: () => probeNow);
+        for (var packet = 0; packet < 10_000; packet++)
+            Assert(cachedResolver.Resolve(4343, now.AddTicks(packet)) == "browser",
+                "a packet keeps the process name supplied by the bounded cache");
+        Assert(probeCalls == 1 && cachedResolver.CacheHits == 9_999,
+            "ten thousand packets in one probe interval cross into Windows once, not ten thousand times");
+        probeNow = probeNow.Add(ProcessNameResolver.LiveProbeInterval).AddMilliseconds(1);
+        Assert(cachedResolver.Resolve(4343, now.AddSeconds(1)) == "browser" && probeCalls == 2,
+            "the live fallback checks the PID again after the bounded interval");
+
+        // If that fallback discovers a reused PID while old ETW callbacks are
+        // still draining, the old event keeps the old owner and the next
+        // current event gets the new one.
+        var owner = new ProcessNameResolver.LiveProcess("first", started);
+        probeNow = now;
+        var backlogResolver = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => owner, clock: () => probeNow);
+        Assert(backlogResolver.Resolve(4444, now) == "first", "the original PID owner is cached");
+        owner = new ProcessNameResolver.LiveProcess("second", now.AddSeconds(1));
+        probeNow = probeNow.AddSeconds(2);
+        Assert(backlogResolver.Resolve(4444, now.AddMilliseconds(500)) == "first",
+            "a delayed event is not relabelled with the PID's new owner");
+        Assert(backlogResolver.Resolve(4444, now.AddSeconds(2)) == "second",
+            "after reuse, current traffic takes the new owner from the in-memory cache");
+
         // A PID handed to a different process must not inherit the old name.
         // A wrong name is worse than none: a missing name is visibly missing,
         // a wrong one is indistinguishable from a correct one.

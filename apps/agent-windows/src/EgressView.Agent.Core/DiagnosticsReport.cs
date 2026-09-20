@@ -168,7 +168,7 @@ public static class DiagnosticsReport
         value.EtwConnectionDisconnected, value.EtwConnectionClosed,
         value.InterfaceUnresolved, value.InboundMulticastIgnored, value.EtwEventsLost, value.EtwEventsLostAtStart,
         collectorError = SafeCode(value.CollectorError), persistenceError = SafeCode(value.PersistenceError),
-        value.NamesFromStartEvents, value.NamesFromCache, value.NamesNeverSeen, value.NamesNeverSeenAtStartup,
+        value.NamesFromStartEvents, value.NamesFromCache, value.NamesFromLiveQueries, value.NamesNeverSeen, value.NamesNeverSeenAtStartup,
         value.NamesNeverSeenAfterStartup, value.NamesNeverSeenAfterStartProbeMiss, value.NamesNeverSeenWithoutStartEvent,
         value.NamesInvalidProcessId, value.NamesExpired, value.NamesPidReuseRejected, value.NamesDeferredPending,
         value.NamesDeferred, value.NamesRecoveredFromStop, value.NamesDeferredExpired, value.NamesDeferredOverflow,

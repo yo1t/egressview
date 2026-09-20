@@ -267,6 +267,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         CollectorError = Error,
         NamesFromStartEvents = processNames.ObservedStarts,
         NamesFromCache = processNames.CacheHits,
+        NamesFromLiveQueries = processNames.LiveLookups,
         NamesNeverSeen = processNames.NeverSeen,
         NamesNeverSeenAtStartup = processNames.NeverSeenAtStartup,
         NamesNeverSeenAfterStartup = processNames.NeverSeenAfterStartup,

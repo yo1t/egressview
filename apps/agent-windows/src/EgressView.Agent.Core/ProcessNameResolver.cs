@@ -35,6 +35,17 @@ public sealed class ProcessNameResolver
     private readonly ConcurrentDictionary<int, DateTimeOffset> startEventsWithoutName = new();
     private readonly TimeSpan retention;
     private readonly Func<int, LiveProcess?> probe;
+    private readonly Func<DateTimeOffset> clock;
+
+    /// Do not ask Windows for the same process on every packet.
+    ///
+    /// Process.GetProcessById and Process.StartTime both cross into the OS. A
+    /// busy connection can produce tens of thousands of ETW callbacks per
+    /// second; doing those calls for every callback made event time advance at
+    /// one tenth of wall time while the ETW buffers overflowed. Process start
+    /// events update the cache immediately, and this interval is only the
+    /// fallback for a lifecycle event that was missed.
+    internal static readonly TimeSpan LiveProbeInterval = TimeSpan.FromSeconds(1);
 
     private long cacheHits, liveLookups, expired, pidReuseRejected, observedStarts, neverSeen;
     private long neverSeenAtStartup, neverSeenAfterStartup, invalidProcessId;
@@ -44,10 +55,12 @@ public sealed class ProcessNameResolver
 
     /// The probe is injectable so the reuse and expiry rules can be tested
     /// without waiting for real processes to start and exit.
-    public ProcessNameResolver(TimeSpan retention, Func<int, LiveProcess?> probe, IEnumerable<int>? startupProcessIds = null)
+    public ProcessNameResolver(TimeSpan retention, Func<int, LiveProcess?> probe,
+        IEnumerable<int>? startupProcessIds = null, Func<DateTimeOffset>? clock = null)
     {
         this.retention = retention;
         this.probe = probe;
+        this.clock = clock ?? (() => DateTimeOffset.UtcNow);
         processesPresentAtStartup = new ConcurrentDictionary<int, byte>(
             (startupProcessIds ?? []).Where(pid => pid > 0).Select(pid => new KeyValuePair<int, byte>(pid, 0)));
     }
@@ -99,19 +112,47 @@ public sealed class ProcessNameResolver
             return null;
         }
 
+        // The lifecycle provider is the primary PID-reuse guard. Between its
+        // events, reuse the in-memory answer for a bounded interval instead of
+        // turning every network packet into two synchronous process queries.
+        // The observation-time retention check remains here so a synthetic or
+        // delayed event far beyond the process lifetime cannot extend a name.
+        cache.TryGetValue(processId, out var cached);
+        if (cached is not null && BelongsTo(cached, observedAt) &&
+            observedAt - cached.LastSeenAlive <= retention &&
+            clock() - cached.LastSeenAlive < LiveProbeInterval)
+        {
+            Interlocked.Increment(ref cacheHits);
+            return cached.Name;
+        }
+
         var live = SafeProbe(processId);
         if (live is { } running)
         {
             Interlocked.Increment(ref liveLookups);
             var name = Sanitize(running.Name);
             if (name is null) return null;
-            Remember(processId, new Entry(name, running.StartedAt, Later(observedAt)));
+            // Remember the current owner for subsequent packets even when this
+            // particular event predates it. If the PID was reused while an ETW
+            // backlog was draining, the cached previous owner still answers
+            // this old event; the new owner answers the next current one.
+            Remember(processId, new Entry(name, running.StartedAt, ConfirmedAt(observedAt)));
+            if (running.StartedAt is { } currentStart && observedAt < currentStart)
+            {
+                if (cached is not null && BelongsTo(cached, observedAt))
+                {
+                    Interlocked.Increment(ref cacheHits);
+                    return cached.Name;
+                }
+                Interlocked.Increment(ref pidReuseRejected);
+                return null;
+            }
             return name;
         }
 
         // The process is gone. Its name is still the right answer for the
         // events it produced while it was alive.
-        if (!cache.TryGetValue(processId, out var entry))
+        if (cached is null)
         {
             // Never seen alive and no start event for it. Distinguishing this
             // from an expired entry is what separates "started before we did"
@@ -130,7 +171,7 @@ public sealed class ProcessNameResolver
             return null;
         }
 
-        if (entry.StartedAt is { } startedAt && observedAt < startedAt)
+        if (cached.StartedAt is { } startedAt && observedAt < startedAt)
         {
             // This observation predates the process we cached, so it belongs
             // to whatever held the PID before it.
@@ -138,7 +179,7 @@ public sealed class ProcessNameResolver
             return null;
         }
 
-        if (observedAt - entry.LastSeenAlive > retention)
+        if (observedAt - cached.LastSeenAlive > retention)
         {
             Interlocked.Increment(ref expired);
             cache.TryRemove(processId, out _);
@@ -146,7 +187,7 @@ public sealed class ProcessNameResolver
         }
 
         Interlocked.Increment(ref cacheHits);
-        return entry.Name;
+        return cached.Name;
     }
 
     /// Record a process the moment it starts, before any of its traffic is
@@ -168,7 +209,7 @@ public sealed class ProcessNameResolver
         if (name is null) return null;
         startEventsWithoutName.TryRemove(processId, out _);
         Interlocked.Increment(ref observedStarts);
-        Remember(processId, new Entry(name, startedAt, Later(startedAt)));
+        Remember(processId, new Entry(name, startedAt, ConfirmedAt(startedAt)));
         return name;
     }
 
@@ -200,7 +241,7 @@ public sealed class ProcessNameResolver
         }
         startEventsWithoutName.TryRemove(processId, out _);
         Interlocked.Increment(ref observedStarts);
-        Remember(processId, new Entry(name, running.StartedAt ?? startedAt, Later(startedAt)));
+        Remember(processId, new Entry(name, running.StartedAt ?? startedAt, ConfirmedAt(startedAt)));
     }
 
     internal static string? BareName(string? imageName)
@@ -276,9 +317,12 @@ public sealed class ProcessNameResolver
 
     private static DateTimeOffset Later(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
 
+    private static bool BelongsTo(Entry entry, DateTimeOffset observedAt) =>
+        entry.StartedAt is not { } startedAt || observedAt >= startedAt;
+
     /// An observation timestamped in the past still confirms the process was
     /// alive now, so the later of the two is what the retention window runs
     /// from.
-    private static DateTimeOffset Later(DateTimeOffset observedAt) =>
-        Later(observedAt, DateTimeOffset.UtcNow);
+    private DateTimeOffset ConfirmedAt(DateTimeOffset observedAt) =>
+        Later(observedAt, clock());
 }
