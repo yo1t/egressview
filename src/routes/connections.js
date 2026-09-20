@@ -139,12 +139,59 @@ function quantiseForCache(value) {
  * it is not visible any other way: the query is correct, the response is
  * correct, and only the cost is wrong.
  */
-const summaryCacheStats = { hits: 0, misses: 0 };
+const summaryCacheStats = {
+  hits: 0,
+  misses: 0,
+  // Why a miss missed. A hit rate alone says the cache is not working and
+  // nothing about which of the two possible reasons it is, and guessing
+  // between them cost a wrong fix and a production deploy (P3-139): the TTL
+  // was raised on the belief that the key was stable, when the key was moving
+  // every quantum and no TTL could ever have been reached.
+  expired: 0,
+  movingKey: 0,
+  // What the misses were asking for, coarsely: enough to tell a one-hour view
+  // from an open-ended one, and no timestamps or addresses.
+  ranges: {},
+  slowestMs: 0,
+  slowestRange: null,
+  ttlGrantedMs: 0,
+};
+// Keys seen before, so a miss can say whether this key has ever been cached.
+// Bounded: it answers a question about recent traffic, not a log of it.
+const summaryKeysSeen = new Map();
+const SUMMARY_KEYS_SEEN_LIMIT = 200;
+
+/**
+ * How far back a request asked, named coarsely enough to log.
+ *
+ * No timestamps and no addresses: the operator needs to know whether the
+ * expensive misses are a fourteen-day view or something wider, not who asked.
+ */
+function summaryRangeLabel(from, to) {
+  if (from == null && to == null) return 'all';
+  if (from == null) return 'open-start';
+  const spanMs = (to ?? Date.now()) - from;
+  if (spanMs <= 3_600_000) return '<=1h';
+  if (spanMs <= 6 * 3_600_000) return '<=6h';
+  if (spanMs <= 86_400_000) return '<=24h';
+  if (spanMs <= 7 * 86_400_000) return '<=7d';
+  if (spanMs <= 14 * 86_400_000) return '<=14d';
+  return '>14d';
+}
+
+function noteSummaryKeySeen(key) {
+  summaryKeysSeen.set(key, Date.now());
+  if (summaryKeysSeen.size > SUMMARY_KEYS_SEEN_LIMIT) {
+    const oldest = summaryKeysSeen.keys().next().value;
+    summaryKeysSeen.delete(oldest);
+  }
+}
 
 function summaryCacheSnapshot() {
   const total = summaryCacheStats.hits + summaryCacheStats.misses;
   return {
     ...summaryCacheStats,
+    ranges: { ...summaryCacheStats.ranges },
     hitRate: total ? summaryCacheStats.hits / total : null,
   };
 }
@@ -192,14 +239,31 @@ function setSummaryCache(key, body, ttlMs = SUMMARY_CACHE_MIN_TTL_MS) {
  * old. `null` is preserved because "up to now" already means the same thing on
  * every request.
  */
-function cachedRead(kind, keyParts, compute) {
+function cachedRead(kind, keyParts, compute, { from = null, to = null } = {}) {
   const key = JSON.stringify({ kind, ...keyParts });
   const cached = getSummaryCache(key);
-  summaryCacheStats[cached ? 'hits' : 'misses'] += 1;
-  if (cached) return { body: cached, cached: true };
+  if (cached) {
+    summaryCacheStats.hits += 1;
+    return { body: cached, cached: true };
+  }
+  summaryCacheStats.misses += 1;
+  // A key this process has served before and lost means the TTL ran out. A key
+  // it has never seen means the key itself moved, and no TTL would have helped.
+  summaryCacheStats[summaryKeysSeen.has(key) ? 'expired' : 'movingKey'] += 1;
+  const label = summaryRangeLabel(from, to);
+  summaryCacheStats.ranges[label] = (summaryCacheStats.ranges[label] || 0) + 1;
+
   const startedAt = Date.now();
   const body = compute();
-  setSummaryCache(key, body, summaryCacheTtl(Date.now() - startedAt));
+  const computeMs = Date.now() - startedAt;
+  const ttlMs = summaryCacheTtl(computeMs);
+  if (computeMs > summaryCacheStats.slowestMs) {
+    summaryCacheStats.slowestMs = computeMs;
+    summaryCacheStats.slowestRange = label;
+    summaryCacheStats.ttlGrantedMs = ttlMs;
+  }
+  setSummaryCache(key, body, ttlMs);
+  noteSummaryKeySeen(key);
   return { body, cached: false };
 }
 
@@ -352,7 +416,7 @@ function connectionsRoutes(ctx) {
       src,
       buckets,
       ...(sourceScope ? { sourceScope } : {}),
-    }));
+    }), { from, to });
     res.json({ ...summary, serverTime: Date.now(), cached });
   });
 
@@ -556,8 +620,15 @@ module.exports.summaryCacheSnapshot = summaryCacheSnapshot;
 // process that builds several with different fixtures behind the same key.
 module.exports._resetReadCacheForTest = () => {
   summaryCache.clear();
-  summaryCacheStats.hits = 0;
-  summaryCacheStats.misses = 0;
+  summaryKeysSeen.clear();
+  Object.assign(summaryCacheStats, {
+    hits: 0, misses: 0, expired: 0, movingKey: 0,
+    ranges: {}, slowestMs: 0, slowestRange: null, ttlGrantedMs: 0,
+  });
 };
 module.exports._sendLargeJson = sendLargeJson;
 module.exports._summaryCacheTtl = summaryCacheTtl;
+module.exports._summaryRangeLabel = summaryRangeLabel;
+// Drops the cached bodies but keeps the memory of which keys were served, so a
+// test can produce the expiry case without waiting out a TTL.
+module.exports._expireSummaryEntriesForTest = () => { summaryCache.clear(); };

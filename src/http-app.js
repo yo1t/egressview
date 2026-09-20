@@ -206,6 +206,22 @@ function configureHttpApp(app, {
       `[summary-cache] hits=${snapshot.hits} misses=${snapshot.misses} `
       + `hitRate=${(snapshot.hitRate * 100).toFixed(0)}%`
     );
+    // A hit rate says the cache is not working. It does not say which of the
+    // two reasons it is, and the difference decides the fix: an expired entry
+    // wants a longer TTL, a key that never repeats wants a steadier key.
+    // Guessing between them cost a wrong fix and a production deploy (P3-139).
+    if (snapshot.misses) {
+      const ranges = Object.entries(snapshot.ranges)
+        .sort(([, a], [, b]) => b - a)
+        .map(([label, count]) => `${label} x${count}`)
+        .join(', ');
+      logger.info(
+        `[summary-cache] missed because: expired=${snapshot.expired} `
+        + `keyNeverSeen=${snapshot.movingKey}; asked for: ${ranges}; `
+        + `slowest=${snapshot.slowestMs}ms (${snapshot.slowestRange}) `
+        + `ttlGranted=${snapshot.ttlGrantedMs}ms`
+      );
+    }
   }, 15 * 60 * 1000);
   cacheSummary.unref();
   app.use('/api', enforceApiPermissions);
