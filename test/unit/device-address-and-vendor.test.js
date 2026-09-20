@@ -32,7 +32,7 @@ describe('端末一覧に載るのは端末だけ', () => {
   });
 
   it('本物の端末のアドレスは通す', () => {
-    for (const ip of ['192.168.41.50', '10.0.0.5', '172.16.173.1', '203.0.113.9']) {
+    for (const ip of ['192.168.1.50', '10.0.0.5', '172.16.173.1', '203.0.113.9']) {
       assert.equal(devices.isDeviceAddress(ip), true, `弾いてはいけない: ${ip}`);
     }
   });
@@ -50,7 +50,7 @@ describe('端末一覧に載るのは端末だけ', () => {
     assert.equal(devices.observeDevice({ ip: '240d:1a:55e:ed00::1', source: 'agent', lastSeen: now }), null);
     assert.equal(devices.getAll().length, 0, '端末でないものが一覧に入っている');
 
-    assert.notEqual(devices.observeDevice({ ip: '192.168.41.50', source: 'agent', lastSeen: now }), null);
+    assert.notEqual(devices.observeDevice({ ip: '192.168.1.50', source: 'agent', lastSeen: now }), null);
     assert.equal(devices.getAll().length, 1);
   });
 });
