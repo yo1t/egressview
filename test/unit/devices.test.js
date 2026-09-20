@@ -86,9 +86,22 @@ describe('devices.observeDevices batch', () => {
   it('rolls back the whole batch when one device cannot be bound', () => {
     assert.throws(() => devicesModule.observeDevices([
       { ip: '192.168.1.20', firstSeen: 1, lastSeen: 2, source: 'yamaha' },
-      { ip: { invalid: true }, firstSeen: 1, lastSeen: 2, source: 'yamaha' },
+      { ip: '192.168.1.21', mac: { invalid: true }, firstSeen: 1, lastSeen: 2, source: 'yamaha' },
     ]));
     assert.equal(devicesModule.getByIp('192.168.1.20'), null);
+  });
+
+  it('端末でないアドレスは、バッチを壊さずに飛ばす', () => {
+    // An Agent reports every address its machine holds, and most of them are
+    // not devices (P3-138). One of those must not cost the poll its other rows.
+    devicesModule.observeDevices([
+      { ip: '192.168.1.22', firstSeen: 1, lastSeen: 2, source: 'agent' },
+      { ip: '0.0.0.0', firstSeen: 1, lastSeen: 2, source: 'agent' },
+      { ip: 'fe80::1%en0', firstSeen: 1, lastSeen: 2, source: 'agent' },
+    ]);
+    assert.ok(devicesModule.getByIp('192.168.1.22'), '本物の端末が失われている');
+    assert.equal(devicesModule.getByIp('0.0.0.0'), null);
+    assert.equal(devicesModule.getByIp('fe80::1%en0'), null);
   });
 });
 

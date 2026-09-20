@@ -34,16 +34,9 @@ let observeManyTxn        = null;
 
 // ─── isStableMac ──────────────────────────────────────────────────────────────
 
-/**
- * Returns true if mac is a globally unique (OUI-assigned) hardware MAC.
- * Returns false for privacy/locally-administered MACs, broadcast, all-zero, or invalid input.
- */
-function isStableMac(mac) {
-  if (!mac || !/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(mac)) return false;
-  if (mac === 'ff:ff:ff:ff:ff:ff' || mac === '00:00:00:00:00:00') return false;
-  const first = parseInt(mac.split(':')[0], 16);
-  return (first & 0x02) === 0;
-}
+// Moved to src/mac.js: what a MAC can tell you is a property of the address,
+// not of this store, and the OUI lookup needs the same answer.
+const { isStableMac } = require('./mac');
 
 // ─── Choosing between candidates that claim the same IP ───────────────────────
 
@@ -454,8 +447,52 @@ function upsert(d) {
  *
  * @returns {string|null} deviceId
  */
+// ─── What counts as a device's address ────────────────────────────────────────
+
+// A device list should contain devices.
+//
+// Agents report every address their machine holds, and the Hub turned each one
+// into a row: measured on the production Hub 2026-09-20, 305 of 427 rows (72%)
+// were not devices. They were one machine's other addresses -- rotating IPv6
+// temporary addresses, per-interface link-local addresses including AirDrop's
+// `%awdl0`, virtual-machine bridges, loopback, broadcast and the unspecified
+// address. The IPv6 ones rotate every few days, so the list grew for ever.
+//
+// IPv6 is not excluded because it does not matter. It is excluded because a
+// device's IPv6 addresses are an attribute of the device here -- the `ipv6Addr`
+// column, filled from the neighbour cache -- and a device that owns eight
+// temporary addresses is one device, not eight.
+const NOT_A_DEVICE = [
+  { re: /^0\.0\.0\.0$/,                        why: 'unspecified' },
+  { re: /^127\./,                              why: 'loopback' },
+  { re: /^169\.254\./,                         why: 'link-local' },
+  { re: /^22[4-9]\.|^23\d\./,                  why: 'multicast' },
+  { re: /^255\.255\.255\.255$/,                why: 'broadcast' },
+  // 100.64/10, carrier-grade NAT. Tailscale hands these out; they name a peer
+  // on an overlay, not a machine on this network.
+  { re: /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, why: 'carrier-grade NAT' },
+];
+
+/**
+ * True when an address can name a device on the network being watched.
+ *
+ * Deliberately permissive about which IPv4 ranges are "local": a Hub may watch
+ * a network that is publicly addressed, and refusing anything outside RFC1918
+ * would make it blind there. What is refused is what cannot be a device under
+ * any addressing scheme.
+ */
+function isDeviceAddress(ip) {
+  if (typeof ip !== 'string' || !ip) return false;
+  if (ip.includes(':')) return false;                    // IPv6 is an attribute
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return false;
+  return !NOT_A_DEVICE.some(rule => rule.re.test(ip));
+}
+
 function observeDevice(d) {
   if (!db) return null;
+  // The list is of devices, so an address that cannot name one does not make a
+  // row. See isDeviceAddress.
+  if (!isDeviceAddress(d?.ip)) return null;
   const now = Date.now();
 
   // ── 1. Look up by IP ──────────────────────────────────────────────────────
@@ -985,6 +1022,7 @@ module.exports = {
   pruneObservations,
   getDiscardedRedirects,
   chooseForIp,
+  isDeviceAddress,
   getHeldMacSwitches,
   MAC_SWITCH_CONFIRMATIONS,
   _initForTest,
