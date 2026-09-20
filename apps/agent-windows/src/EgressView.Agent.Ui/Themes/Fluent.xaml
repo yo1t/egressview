@@ -24,6 +24,12 @@
   <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}"/>
   <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
   <SolidColorBrush x:Key="StrokeBrush" Color="{StaticResource StrokeColor}"/>
+  <!-- The globe's controls sit on the globe rather than under it: the sphere is
+       drawn from the smaller side of its box, so every point of height the
+       controls took came straight off it. Translucent at the same weights the
+       Mac Agent uses, so the map still reads through them. -->
+  <SolidColorBrush x:Key="GlobeControlScrimBrush" Color="{StaticResource SurfaceColor}" Opacity="0.45"/>
+  <SolidColorBrush x:Key="GlobeControlEdgeBrush" Color="{StaticResource TextPrimaryColor}" Opacity="0.10"/>
   <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
   <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}"/>
   <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}"/>

@@ -49,7 +49,8 @@ public static class DiagnosticsReport
     }
 
     public static string Create(CollectorSnapshot snapshot, ObservationStore store, string version, bool monitoringEnabled = true,
-        bool verifyIntegrity = false, string reportChannel = "service-internal", DeliveryCapabilityStatus? capabilityStatus = null)
+        bool verifyIntegrity = false, string reportChannel = "service-internal", DeliveryCapabilityStatus? capabilityStatus = null,
+        DeliveryRuntimeStatus? deliveryRuntime = null)
     {
         // The service verified the entire database when it opened it. Re-running
         // integrity_check for every 15-second UI status request can take minutes
@@ -89,7 +90,7 @@ public static class DiagnosticsReport
             flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, processNames = new { resolved = processNames.Resolved, unresolved = processNames.Unresolved }, byOrigin = store.ReadFlowOrigins() },
             coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
             monitoringEnabled,
-            delivery = new { pending = delivery.Pending, contractRejected = delivery.ContractRejected, queueOverflow = delivery.QueueOverflow, oldestPendingAt = delivery.OldestPendingAt, lastAcknowledgedAt = delivery.LastAcknowledgedAt, capability = capabilityStatus },
+            delivery = new { pending = delivery.Pending, contractRejected = delivery.ContractRejected, queueOverflow = delivery.QueueOverflow, oldestPendingAt = delivery.OldestPendingAt, lastAcknowledgedAt = delivery.LastAcknowledgedAt, capability = capabilityStatus, runtime = SafeDeliveryRuntime(deliveryRuntime) },
             deliveryEnabled = store.DeliveryEnabled,
             ipc = new { reportChannel },
             installer = ReadInstallerState(),
@@ -159,6 +160,31 @@ public static class DiagnosticsReport
         }
         catch (Exception) { return []; }
     }
+
+    /// Why delivery is where it is: the state it is in, what failed last,
+    /// what the Hub answered, and when it will try again.
+    ///
+    /// This existed and reached the window over IPC, but not the bundle. A Hub
+    /// that answered 400 to every batch carrying one malformed observation
+    /// stopped delivery for hours, and the bundle -- the thing a person sends
+    /// when they cannot work out what is wrong -- showed a pending count and a
+    /// capability that said "agreed". Finding the reason took reading the live
+    /// database and the Hub's schema by hand. The four fields below would have
+    /// said "contract-rejected, HTTP 400" on the first look.
+    ///
+    /// Nothing here names a destination: the state and the failure are from a
+    /// fixed vocabulary, the status code is the Hub's, and the times are the
+    /// Agent's own. The Hub URL is deliberately absent, as it is everywhere
+    /// else in this report.
+    private static object? SafeDeliveryRuntime(DeliveryRuntimeStatus? value) => value is null ? null : new
+    {
+        state = SafeCode(value.State),
+        lastAttemptAt = value.LastAttemptAt,
+        nextRetryAt = value.NextRetryAt,
+        lastFailure = SafeCode(value.LastFailure),
+        lastFailureAt = value.LastFailureAt,
+        lastStatusCode = value.LastStatusCode,
+    };
 
     private static object SafeCollector(CollectorSnapshot value) => new
     {

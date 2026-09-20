@@ -108,7 +108,8 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     /// a time, so saving a bundle made the window show "status unavailable"
     /// for the whole of it.
     private string Diagnostics() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), verifyIntegrity: false,
-        reportChannel: "authenticated-named-pipe", capabilityStatus: delivery.CapabilityStatus);
+        reportChannel: "authenticated-named-pipe", capabilityStatus: delivery.CapabilityStatus,
+        deliveryRuntime: delivery.Status);
     private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
     private IReadOnlyList<GlobePoint> Globe(int minutes) => store.ReadGlobePoints(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow);
     private IReadOnlyList<CountryHistoryRow> CountryHistory(int? minutes)

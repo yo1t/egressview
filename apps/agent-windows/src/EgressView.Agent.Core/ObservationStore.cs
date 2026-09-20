@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 22;
+    private const int CurrentSchemaVersion = 25;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -153,6 +153,32 @@ public sealed partial class ObservationStore : IDisposable
         "THEN protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||process_id " +
         "ELSE protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||remote_address||CHAR(31)||remote_port||CHAR(31)||process_id END";
 
+    private const string Version25Schema = """
+        CREATE TABLE IF NOT EXISTS chart_hourly_destination(
+          bucket_start TEXT NOT NULL,
+          application TEXT NOT NULL,
+          remote_address TEXT NOT NULL,
+          layer TEXT NOT NULL CHECK(layer IN ('logical','vpn_transport')),
+          remote_hostname TEXT,
+          flow_count INTEGER NOT NULL,
+          observation_count INTEGER NOT NULL,
+          bytes_sent INTEGER NOT NULL,
+          bytes_received INTEGER NOT NULL,
+          bytes_unknown INTEGER NOT NULL,
+          PRIMARY KEY(bucket_start,application,remote_address,layer)
+        );
+        CREATE INDEX IF NOT EXISTS chart_hourly_destination_bucket ON chart_hourly_destination(bucket_start);
+        """;
+    private const string Version24Schema = """
+        UPDATE delivery_queue SET first_observed_at=last_observed_at, last_observed_at=first_observed_at
+          WHERE last_observed_at<first_observed_at;
+        UPDATE flows SET first_seen=last_seen, last_seen=first_seen
+          WHERE last_seen<first_seen;
+        """;
+    private const string Version23Schema = """
+        ALTER TABLE delivery_state ADD COLUMN blocked_batch_id TEXT;
+        ALTER TABLE delivery_state ADD COLUMN blocked_batch_rejections INTEGER NOT NULL DEFAULT 0;
+        """;
     private const string Version22Schema = """
         ALTER TABLE chart_hourly ADD COLUMN flow_count INTEGER NOT NULL DEFAULT 0;
         """;
@@ -340,7 +366,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -370,7 +396,10 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 18) { MigrateVersion18To19(); version = 19; }
         if (version == 19) { MigrateVersion19To20(); version = 20; }
         if (version == 20) { MigrateVersion20To21(); version = 21; }
-        if (version == 21) MigrateVersion21To22();
+        if (version == 21) { MigrateVersion21To22(); version = 22; }
+        if (version == 22) { MigrateVersion22To23(); version = 23; }
+        if (version == 23) { MigrateVersion23To24(); version = 24; }
+        if (version == 24) MigrateVersion24To25();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -470,6 +499,92 @@ public sealed partial class ObservationStore : IDisposable
             Execute("UPDATE schema_version SET version=22 WHERE version=21");
             Execute("COMMIT");
             PruneMigrationBackups(22);
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// Delivery remembers which batch keeps being refused.
+    ///
+    /// A batch the Hub will never accept was retried for ever, and because the
+    /// next batch cannot be prepared while one is outstanding, everything
+    /// behind it stopped. Measured on a real machine: one batch of 107
+    /// observations claimed at 01:34:33Z was still claimed three hours later,
+    /// the queue behind it sat at its 10,000 ceiling, and 17,813 observations
+    /// had been dropped to make room. Losing 107 that the Hub refuses is the
+    /// smaller loss by two orders of magnitude, and the only one that ends.
+    private void MigrateVersion22To23()
+    {
+        CreateMigrationBackup(23);
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version23Schema + " UPDATE schema_version SET version=23 WHERE version=22; COMMIT;");
+            PruneMigrationBackups(23);
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// A flow's first and last times are put back in order.
+    ///
+    /// Both upserts assigned the last time from whichever observation arrived
+    /// most recently, which is only correct if observations arrive in time
+    /// order. They do not: ETW callbacks are not strictly ordered, and the
+    /// per-second summing emits a bucket when the event timeline passes it
+    /// rather than when its own traffic happened. A later arrival carrying an
+    /// earlier time moved last_observed_at behind first_observed_at.
+    ///
+    /// The Hub checks exactly that, and answers 400 for the whole batch. On
+    /// this machine 31 of 10,000 queued observations were inverted -- about
+    /// one in three hundred, which is enough that half of all 200-observation
+    /// batches carried one, and every one of those was refused. Delivery
+    /// stopped for hours at a time and the queue overflowed at the far end.
+    ///
+    /// Swapped rather than clamped: both times are real, they are simply
+    /// recorded the wrong way round, and the smaller one is the first.
+    private void MigrateVersion23To24()
+    {
+        CreateMigrationBackup(24);
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version24Schema + " UPDATE schema_version SET version=24 WHERE version=23; COMMIT;");
+            PruneMigrationBackups(24);
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// Destinations get the hourly summary applications already had.
+    ///
+    /// The per-destination byte figures had no aggregate to read, so a period
+    /// scanned every raw observation in it. Measured on this machine, a day
+    /// held 6,500,653 of them and that one query took 5.33 seconds, on the
+    /// single pipe the window also asks "is the agent running" -- which is
+    /// what the screen meant when it said it could not get the status.
+    ///
+    /// The existing chart rows are dropped back to where raw observations
+    /// still reach, and the ordinary fold rebuilds both tables from there on
+    /// its own schedule. It is bounded per pass, so a database with a
+    /// fortnight of raw history catches up over an hour of one-minute passes
+    /// rather than holding a single transaction open for all of it. Hours
+    /// older than the raw retention keep their application-level rows and
+    /// gain no destination rows: those observations are gone, and the period
+    /// reports no destination bytes rather than inventing them.
+    private void MigrateVersion24To25()
+    {
+        CreateMigrationBackup(25);
+        try
+        {
+            Execute("BEGIN IMMEDIATE");
+            Execute(Version25Schema);
+            var oldestRaw = NullableScalarText("SELECT MIN(observed_at) FROM observations");
+            if (oldestRaw is not null)
+            {
+                var oldest = DateTimeOffset.Parse(oldestRaw).ToUniversalTime();
+                var boundary = new DateTimeOffset(oldest.Year, oldest.Month, oldest.Day, oldest.Hour, 0, 0, TimeSpan.Zero);
+                Execute($"DELETE FROM chart_hourly WHERE bucket_start>='{boundary:O}'");
+                Execute($"UPDATE chart_hourly_state SET folded_through='{boundary:O}' WHERE folded_through>'{boundary:O}'");
+            }
+            Execute("UPDATE schema_version SET version=25 WHERE version=24");
+            Execute("COMMIT");
+            PruneMigrationBackups(25);
         }
         catch { TryRollback(); throw; }
     }
@@ -798,8 +913,8 @@ public sealed partial class ObservationStore : IDisposable
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows','local_country_cache','geo_lookup_misses')");
-        if (tables != 20)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_destination','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows','local_country_cache','geo_lookup_misses')");
+        if (tables != 21)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -841,7 +956,12 @@ public sealed partial class ObservationStore : IDisposable
                       process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name,remote_hostname)
                     VALUES(?,?,?,?,?,?,?,?,?,'etw',?,?,?,?,?,?)
                     ON CONFLICT(flow_key) DO UPDATE SET
-                      last_seen=excluded.last_seen,
+                      -- The earliest and the latest, not the latest arrival.
+                      -- Observations do not reach here in time order, and
+                      -- assigning last_seen from whatever turned up last moved
+                      -- it behind first_seen. See the v24 migration.
+                      first_seen=MIN(flows.first_seen,excluded.first_seen),
+                      last_seen=MAX(flows.last_seen,excluded.last_seen),
                       origin=CASE WHEN flows.origin='snapshot' THEN 'both' ELSE flows.origin END,
                       bytes_sent=CASE WHEN flows.bytes_sent IS NULL THEN excluded.bytes_sent ELSE flows.bytes_sent+excluded.bytes_sent END,
                       bytes_received=CASE WHEN flows.bytes_received IS NULL THEN excluded.bytes_received ELSE flows.bytes_received+excluded.bytes_received END,
@@ -923,7 +1043,8 @@ public sealed partial class ObservationStore : IDisposable
                 var observations = DeleteBatch("observations", "id", "observed_at", rawCutoff, batchSize);
                 var flows = DeleteBatch("flows", "flow_key", "last_seen", rawCutoff, batchSize);
                 var summaries = DeleteBatch("hourly_summary", "rowid", "bucket_start", aggregateCutoff, batchSize);
-                var chartSummaries = DeleteBatch("chart_hourly", "rowid", "bucket_start", aggregateCutoff, batchSize);
+                var chartSummaries = DeleteBatch("chart_hourly", "rowid", "bucket_start", aggregateCutoff, batchSize)
+                    + DeleteBatch("chart_hourly_destination", "rowid", "bucket_start", aggregateCutoff, batchSize);
                 var coverage = DeleteBatch("coverage_sessions", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
                 var sleeps = DeleteBatch("sleep_periods", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
                 Execute("COMMIT");
@@ -1014,7 +1135,8 @@ public sealed partial class ObservationStore : IDisposable
                     observations = DeleteWhere("observations", $"observed_at<'{value}'");
                     flows = DeleteWhere("flows", $"last_seen<'{value}'");
                     hourly = DeleteWhere("hourly_summary", $"bucket_start<'{value}'");
-                    chart = DeleteWhere("chart_hourly", $"bucket_start<'{value}'");
+                    chart = DeleteWhere("chart_hourly", $"bucket_start<'{value}'")
+                        + DeleteWhere("chart_hourly_destination", $"bucket_start<'{value}'");
                     coverage = DeleteMatchingCoverage($"ended_at IS NOT NULL AND ended_at<'{value}'");
                     Execute($"UPDATE coverage_sessions SET started_at='{value}' WHERE started_at<'{value}' AND (ended_at IS NULL OR ended_at>='{value}')");
                     sleeps = DeleteWhere("sleep_periods", $"ended_at IS NOT NULL AND ended_at<'{value}'");
@@ -1037,7 +1159,7 @@ public sealed partial class ObservationStore : IDisposable
         var observations = DeleteAllRows("observations");
         var flows = DeleteAllRows("flows");
         var hourly = DeleteAllRows("hourly_summary");
-        var chart = DeleteAllRows("chart_hourly");
+        var chart = DeleteAllRows("chart_hourly") + DeleteAllRows("chart_hourly_destination");
         Execute("DELETE FROM chart_hourly_state");
         var coverage = DeleteMatchingCoverage("ended_at IS NOT NULL");
         Execute($"UPDATE coverage_sessions SET started_at='{cutoff:O}',confirmed_at='{cutoff:O}' WHERE ended_at IS NULL");
@@ -1586,13 +1708,59 @@ public sealed partial class ObservationStore : IDisposable
     }
 
     /// <summary>
+    /// The most hours one pass folds. See the bound's reason where it is used.
+    private const int MaximumHoursPerFold = 6;
+
+    /// How long an hour is left alone after it ends before it is folded.
+    ///
+    /// An observation is not written the instant its traffic happens. The
+    /// per-second summing holds a bucket until the event timeline has moved
+    /// past it, a name that could not be resolved is held until the process
+    /// exits or the wait expires, and ETW callbacks arrive late under load.
+    /// Folding an hour the moment it ends means anything arriving afterwards
+    /// belongs to a summarised hour -- and a summarised hour is not read raw,
+    /// so it would be counted nowhere at all. Five minutes is far longer than
+    /// any of those waits, and costs only that the newest complete hour is
+    /// read from observations for a few minutes longer.
+    private static readonly TimeSpan FoldSettlingPeriod = TimeSpan.FromMinutes(5);
+
+    /// The latest hour boundary that may be folded now.
+    private static DateTimeOffset FoldBoundary(DateTimeOffset now)
+    {
+        var settled = now.ToUniversalTime() - FoldSettlingPeriod;
+        return new DateTimeOffset(settled.Year, settled.Month, settled.Day, settled.Hour, 0, 0, TimeSpan.Zero);
+    }
+
+    /// Whole hours still waiting to be folded.
+    ///
+    /// The count of rows a pass wrote cannot answer this: an hour in which
+    /// nothing happened folds to nothing, and a caller watching for zero would
+    /// stop while hours remained. Retention deletes raw observations that are
+    /// old enough, so stopping early would delete hours that had never been
+    /// summarised -- the one thing the fold exists to prevent.
+    public long PendingChartFoldHours(DateTimeOffset now)
+    {
+        var currentHour = FoldBoundary(now);
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            var watermarkText = NullableScalarText("SELECT MAX(folded_through) FROM chart_hourly_state");
+            var watermark = watermarkText is null
+                ? NullableScalarText("SELECT MIN(observed_at) FROM observations") is { } oldest
+                    ? DateTimeOffset.Parse(oldest).ToUniversalTime()
+                    : currentHour
+                : DateTimeOffset.Parse(watermarkText).ToUniversalTime();
+            var hours = (currentHour - watermark).TotalHours;
+            return hours <= 0 ? 0 : (long)Math.Ceiling(hours);
+        }
+    }
+
     /// Folds complete UTC hours into the bounded chart aggregate. The current
     /// hour remains raw so a refresh never double-counts an hour still changing.
     /// </summary>
     public long FoldCompletedHoursForCharts(DateTimeOffset now)
     {
-        var utc = now.ToUniversalTime();
-        var currentHour = new DateTimeOffset(utc.Year, utc.Month, utc.Day, utc.Hour, 0, 0, TimeSpan.Zero);
+        var currentHour = FoldBoundary(now);
         lock (gate)
         {
             ThrowIfDisposed();
@@ -1611,6 +1779,14 @@ public sealed partial class ObservationStore : IDisposable
             }
             else watermark = DateTimeOffset.Parse(watermarkText).ToUniversalTime();
             if (watermark >= currentHour) return 0;
+            // One pass covers a bounded stretch of hours. A database rebuilding
+            // a fortnight of history would otherwise hold a single transaction
+            // open across every raw observation it has, which is minutes of the
+            // lock every other reader needs. Passes run a minute apart, so a
+            // fortnight catches up in about an hour without ever blocking the
+            // window for longer than one stretch takes.
+            var foldTo = watermark.AddHours(MaximumHoursPerFold);
+            if (foldTo > currentHour) foldTo = currentHour;
 
             Execute("BEGIN IMMEDIATE");
             try
@@ -1623,7 +1799,7 @@ public sealed partial class ObservationStore : IDisposable
                            SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
                            SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                     FROM observations
-                    WHERE observed_at>='{watermark:O}' AND observed_at<'{currentHour:O}'
+                    WHERE observed_at>='{watermark:O}' AND observed_at<'{foldTo:O}'
                     GROUP BY 1,2,layer
                     ON CONFLICT(bucket_start,application,layer) DO UPDATE SET
                       observation_count=observation_count+excluded.observation_count,
@@ -1636,13 +1812,30 @@ public sealed partial class ObservationStore : IDisposable
                       bytes_sent=bytes_sent+excluded.bytes_sent,
                       bytes_received=bytes_received+excluded.bytes_received,
                       bytes_unknown=bytes_unknown+excluded.bytes_unknown;
-                    INSERT INTO chart_hourly_state(id,folded_through) VALUES(1,'{currentHour:O}')
+                    INSERT INTO chart_hourly_destination(bucket_start,application,remote_address,layer,remote_hostname,flow_count,observation_count,bytes_sent,bytes_received,bytes_unknown)
+                    SELECT substr(observed_at,1,13) || ':00:00.0000000+00:00',
+                           COALESCE(NULLIF(process_name,''),'Unknown'),remote_address,layer,
+                           MAX(NULLIF(remote_hostname,'')),
+                           COUNT(DISTINCT {FlowIdentity}),COUNT(*),
+                           SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
+                           SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
+                    FROM observations
+                    WHERE observed_at>='{watermark:O}' AND observed_at<'{foldTo:O}'
+                    GROUP BY 1,2,remote_address,layer
+                    ON CONFLICT(bucket_start,application,remote_address,layer) DO UPDATE SET
+                      remote_hostname=COALESCE(chart_hourly_destination.remote_hostname,excluded.remote_hostname),
+                      flow_count=flow_count+excluded.flow_count,
+                      observation_count=observation_count+excluded.observation_count,
+                      bytes_sent=bytes_sent+excluded.bytes_sent,
+                      bytes_received=bytes_received+excluded.bytes_received,
+                      bytes_unknown=bytes_unknown+excluded.bytes_unknown;
+                    INSERT INTO chart_hourly_state(id,folded_through) VALUES(1,'{foldTo:O}')
                     ON CONFLICT(id) DO UPDATE SET folded_through=excluded.folded_through;
                     """);
                 Execute("COMMIT");
             }
             catch { TryRollback(); throw; }
-            return ScalarInt64($"SELECT COUNT(*) FROM chart_hourly WHERE bucket_start>='{watermark:O}' AND bucket_start<'{currentHour:O}'");
+            return ScalarInt64($"SELECT COUNT(*) FROM chart_hourly WHERE bucket_start>='{watermark:O}' AND bucket_start<'{foldTo:O}'");
         }
     }
 
@@ -2059,6 +2252,10 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// The fewest hourly bars worth drawing. Under this a period is read raw,
+    /// which is cheap at that length and keeps the finer resolution.
+    private const int MinimumHourlyBuckets = 12;
+
     public PeriodAnalysis ReadPeriodAnalysis(DateTimeOffset from, DateTimeOffset to, int bucketCount = 60)
     {
         if (from >= to) throw new ArgumentOutOfRangeException(nameof(from));
@@ -2123,9 +2320,17 @@ public sealed partial class ObservationStore : IDisposable
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
                     AND NOT EXISTS(SELECT 1 FROM chart_hourly c WHERE c.bucket_start=h.bucket_start AND c.layer=h.layer)
                   UNION ALL
+                  -- The hours the fold has not reached, as two ranges rather
+                  -- than one range with a hole in it. Written as a hole, the
+                  -- index serves the outer range and the OR is a filter over
+                  -- every row inside it: measured on a month, 2.67 seconds to
+                  -- find 27,000 rows among 34 million. As two ranges it is
+                  -- 0.02, because each one is an index seek.
                   SELECT COALESCE(bytes_sent,0),COALESCE(bytes_received,0) FROM observations
-                  WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
-                    AND (observed_at<'{aggregateStart:O}' OR observed_at>='{aggregateEnd:O}')
+                  WHERE observed_at>='{fromText}' AND observed_at<'{aggregateStart:O}' AND layer='logical'
+                  UNION ALL
+                  SELECT COALESCE(bytes_sent,0),COALESCE(bytes_received,0) FROM observations
+                  WHERE observed_at>='{aggregateEnd:O}' AND observed_at<'{toText}' AND layer='logical'
                 )
                 """;
             CheckOperation(WinSqlite.Prepare(db, bytesSql, -1, out var bytesStatement, 0));
@@ -2150,12 +2355,20 @@ public sealed partial class ObservationStore : IDisposable
             // split a destination in two whenever one address answered to two
             // names, and half a destination is not something a reader can use.
             var linksSql = $"""
-                WITH measured AS (
-                  SELECT {app} AS application,remote_address,
-                         SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)) AS bytes
+                WITH parts AS (
+                  SELECT application,remote_address,bytes_sent+bytes_received AS bytes
+                  FROM chart_hourly_destination
+                  WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
+                  UNION ALL
+                  SELECT {app},remote_address,COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)
                   FROM observations
-                  WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
-                  GROUP BY 1,2
+                  WHERE observed_at>='{fromText}' AND observed_at<'{aggregateStart:O}' AND layer='logical'
+                  UNION ALL
+                  SELECT {app},remote_address,COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)
+                  FROM observations
+                  WHERE observed_at>='{aggregateEnd:O}' AND observed_at<'{toText}' AND layer='logical'
+                ), measured AS (
+                  SELECT application,remote_address,SUM(bytes) AS bytes FROM parts GROUP BY 1,2
                 )
                 SELECT {qualifiedApp},f.remote_address,MAX(COALESCE(NULLIF(f.remote_hostname,''),f.remote_address)),
                        COUNT(*),COALESCE(MAX(measured.bytes),0),
@@ -2177,34 +2390,72 @@ public sealed partial class ObservationStore : IDisposable
             var durationSeconds = Math.Max(1, (to - from).TotalSeconds);
             var timeline = new List<AppTimelineAggregate>();
             var widthSeconds = durationSeconds / bucketCount;
-            // Buckets narrower than an hour cannot be filled from hourly rows,
-            // so the chart falls back to raw observations for the whole period.
-            // The totals above do not: they are not drawn in buckets.
+            // A long period is drawn from the folded hours, by widening its
+            // buckets to an hour rather than by reading a day of raw rows.
+            //
+            // Sixty buckets over a day is a bucket of twenty-four minutes, and
+            // an hourly row cannot be cut into those, so every period the UI
+            // offers fell back to raw observations and the fold was never used
+            // for the chart at all. Measured on this machine, a day held
+            // 6,500,653 observations and the timeline query took 14.9 seconds
+            // -- against a window that refreshes every five, on the single
+            // pipe that also answers "is the agent running", which is why the
+            // screen said it could not get the status.
+            //
+            // Twenty-four bars for a day is a better chart than sixty anyway.
+            // Below this the period is short enough to read raw: six hours
+            // measured 0.28 seconds.
+            var hours = durationSeconds / 3600.0;
+            if (widthSeconds < 3600 && hours >= MinimumHourlyBuckets)
+            {
+                bucketCount = (int)Math.Floor(hours);
+                widthSeconds = durationSeconds / bucketCount;
+            }
+            // Still narrower than an hour, so the hourly rows cannot fill it
+            // and the raw observations must. The totals above are unaffected:
+            // they are not drawn in buckets.
             if (widthSeconds < 3600) aggregateEnd = aggregateStart;
             var widthText = widthSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            // Whole seconds, not a difference of julian days.
+            //
+            // julianday returns a fractional day, and the fraction cannot hold
+            // an exact hour: measured here, 04:00 came back as 14,399.999987
+            // seconds after midnight, which divided by an hour and truncated
+            // is bucket 3. Every other hourly bar landed one place to the left
+            // of where its traffic happened. Epoch seconds are integers and
+            // the subtraction is exact; sub-second precision is not something
+            // a bucket a second or wider can show.
+            var fromEpoch = from.ToUniversalTime().ToUnixTimeSeconds();
             var timelineSql = $"""
                 WITH combined AS (
-                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(bucket_start)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',bucket_start) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
                          application,SUM(flow_count) AS connections,
                          SUM(bytes_sent+bytes_received) AS bytes,SUM(bytes_unknown) AS unknown
                   FROM chart_hourly
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
                   GROUP BY bucket,application
                   UNION ALL
-                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(observed_at)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',observed_at) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
                          {app},COUNT(DISTINCT {FlowIdentity}),
                          SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
                          SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                   FROM observations
-                  WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
-                    AND (observed_at<'{aggregateStart:O}' OR observed_at>='{aggregateEnd:O}')
+                  WHERE observed_at>='{fromText}' AND observed_at<'{aggregateStart:O}' AND layer='logical'
+                  GROUP BY bucket,2
+                  UNION ALL
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',observed_at) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
+                         {app},COUNT(DISTINCT {FlowIdentity}),
+                         SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
+                         SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
+                  FROM observations
+                  WHERE observed_at>='{aggregateEnd:O}' AND observed_at<'{toText}' AND layer='logical'
                   GROUP BY bucket,2
                   UNION ALL
                   -- Hours the per-application fold never covered. There is no
                   -- connection count to recover from a protocol summary, so
                   -- these contribute bytes and nothing to the bars; a drawn
                   -- zero would be read as "nothing happened".
-                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(bucket_start)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',bucket_start) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
                          'Other',0,SUM(bytes_sent+bytes_received),SUM(bytes_unknown)
                   FROM hourly_summary h
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'

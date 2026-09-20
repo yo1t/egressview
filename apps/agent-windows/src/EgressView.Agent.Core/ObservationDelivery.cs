@@ -10,6 +10,20 @@ public sealed record DeliveryObservation(
     string Collector = "etw", string Confidence = "exact", string? BundleID = null, string? RemoteHostname = null);
 
 public sealed record DeliveryBatch(Guid BatchId, DateTimeOffset SentAt, IReadOnlyList<DeliveryObservation> Observations);
+/// What a refusal did to the batch it was about.
+public enum DeliveryRefusal
+{
+    /// The batch was halved; the released half returns to the queue.
+    Split,
+    /// A single observation, kept for another attempt.
+    Retained,
+    /// A single observation the Hub refused often enough to give up on.
+    Abandoned,
+    /// Nothing was claimed under that id. Says only that the refusal arrived
+    /// after the batch had already gone, which is not an error.
+    Unknown,
+}
+
 public sealed record DeliveryQueueStatus(long Pending, long ContractRejected, long QueueOverflow,
     DateTimeOffset? OldestPendingAt, DateTimeOffset? LastAcknowledgedAt);
 
@@ -60,7 +74,7 @@ public sealed partial class ObservationStore
             Execute($"""
                 INSERT INTO delivery_queue(delivery_id,stable_key,protocol,local_address,local_port,remote_address,remote_port,process_id,process_name,first_observed_at,last_observed_at,bytes_in,bytes_out,queued_at,batch_id,remote_hostname)
                 VALUES('{id}','{stable}','{item.Protocol.ToLowerInvariant()}','{Sql(item.LocalAddress)}',{item.LocalPort},'{Sql(item.RemoteAddress)}',{item.RemotePort},{item.ProcessId},'{Sql(item.ProcessName!)}','{first}','{first}',{received},{sent},'{queuedAt.ToUniversalTime():O}',NULL,{(item.RemoteHostname is null ? "NULL" : $"'{Sql(item.RemoteHostname)}'")})
-                ON CONFLICT(stable_key) WHERE batch_id IS NULL DO UPDATE SET last_observed_at=excluded.last_observed_at,process_name=excluded.process_name,remote_hostname=COALESCE(excluded.remote_hostname,delivery_queue.remote_hostname),bytes_in=CASE WHEN delivery_queue.bytes_in IS NULL OR excluded.bytes_in IS NULL THEN NULL ELSE delivery_queue.bytes_in+excluded.bytes_in END,bytes_out=CASE WHEN delivery_queue.bytes_out IS NULL OR excluded.bytes_out IS NULL THEN NULL ELSE delivery_queue.bytes_out+excluded.bytes_out END
+                ON CONFLICT(stable_key) WHERE batch_id IS NULL DO UPDATE SET first_observed_at=MIN(delivery_queue.first_observed_at,excluded.first_observed_at),last_observed_at=MAX(delivery_queue.last_observed_at,excluded.last_observed_at),process_name=excluded.process_name,remote_hostname=COALESCE(excluded.remote_hostname,delivery_queue.remote_hostname),bytes_in=CASE WHEN delivery_queue.bytes_in IS NULL OR excluded.bytes_in IS NULL THEN NULL ELSE delivery_queue.bytes_in+excluded.bytes_in END,bytes_out=CASE WHEN delivery_queue.bytes_out IS NULL OR excluded.bytes_out IS NULL THEN NULL ELSE delivery_queue.bytes_out+excluded.bytes_out END
                 """);
         }
         var overflow = Math.Max(0, ScalarInt64("SELECT COUNT(*) FROM delivery_queue") - maximumPending);
@@ -90,6 +104,91 @@ public sealed partial class ObservationStore
         }
     }
 
+    /// How many times a single observation may be refused before it is given
+    /// up on.
+    ///
+    /// Only ever applied to a batch of one, because by then the refusal is
+    /// about that observation and nothing else. Not one refusal, because
+    /// "rejected" has arrived from a Hub that was mid-deploy, and throwing
+    /// data away on a single answer would make a restart of the other side
+    /// into data loss here.
+    public const int AbandonBatchAfterRejections = 5;
+
+    /// Records that the Hub refused this batch, and narrows the refusal to the
+    /// observation responsible.
+    ///
+    /// Discarding the batch was the first answer, and the measurement said it
+    /// was too blunt: on a real machine it unblocked delivery and then shed
+    /// 200 observations every two and a half minutes, because one record the
+    /// Hub would not take condemned the 199 innocent ones travelling with it.
+    /// Roughly 4,800 an hour, against a Hub that was answering normally the
+    /// rest of the time.
+    ///
+    /// So a refused batch is halved instead. The half that is kept carries the
+    /// batch on; the half that is released goes back to the queue to be sent
+    /// with everything else. Eight halvings take two hundred observations down
+    /// to one, and only that one is ever given up on.
+    ///
+    /// Only for refusals of the content itself. A network failure, a rate
+    /// limit or an expired credential says nothing about the batch and must
+    /// not consume its lives: an Agent offline for an afternoon has to come
+    /// back with its queue intact.
+    public DeliveryRefusal RecordDeliveryBatchRejection(Guid batchId)
+    {
+        lock (gate)
+        {
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                var size = ScalarInt64($"SELECT COUNT(*) FROM delivery_queue WHERE batch_id='{batchId:D}'");
+                if (size == 0)
+                {
+                    Execute("COMMIT");
+                    return DeliveryRefusal.Unknown;
+                }
+                if (size > 1)
+                {
+                    // The younger half goes back. Ordering by queued_at keeps
+                    // the oldest observations moving first, which is the order
+                    // everything else in the queue is served in.
+                    var release = size / 2;
+                    Execute($"""
+                        UPDATE delivery_queue SET batch_id=NULL
+                        WHERE delivery_id IN (
+                          SELECT delivery_id FROM delivery_queue WHERE batch_id='{batchId:D}'
+                          ORDER BY queued_at DESC, delivery_id DESC LIMIT {release})
+                        """);
+                    // The tally starts again: what is left is a different
+                    // batch in everything but name, and has not been refused.
+                    Execute($"UPDATE delivery_state SET blocked_batch_id='{batchId:D}',blocked_batch_rejections=0 WHERE id=1");
+                    Execute("COMMIT");
+                    AddCounter("delivery-batches-split", 1);
+                    return DeliveryRefusal.Split;
+                }
+
+                var blocked = ScalarTextOrNull("SELECT blocked_batch_id FROM delivery_state WHERE id=1");
+                var rejections = string.Equals(blocked, batchId.ToString("D"), StringComparison.OrdinalIgnoreCase)
+                    ? ScalarInt64("SELECT blocked_batch_rejections FROM delivery_state WHERE id=1") + 1
+                    : 1;
+                if (rejections < AbandonBatchAfterRejections)
+                {
+                    Execute($"UPDATE delivery_state SET blocked_batch_id='{batchId:D}',blocked_batch_rejections={rejections} WHERE id=1");
+                    Execute("COMMIT");
+                    return DeliveryRefusal.Retained;
+                }
+                // Said in the durable counters, not dropped quietly. One
+                // observation is a small loss; a loss nobody can count is not.
+                Execute($"DELETE FROM delivery_queue WHERE batch_id='{batchId:D}'");
+                Execute("UPDATE delivery_state SET blocked_batch_id=NULL,blocked_batch_rejections=0 WHERE id=1");
+                Execute("COMMIT");
+                AddCounter("delivery-batch-abandoned", 1);
+                AddCounter("delivery-observations-abandoned", 1);
+                return DeliveryRefusal.Abandoned;
+            }
+            catch { TryRollback(); throw; }
+        }
+    }
+
     public void AcknowledgeDelivery(Guid batchId, DateTimeOffset acknowledgedAt)
     {
         lock (gate)
@@ -100,7 +199,7 @@ public sealed partial class ObservationStore
                 if (ScalarInt64($"SELECT COUNT(*) FROM delivery_queue WHERE batch_id='{batchId:D}'") == 0)
                     throw new InvalidOperationException("Acknowledgement does not match the active delivery batch.");
                 Execute($"DELETE FROM delivery_queue WHERE batch_id='{batchId:D}'");
-                Execute($"UPDATE delivery_state SET last_acknowledged_at='{acknowledgedAt.ToUniversalTime():O}' WHERE id=1");
+                Execute($"UPDATE delivery_state SET last_acknowledged_at='{acknowledgedAt.ToUniversalTime():O}',blocked_batch_id=NULL,blocked_batch_rejections=0 WHERE id=1");
                 Execute("COMMIT");
             }
             catch { TryRollback(); throw; }

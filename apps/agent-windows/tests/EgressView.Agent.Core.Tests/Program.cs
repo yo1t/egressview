@@ -217,8 +217,6 @@ try
         statusStore.EndCoverage(statusCoverage, healthConfirmedAt.AddMinutes(1));
     }
 
-    Assert(SankeyLabelLayout.NamedCapacity(340, 14) > SankeyLabelLayout.NamedCapacity(170, 14),
-        "a taller Sankey names more rows instead of retaining a fixed seven-item ceiling");
     static double MonospaceMeasure(string value) => value.Length;
     var similarLabels = SankeyLabelLayout.FitDistinct(
         ["api.cluster-east.example.net", "api.cluster-west.example.net", "2606:4700:4408::ac40:9bd1", "2606:4700:4408::ac40:9bd2"],
@@ -459,6 +457,55 @@ try
     Assert(NotificationPolicy.Evaluate(true, false, false, 0, 999, null, notificationNow) == NotificationDecision.CategoryDisabled,
         "a disabled category remains suppressed even when the daily limit is unlimited");
 
+    // A notification that can never say anything.
+    //
+    // The rule was "any '.' or ':'", which is not a test for a destination.
+    // The outbound-anomaly notice is built from a clock time and a byte size,
+    // so it matched every time: a real 2.10 GiB detection at 12:15 was
+    // announced as "status changed", and could not have been announced as
+    // anything else in any language. The same rule emptied every English body
+    // in the product, because English sentences end in a period.
+    Assert(NotificationRedaction.Apply("外向き通信が 12:15 に 2.10 GiB ありました。") == "外向き通信が 12:15 に 2.10 GiB ありました。",
+        "a clock time and a byte size are not a destination and are left alone");
+    Assert(NotificationRedaction.Apply("Outbound traffic at 12:15 was 2.10 GiB. Open the Agent for details.")
+            == "Outbound traffic at 12:15 was 2.10 GiB. Open the Agent for details.",
+        "and an English sentence is not redacted for ending in a full stop");
+    Assert(NotificationRedaction.Apply("Delivery to the Hub is not completing. 10,000 observations are pending.")
+            != NotificationRedaction.Replacement,
+        "the Hub delivery notice survives in English as well as Japanese");
+
+    // What the rule is actually for. Redacted whole, not patched, so nothing
+    // is left to reconstruct the rest from.
+    foreach (var named in new[]
+    {
+        "chrome talked to ads.example.com",
+        "203.0.113.42 received 2 GiB",
+        "2606:4700:10::1 received 2 GiB",
+        "a connection to fe80::1 was seen",
+    })
+        Assert(NotificationRedaction.Apply(named) == NotificationRedaction.Replacement,
+            $"a destination is kept off the desktop: {named}");
+
+    // Suppressed attempts crowd out the ones that were shown.
+    //
+    // A degraded agent is re-evaluated on the UI's five-second refresh, and
+    // every suppressed attempt was its own row in a list capped at a hundred.
+    // Measured on a real machine: 94 of 100 slots held the same suppressed
+    // message and a real outbound-anomaly notice was three rows from being
+    // evicted by its own agent's noise.
+    Assert(NotificationHistoryPolicy.RepeatsNewest("Monitoring", "要確認", "suppressed-cooldown",
+            "Monitoring", "要確認", "suppressed-cooldown"),
+        "the same suppressed attempt twice running is one entry with a count");
+    Assert(!NotificationHistoryPolicy.RepeatsNewest("Monitoring", "要確認", "suppressed-cooldown",
+            "HubDelivery", "要確認", "suppressed-cooldown"),
+        "a different category is a different entry");
+    Assert(!NotificationHistoryPolicy.RepeatsNewest("Monitoring", "要確認", "shown",
+            "Monitoring", "要確認", "shown"),
+        "two notifications actually shown are two events, because each one interrupted the reader");
+    Assert(!NotificationHistoryPolicy.RepeatsNewest("Monitoring", "要確認", "suppressed-cooldown",
+            "Monitoring", "要確認", "shown"),
+        "and a suppressed attempt never folds into one that was shown");
+
     var deliveryNotice = new DeliveryNotificationTracker();
     var deliveryAck = notificationNow.AddMinutes(-10);
     var shortFailure = new DeliveryNotificationSample(notificationNow, true, "retryable", 12, notificationNow, deliveryAck);
@@ -615,6 +662,43 @@ try
             reopened, "test");
         Assert(unsafeReport.Contains("IOException", StringComparison.Ordinal) && !unsafeReport.Contains("secret", StringComparison.Ordinal),
             "free-text collector failures are reduced to a safe classification before export");
+
+        // Why delivery is where it is, in the bundle and not only on screen.
+        //
+        // This existed and reached the window over IPC. A Hub that answered
+        // 400 to every batch carrying one malformed observation stopped
+        // delivery for hours, and the bundle -- the thing a person sends when
+        // they cannot work out what is wrong -- showed a pending count and a
+        // capability that said "agreed". Finding the reason took reading the
+        // live database and the Hub's own schema by hand.
+        var stalled = DiagnosticsReport.Create(
+            new CollectorSnapshot("healthy", 20, 20, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 32),
+            reopened, "test",
+            deliveryRuntime: new DeliveryRuntimeStatus("contract-rejected",
+                LastAttemptAt: DateTimeOffset.UtcNow, NextRetryAt: DateTimeOffset.UtcNow.AddMinutes(5),
+                LastFailure: "contract-rejected", LastFailureAt: DateTimeOffset.UtcNow, LastStatusCode: 400));
+        using (var stalledJson = JsonDocument.Parse(stalled))
+        {
+            Assert(stalledJson.RootElement.GetProperty("delivery").TryGetProperty("runtime", out var runtime),
+                "diagnostics carry the delivery runtime at all, which is the whole point of this");
+            Assert(runtime.GetProperty("state").GetString() == "contract-rejected" &&
+                runtime.GetProperty("lastFailure").GetString() == "contract-rejected" &&
+                runtime.GetProperty("lastStatusCode").GetInt32() == 400 &&
+                runtime.TryGetProperty("nextRetryAt", out _),
+                "diagnostics say why delivery stopped and what the Hub answered, not only how much is pending");
+        }
+        Assert(JsonDocument.Parse(report).RootElement.GetProperty("delivery")
+                .GetProperty("runtime").ValueKind == JsonValueKind.Null,
+            "and say nothing rather than guessing when the caller has no delivery controller to ask");
+
+        // The failure is free text on the way in. A path or a host reaching it
+        // must be reduced the way collector failures already are.
+        var leaky = DiagnosticsReport.Create(
+            new CollectorSnapshot("healthy", 20, 20, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 32),
+            reopened, "test",
+            deliveryRuntime: new DeliveryRuntimeStatus("retryable", LastFailure: "retryable: https://hub.secret.example/api"));
+        Assert(leaky.Contains("retryable", StringComparison.Ordinal) && !leaky.Contains("secret", StringComparison.Ordinal),
+            "a free-text delivery failure is reduced to a safe classification before export");
 
         var beforeBackup = reopened.ReadStorageBytes();
         File.WriteAllBytes(database + ".pre-v99.bak", new byte[123]);
@@ -813,15 +897,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 22, "v1 database migrates through v2-v22");
+        Assert(migrated.SchemaVersion == 25, "v1 database migrates through v2-v25");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v22.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v25.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 22, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 25, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -832,13 +916,19 @@ try
             new NetworkObservation(now.AddDays(-13), 2, "TCP", "10.0.0.1", 40002, "203.0.113.2", 443, 1, 1, ObservationLayer.Logical, null, "etw", "FreshRaw"),
             new NetworkObservation(now.AddDays(-31), 3, "TCP", "10.0.0.1", 40003, "203.0.113.3", 443, 1, 1, ObservationLayer.Logical, null, "etw", "OldAggregate")
         ]);
-        retentionStore.FoldCompletedHoursForCharts(now);
+        // Bounded passes, run to completion: a single call folds only a few
+        // hours, and retention below deletes raw observations old enough to
+        // go. An hour pruned before it was summarised is gone for good.
+        while (retentionStore.PendingChartFoldHours(now) > 0) retentionStore.FoldCompletedHoursForCharts(now);
         var oldCoverage = retentionStore.BeginCoverage([], now.AddDays(-31));
         retentionStore.EndCoverage(oldCoverage, now.AddDays(-31).AddMinutes(1));
         retentionStore.BeginSleepPeriod(now.AddDays(-31));
         retentionStore.EndSleepPeriod(now.AddDays(-31).AddMinutes(1));
         var result = retentionStore.PruneRetentionBatch(now, batchSize: 1);
-        Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1 && result.ChartSummariesDeleted == 1 && result.SleepPeriodsDeleted == 1,
+        // Two chart rows for one aged-out hour: the per-application summary
+        // and the per-destination one, which are pruned together because a
+        // period that kept one without the other would disagree with itself.
+        Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1 && result.ChartSummariesDeleted == 2 && result.SleepPeriodsDeleted == 1,
             "retention prunes raw data at 14 days and aggregates at 30 days in bounded batches");
         var second = retentionStore.PruneRetentionBatch(now, batchSize: 10);
         Assert(second.ObservationsDeleted == 1 && second.FlowsDeleted == 1,
@@ -906,8 +996,13 @@ try
             new NetworkObservation(from.AddHours(2).AddMinutes(10), 42, "TCP", "10.0.0.1", 51000,
                 "203.0.113.42", 443, 30, 40, ObservationLayer.Logical, null, "etw", "LongLived")
         ]);
-        Assert(timelineStore.FoldCompletedHoursForCharts(from.AddHours(3)) == 2 &&
-            timelineStore.FoldCompletedHoursForCharts(from.AddHours(3)) == 0,
+        // Ten minutes past the hour, because an hour is left to settle before
+        // it is folded: an observation arriving after its hour was summarised
+        // would belong to a summarised hour, and a summarised hour is not read
+        // raw, so it would be counted nowhere at all.
+        var settled = from.AddHours(3).AddMinutes(10);
+        Assert(timelineStore.FoldCompletedHoursForCharts(settled) == 2 &&
+            timelineStore.FoldCompletedHoursForCharts(settled) == 0,
             "completed chart hours fold once and the watermark makes the operation idempotent");
         var timeline = timelineStore.ReadPeriodAnalysis(from, from.AddHours(12), bucketCount: 12);
         Assert(timeline.Connections == 1 && timeline.Timeline.Sum(item => item.Connections) == 2 &&
@@ -943,7 +1038,117 @@ try
             "timeline combines folded complete hours with the current raw hour without gaps or duplicates");
     }
 
-        // The chart counts connections, because that is what its legend says.
+        // A period that starts mid-hour still counts the part-hour it starts in.
+    //
+    // The folded hours are whole hours inside the period, so a period starting
+    // at half past has a leading stretch that only the raw observations can
+    // answer for, and a trailing one for the hours not folded yet. Asked for
+    // as one range with a hole in it, the index serves the outer range and the
+    // hole becomes a filter over every row inside it: measured on a month,
+    // 2.67 seconds to find 27,000 rows among 34 million, against 0.02 for the
+    // two ranges named separately. Every fixture above starts on the hour, so
+    // the leading range was never exercised and could have been dropped
+    // entirely without a test noticing.
+    using (var partialStore = new ObservationStore(Path.Combine(directory, "partial-hours.db")))
+    {
+        var hour = new DateTimeOffset(2026, 9, 24, 0, 0, 0, TimeSpan.Zero);
+        NetworkObservation At(DateTimeOffset when, long sent) =>
+            new(when, 77, "TCP", "10.0.0.1", 50003, "203.0.113.50", 443, sent, 0,
+                ObservationLayer.Logical, null, "etw", "Straddler");
+        partialStore.WriteBatch([
+            At(hour.AddMinutes(40), 1),        // before the first whole hour
+            At(hour.AddHours(1).AddMinutes(30), 10),
+            At(hour.AddHours(2).AddMinutes(30), 100),
+            At(hour.AddHours(3).AddMinutes(2), 1000),   // after the fold reaches
+        ]);
+        while (partialStore.PendingChartFoldHours(hour.AddHours(3).AddMinutes(10)) > 0)
+            partialStore.FoldCompletedHoursForCharts(hour.AddHours(3).AddMinutes(10));
+
+        var period = partialStore.ReadPeriodAnalysis(hour.AddMinutes(30), hour.AddHours(3).AddMinutes(5));
+        Assert(period.Bytes == 1111,
+            "a period starting mid-hour counts the part-hour before the folded hours, and the part-hour after them");
+        Assert(period.Links.Single().Bytes == 1111,
+            "and its destinations are made of the same three stretches");
+    }
+
+    // Per-destination bytes come from an aggregate, not from a day of rows.
+    //
+    // The links query had no aggregate to read, so a period scanned every raw
+    // observation in it. Measured on one machine, a day held 6,500,653 of them
+    // and that one query took 5.33 seconds, on the single pipe the window also
+    // asks "is the agent running".
+    using (var destStore = new ObservationStore(Path.Combine(directory, "hourly-destinations.db")))
+    {
+        var from = new DateTimeOffset(2026, 9, 23, 0, 0, 0, TimeSpan.Zero);
+        NetworkObservation To(string address, int hour, int minute, long sent, long received, string? name = null) =>
+            new(from.AddHours(hour).AddMinutes(minute), 31, "TCP", "10.0.0.1", 50000 + minute, address, 443,
+                sent, received, ObservationLayer.Logical, null, "etw", "Talker", name);
+        destStore.WriteBatch([
+            To("203.0.113.40", 0, 5, 10, 20, "one.example"),
+            To("203.0.113.40", 0, 6, 1, 2),
+            To("203.0.113.41", 0, 7, 100, 200, "two.example"),
+            To("203.0.113.40", 1, 5, 1000, 2000),
+        ]);
+        while (destStore.PendingChartFoldHours(from.AddHours(3)) > 0)
+            destStore.FoldCompletedHoursForCharts(from.AddHours(3));
+
+        var period = destStore.ReadPeriodAnalysis(from, from.AddHours(24), bucketCount: 60);
+        var first = period.Links.Single(link => link.Destination == "203.0.113.40");
+        Assert(first.Bytes == 3033 && period.Links.Single(link => link.Destination == "203.0.113.41").Bytes == 300,
+            "a destination's bytes survive being summarised, hour by hour, and add back up");
+        Assert(first.DestinationName == "one.example",
+            "and the name it answered to is kept with them");
+        Assert(period.Links.Sum(link => link.Bytes) == period.Bytes,
+            "the destinations and the period total tell the same story");
+
+        // The hour still being written has no folded row, and must be read raw
+        // rather than left out.
+        destStore.WriteBatch([To("203.0.113.42", 2, 30, 7, 8)]);
+        var withCurrent = destStore.ReadPeriodAnalysis(from, from.AddHours(3), bucketCount: 60);
+        Assert(withCurrent.Links.Single(link => link.Destination == "203.0.113.42").Bytes == 15,
+            "the hour still in progress is read from the observations, so nothing is missing from the end");
+    }
+
+    // A long period is drawn from the folded hours, not from a day of rows.
+    //
+    // Sixty buckets over a day is a bucket of twenty-four minutes, and an
+    // hourly row cannot be cut into those, so every period the UI offers fell
+    // back to raw observations and the fold was never used for the chart at
+    // all. Measured on one machine, a day held 6,500,653 observations and the
+    // timeline query took 14.9 seconds -- against a window that refreshes
+    // every five, on the single pipe that also answers "is the agent running".
+    using (var wideStore = new ObservationStore(Path.Combine(directory, "hourly-buckets.db")))
+    {
+        var from = new DateTimeOffset(2026, 9, 22, 0, 0, 0, TimeSpan.Zero);
+        var rows = new List<NetworkObservation>();
+        for (var hour = 0; hour < 20; hour++)
+            rows.Add(new NetworkObservation(from.AddHours(hour).AddMinutes(5), 12, "TCP", "10.0.0.1", 50000 + hour,
+                "203.0.113.30", 443, 100, 200, ObservationLayer.Logical, null, "etw", "Wide"));
+        wideStore.WriteBatch(rows);
+        Assert(wideStore.FoldCompletedHoursForCharts(from.AddHours(21)) > 0, "the hours fold");
+
+        var day = wideStore.ReadPeriodAnalysis(from, from.AddHours(24), bucketCount: 60);
+        Assert(day.Timeline.Select(item => item.Bucket).Distinct().Count() == 20 &&
+            day.Timeline.Select(item => item.Bucket).Max() <= 23,
+            "a day is drawn in hourly bars, so the folded hours can fill them");
+        // Each hour's traffic in its own hour. julianday returns a fractional
+        // day that cannot hold an exact hour: 04:00 came back as 14,399.999987
+        // seconds after midnight, which truncates into the bucket before it,
+        // and every other bar landed one place to the left of its traffic.
+        Assert(day.Timeline.Select(item => item.Bucket).OrderBy(bucket => bucket)
+                .SequenceEqual(Enumerable.Range(0, 20)),
+            "and each hour lands in its own bar rather than one to the left of it");
+        Assert(day.Timeline.Sum(item => item.Connections) == 20 && day.Timeline.Sum(item => item.Bytes) == 6000,
+            "and every hour's traffic is still counted exactly once");
+
+        // Short enough to read raw, where the finer resolution is worth having
+        // and costs little.
+        var sixHours = wideStore.ReadPeriodAnalysis(from, from.AddHours(6), bucketCount: 60);
+        Assert(sixHours.Timeline.Select(item => item.Bucket).Max() > 23,
+            "a shorter period keeps its finer buckets rather than being widened to hours");
+    }
+
+    // The chart counts connections, because that is what its legend says.
     //
     // It plotted observation_count. While the collector wrote a row per packet
     // those were nowhere near each other: measured on one machine, a single
@@ -1114,6 +1319,123 @@ try
         reopenedDelivery.AcknowledgeDelivery(activeBatchId, deliveryStarted.AddSeconds(5));
         Assert(reopenedDelivery.ReadDeliveryStatus().Pending == 0 && reopenedDelivery.ReadDeliveryStatus().LastAcknowledgedAt == deliveryStarted.AddSeconds(5), "ACK removes only the matching durable batch");
     }
+
+    // A flow's times must come out in order however its observations arrive.
+    //
+    // Both upserts assigned the last time from whichever observation arrived
+    // most recently, which is only right if they arrive in time order. They do
+    // not: ETW callbacks are not strictly ordered, and the per-second summing
+    // emits a bucket when the event timeline passes it rather than when its
+    // own traffic happened. The Hub checks first <= last and answers 400 for
+    // the whole batch. Measured here: 31 of 10,000 queued observations were
+    // inverted -- about one in three hundred, enough that half of all
+    // 200-observation batches carried one and every one of those was refused.
+    using (var orderStore = new ObservationStore(Path.Combine(directory, "out-of-order.db")))
+    {
+        var late = new DateTimeOffset(2026, 9, 21, 10, 0, 1, TimeSpan.Zero);
+        var early = late.AddMilliseconds(-420);
+        NetworkObservation At(DateTimeOffset when, long sent) =>
+            new(when, 64, "TCP", "10.0.0.1", 50002, "203.0.113.12", 443, sent, 0,
+                ObservationLayer.Logical, "if", "etw", "OutOfOrder");
+
+        // The later time first, the earlier one second: the order the Agent
+        // actually sees them in when a bucket closes late.
+        orderStore.WriteBatch([At(late, 1)]);
+        orderStore.WriteBatch([At(early, 2)]);
+        orderStore.QueueForDelivery([At(late, 1)], late);
+        orderStore.QueueForDelivery([At(early, 2)], late);
+
+        var flow = orderStore.ReadRecentFlows(50).Single(item => item.ProcessName == "OutOfOrder");
+        Assert(flow.FirstSeen == early && flow.LastSeen == late,
+            "a flow keeps the earliest and the latest time, not the times of the last observation to arrive");
+
+        var queued = orderStore.PrepareDeliveryBatch(late.AddSeconds(1))!.Observations.Single();
+        Assert(queued.FirstObservedAt <= queued.LastObservedAt && queued.FirstObservedAt == early && queued.LastObservedAt == late,
+            "and so does the observation queued for the Hub, which refuses the whole batch over one inverted pair");
+    }
+
+    // A batch the Hub will never accept must not stop the ones behind it,
+    // and must not take them with it either.
+    //
+    // Preparing a batch reuses any that is still outstanding, which is what
+    // keeps an interrupted send from orphaning data. It also means a refusal
+    // that will repeat blocks the queue for ever. Measured on a real machine:
+    // one batch of 107 observations claimed at 01:34:33Z was still claimed
+    // three hours later, the queue behind it sat at its 10,000 ceiling, and
+    // 17,813 observations had been dropped to make room for arrivals.
+    //
+    // Discarding the refused batch was the first answer and was too blunt: it
+    // unblocked delivery and then shed 200 observations every two and a half
+    // minutes, because one record the Hub would not take condemned the 199
+    // travelling with it. Halving finds the one.
+    using (var poisonStore = new ObservationStore(Path.Combine(directory, "poison-batch.db")))
+    {
+        NetworkObservation Refused(int port) =>
+            new(deliveryStarted.AddSeconds(port), 91, "TCP", "10.0.0.1", 50000 + port, "203.0.113.11", port,
+                10, 20, ObservationLayer.Logical, "if", "etw", "Refused");
+        for (var port = 1; port <= 8; port++)
+            poisonStore.QueueForDelivery([Refused(port)], deliveryStarted.AddSeconds(port));
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 8, "eight distinct flows queue as eight observations");
+
+        var batch = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(20))!;
+        Assert(batch.Observations.Count == 8, "and are claimed as one batch");
+
+        // Halving, not discarding. Every refusal hands the younger half back
+        // to the queue and carries on with the older one.
+        foreach (var remaining in new[] { 4, 2, 1 })
+        {
+            Assert(poisonStore.RecordDeliveryBatchRejection(batch.BatchId) == DeliveryRefusal.Split,
+                $"a refused batch of more than one is halved, leaving {remaining}");
+            var carried = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(21))!;
+            Assert(carried.BatchId == batch.BatchId && carried.Observations.Count == remaining,
+                $"the batch carries on with {remaining} observation(s) under the same id");
+            Assert(poisonStore.ReadDeliveryStatus().Pending == 8,
+                "and nothing has been lost: the released half is back in the queue");
+        }
+
+        // Down to one, the refusal is about that observation and nothing else.
+        // Still not thrown away on the first answer -- a Hub mid-deploy says
+        // "rejected" too.
+        for (var attempt = 1; attempt < ObservationStore.AbandonBatchAfterRejections; attempt++)
+            Assert(poisonStore.RecordDeliveryBatchRejection(batch.BatchId) == DeliveryRefusal.Retained &&
+                poisonStore.ReadDeliveryStatus().Pending == 8,
+                $"a single refused observation is kept on attempt {attempt}");
+
+        Assert(poisonStore.RecordDeliveryBatchRejection(batch.BatchId) == DeliveryRefusal.Abandoned,
+            "and is given up on once the refusals have been answered enough times");
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 7,
+            "exactly one observation is lost, not the batch it arrived in");
+        Assert(poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(40))!.Observations.Count == 7,
+            "and the other seven are claimable again");
+
+        var counters = poisonStore.ReadCounters();
+        Assert(counters.TryGetValue("delivery-batches-split", out var splits) && splits == 3 &&
+            counters.TryGetValue("delivery-observations-abandoned", out var lost) && lost == 1,
+            "the halvings and the single loss are both counted, because a loss nobody can count is the failure that started this");
+
+        // A transport failure says nothing about the batch. An Agent offline
+        // for an afternoon has to come back with its queue intact, so those
+        // failures must not halve it or spend its lives.
+        var offline = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(41))!;
+        for (var attempt = 0; attempt < ObservationStore.AbandonBatchAfterRejections * 3; attempt++)
+            Assert(poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(42 + attempt))!.BatchId == offline.BatchId,
+                "a batch nobody has refused is still whole after any number of transport failures");
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 7, "and still holds every observation");
+
+        // The tally is kept against the batch's own id, so an acknowledgement
+        // cannot leave it charged to the next batch: batch ids are fresh
+        // GUIDs, and a different id restarts the count on its own. The reset
+        // in AcknowledgeDelivery is belt-and-braces, and is deliberately not
+        // asserted here -- a test of it could not fail, and a green light that
+        // cannot go red is worse than no light.
+        poisonStore.AcknowledgeDelivery(offline.BatchId, deliveryStarted.AddSeconds(90));
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 0,
+            "an acknowledged batch leaves the queue however many transport failures preceded it");
+
+        // A refusal that arrives after the batch has gone is late, not wrong.
+        Assert(poisonStore.RecordDeliveryBatchRejection(offline.BatchId) == DeliveryRefusal.Unknown,
+            "and a refusal naming a batch that no longer exists changes nothing");
+    }
     using (var senderStore = new ObservationStore(Path.Combine(directory, "sender.db")))
     {
         senderStore.QueueForDelivery([new NetworkObservation(deliveryStarted, 88, "UDP", "10.0.0.1", 53000,
@@ -1144,6 +1466,39 @@ try
         Assert((await sender.SendNextAsync(rejectedStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged,
             "the same durable batch can be accepted after the Hub contract is fixed");
         Assert(handler.BatchIds.Distinct().Count() == 1, "a rejected ACK preserves the idempotent batch ID");
+    }
+
+    // A refusal that halved the batch must not be answered with a longer wait.
+    //
+    // The controller backs off on every refusal, which is right for a server in
+    // trouble and wrong for one that answered. Measured before the two were
+    // separated: an eight-step bisection ran at the 300-second retry ceiling,
+    // and the queue reached its own 10,000 ceiling and began dropping at the
+    // far end while it waited -- trading the loss the halving had just
+    // prevented for a different one. The sender says which refusals changed the
+    // payload so the controller can tell the two apart.
+    using (var narrowStore = new ObservationStore(Path.Combine(directory, "narrowing.db")))
+    {
+        for (var port = 1; port <= 4; port++)
+            narrowStore.QueueForDelivery([new NetworkObservation(deliveryStarted.AddSeconds(port), 88, "UDP",
+                "10.0.0.1", 53000 + port, "203.0.113.9", port, 42, 24, ObservationLayer.Logical, "if", "etw", "Browser")],
+                deliveryStarted.AddSeconds(port));
+        var refusing = new DeliveryHandler(400, 400, 400, 400, 400, 400, 400, 400);
+        var narrowSender = new DeliverySender(new HttpClient(refusing));
+        var narrowCredential = new AgentCredential(new Uri("https://hub.example/"), agentId, agentToken, deliveryStarted);
+        var narrowMetadata = new DeliveryMetadata("host", "windows", "Windows", "dev");
+
+        foreach (var remaining in new[] { 2, 1 })
+        {
+            var narrowed = await narrowSender.SendNextAsync(narrowStore, narrowCredential, narrowMetadata);
+            Assert(narrowed.Kind == DeliveryAttemptKind.Rejected && narrowed.Narrowed,
+                $"a refusal that halves the batch says so, leaving {remaining}");
+        }
+        var single = await narrowSender.SendNextAsync(narrowStore, narrowCredential, narrowMetadata);
+        Assert(single.Kind == DeliveryAttemptKind.Rejected && !single.Narrowed,
+            "and a refusal of a single observation does not, because waiting is then the right answer");
+        Assert(narrowStore.ReadDeliveryStatus().Pending == 4,
+            "nothing has been given up on while the refusal is still being narrowed");
     }
 
     var fallback = AgentCapabilityNegotiation.Decide(null);
@@ -2698,7 +3053,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 22 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 25 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }

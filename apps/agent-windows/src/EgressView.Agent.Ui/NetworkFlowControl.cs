@@ -6,6 +6,7 @@ using Brush = System.Windows.Media.Brush;
 using Pen = System.Windows.Media.Pen;
 using Point = System.Windows.Point;
 using Brushes = System.Windows.Media.Brushes;
+using Size = System.Windows.Size;
 
 namespace EgressView.Agent.Ui;
 
@@ -14,60 +15,120 @@ public sealed class NetworkFlowControl : FrameworkElement
 {
     protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
 
-    private const double LabelWidth = 132;
     private const double NodeWidth = 9;
     private const double NodeGap = 6;
-    private const double LineHeight = 14;
+    /// The pitch of one name row, and the size the names are drawn at.
+    ///
+    /// The names were 10.5 point because the card could not scroll: every row
+    /// had to fit a fixed height, so the only way to show more of them was to
+    /// make them smaller. The card scrolls now, so it is not a trade any more,
+    /// and a destination name is the thing a reader came to the card to read.
+    private const double LineHeight = 20;
+    private const double FontSize = 12;
     private const double TopMargin = 8;
-    /// Below this a node is a line rather than a band, and its label points at
-    /// something the reader cannot see.
-    private const double MinNodeHeight = 4;
 
-    private IReadOnlyList<AppDestinationAggregate> links = [];
+    /// How many names each side keeps before the rest becomes one band.
+    ///
+    /// Thirty, which is the Mac Agent's number and was measured there: of 656
+    /// destinations in a day the remainder falls from 34% at eight names to
+    /// 21% at thirty, and stops falling after that because the tail is long.
+    ///
+    /// This used to be "as many as fit the card", which on a 380-point card is
+    /// about twenty and on a short window far fewer -- so the same period told
+    /// two different stories depending on how tall the window happened to be.
+    /// The card scrolls now, so the extra names cost height in a scroll view
+    /// rather than on screen.
+    private const int MaximumNames = 30;
+
+    /// How wide each column of names is allowed to be.
+    ///
+    /// A share of the card rather than a fixed 132 points. Hostnames are long
+    /// and the middle of the diagram is the part that can afford to lose
+    /// width: a ribbon says the same thing at 300 points as at 400, and a
+    /// destination truncated to "pkg-co...t.com" says almost nothing.
+    private const double MinimumLabelWidth = 140;
+    private const double MaximumLabelWidth = 260;
+    private const double LabelShareOfWidth = 0.31;
+
+    /// The gap between a name and its figure, and between the text and the
+    /// node it belongs to.
+    private const double LabelGap = 10;
+
+    /// The dot that carries a row's colour out to its name.
+    ///
+    /// A ribbon's colour is the only thing tying it to the row that names it,
+    /// and the rows are a column away from the drawing. Without this the
+    /// reader matches them by position, which is exactly what the declutter
+    /// above is allowed to disturb.
+    private const double DotSize = 7;
+    private const double DotGap = 6;
+
+    private Model? model;
     private bool useBytes;
 
     public void SetItems(IReadOnlyList<AppDestinationAggregate> value, bool bytes, bool names)
     {
-        links = names ? value.Select(item => item with { Destination = item.DestinationName }).ToArray() : value;
+        var links = names ? value.Select(item => item with { Destination = item.DestinationName }).ToArray() : value;
         useBytes = bytes;
+        model = Build(links);
+        // The card is as tall as the names need, and scrolls. Measuring has to
+        // be redone before drawing, or a period with more names than the last
+        // one is drawn into the height the last one asked for.
+        InvalidateMeasure();
         InvalidateVisual();
     }
 
-    protected override void OnRender(DrawingContext drawing)
+    /// As tall as the longer column needs, so nothing is laid out into a
+    /// height it does not have. The ribbons are drawn against this same
+    /// height, which is why they keep meeting their names while scrolling.
+    protected override Size MeasureOverride(Size availableSize)
     {
-        base.OnRender(drawing);
-        if (links.Count == 0 || ActualWidth < 260 || ActualHeight < 90) return;
+        var rows = model is null ? 0 : Math.Max(model.Apps.Length, model.Destinations.Length);
+        var height = TopMargin * 2 + Math.Max(rows, 1) * LineHeight;
+        var width = double.IsInfinity(availableSize.Width) ? 0 : availableSize.Width;
+        return new Size(width, height);
+    }
 
+    /// Everything the drawing needs, worked out once when the data arrives.
+    ///
+    /// Held rather than recomputed per render because the height depends on
+    /// it: measuring and drawing have to agree about how many rows there are,
+    /// and the only way to guarantee that is for them to read the same answer.
+    private sealed record Model(Node[] Apps, Node[] Destinations, Entry[] Folded, long Total);
+
+    private Model? Build(IReadOnlyList<AppDestinationAggregate> links)
+    {
+        if (links.Count == 0) return null;
         var other = LocalizationManager.Text("FlowOther");
         var entries = links
             .Select(link => new Entry(LocalizationManager.Application(link.Application), link.Destination,
                 useBytes ? link.Bytes : link.Connections))
             .Where(entry => entry.Value > 0)
             .ToArray();
-        if (entries.Length == 0) return;
+        if (entries.Length == 0) return null;
 
         // Keep every value: the ones outside the top N are folded into a band
         // rather than discarded, so the ribbons still add up to the total the
         // summary card reports.
-        //
-        // How many to name is decided by how thick each would be drawn, not by
-        // a fixed count. Measured by data volume one destination often holds
-        // most of the total, and the rest then arrive as sub-pixel slivers
-        // under a stack of labels nobody can match to them. Naming fewer and
-        // letting the band carry the remainder says the same thing and can be
-        // read.
-        var height = Math.Max(1, ActualHeight - TopMargin * 2);
-        var appNames = TopNames(entries.GroupBy(entry => entry.App), other, height);
-        var destinationNames = TopNames(entries.GroupBy(entry => entry.Destination), other, height);
+        var appNames = TopNames(entries.GroupBy(entry => entry.App), other);
+        var destinationNames = TopNames(entries.GroupBy(entry => entry.Destination), other);
         var folded = entries
             .GroupBy(entry => (App: Bucket(entry.App, appNames, other), Destination: Bucket(entry.Destination, destinationNames, other)))
             .Select(group => new Entry(group.Key.App, group.Key.Destination, group.Sum(entry => entry.Value)))
             .ToArray();
-
-        var apps = Order(folded.GroupBy(entry => entry.App), other);
-        var destinations = Order(folded.GroupBy(entry => entry.Destination), other);
         var total = folded.Sum(entry => entry.Value);
-        if (total <= 0) return;
+        if (total <= 0) return null;
+        return new Model(Order(folded.GroupBy(entry => entry.App), other),
+            Order(folded.GroupBy(entry => entry.Destination), other), folded, total);
+    }
+
+    protected override void OnRender(DrawingContext drawing)
+    {
+        base.OnRender(drawing);
+        if (model is null || ActualWidth < 260 || ActualHeight < 60) return;
+        var other = LocalizationManager.Text("FlowOther");
+        var (apps, destinations, folded, total) = model;
+        var height = Math.Max(1, ActualHeight - TopMargin * 2);
 
         // One scale for node heights and ribbon thickness. Two scales make the
         // ribbons leave their node, which is what a reader notices first.
@@ -75,8 +136,9 @@ public sealed class NetworkFlowControl : FrameworkElement
         var usable = Math.Max(1, height - NodeGap * Math.Max(0, tallest - 1));
         var scale = usable / (double)total;
 
-        var leftX = LabelWidth;
-        var rightX = Math.Max(leftX + 40, ActualWidth - LabelWidth - NodeWidth);
+        var labelWidth = Math.Clamp(ActualWidth * LabelShareOfWidth, MinimumLabelWidth, MaximumLabelWidth);
+        var leftX = labelWidth;
+        var rightX = Math.Max(leftX + 40, ActualWidth - labelWidth - NodeWidth);
         var appRects = Layout(apps, leftX, scale);
         var destinationRects = Layout(destinations, rightX, scale);
 
@@ -136,36 +198,27 @@ public sealed class NetworkFlowControl : FrameworkElement
 
         // A proportional node can be a couple of pixels tall, so its label is
         // pushed clear of the previous one rather than drawn on top of it.
-        DrawLabels(drawing, Declutter(apps, appRects, ActualHeight), 0, LabelWidth - 10, TextAlignment.Left);
-        DrawLabels(drawing, Declutter(destinations, destinationRects, ActualHeight), rightX + NodeWidth + 10,
-            Math.Max(20, ActualWidth - rightX - NodeWidth - 11), TextAlignment.Right);
+        // The figure goes on the side nearest the diagram on both columns, so
+        // the two run down the middle where a reader compares them, and the
+        // names sit on the outside where there is room to be long. The dot
+        // goes on the outer edge, where it starts the row.
+        DrawLabels(drawing, Declutter(apps, appRects, ActualHeight), 0, labelWidth - LabelGap,
+            figureInside: true,
+            node => node.Name == other ? MutedBrush() : palette[appIndex[node.Name] % palette.Length]);
+        DrawLabels(drawing, Declutter(destinations, destinationRects, ActualHeight), rightX + NodeWidth + LabelGap,
+            Math.Max(20, ActualWidth - rightX - NodeWidth - LabelGap - 1),
+            figureInside: false, _ => secondary);
     }
 
-    /// The nodes worth naming: the largest few, cut short at the first one
-    /// too thin to see. A named node the reader cannot find on the chart is
-    /// worse than an honest remainder, because it looks like it is there.
-    private static string[] TopNames(IEnumerable<IGrouping<string, Entry>> groups, string other, double height)
-    {
-        var ranked = groups.Select(group => new Node(group.Key, group.Sum(entry => entry.Value)))
+    /// The nodes worth naming: the largest thirty, with the rest folded into
+    /// one honest band.
+    private static string[] TopNames(IEnumerable<IGrouping<string, Entry>> groups, string other) =>
+        groups.Select(group => new Node(group.Key, group.Sum(entry => entry.Value)))
             .OrderByDescending(node => node.Value)
+            .Take(MaximumNames)
+            .Select(node => node.Name)
+            .Where(name => name != other)
             .ToArray();
-        var total = ranked.Length == 0 ? 0 : groups.Sum(group => group.Sum(entry => entry.Value));
-        if (total <= 0) return [];
-
-        var capacity = SankeyLabelLayout.NamedCapacity(height, LineHeight);
-        if (ranked.Length > capacity) ranked = ranked.Take(capacity).ToArray();
-
-        var named = 0;
-        for (var index = 0; index < ranked.Length; index++)
-        {
-            // Room for this many named nodes plus the remainder band, so the
-            // gaps between them are paid for before the thickness is judged.
-            var usable = height - NodeGap * (index + 1);
-            if (usable <= 0 || ranked[index].Value * usable / total < MinNodeHeight) break;
-            named = index + 1;
-        }
-        return ranked.Take(named).Select(node => node.Name).Where(name => name != other).ToArray();
-    }
 
     private static string Bucket(string name, string[] top, string other) =>
         Array.IndexOf(top, name) >= 0 ? name : other;
@@ -222,30 +275,63 @@ public sealed class NetworkFlowControl : FrameworkElement
         return placed.Where(entry => entry.Y >= 0).ToList();
     }
 
+    /// A column of names and figures, the figure always on the side nearest
+    /// the diagram.
+    ///
+    /// The figures are given one width for the whole column, so the names do
+    /// not shift about as the numbers change between refreshes, and every name
+    /// is measured against the same space.
     private void DrawLabels(DrawingContext drawing, IReadOnlyList<(Node Node, double Y)> placed,
-        double originX, double width, TextAlignment alignment)
+        double originX, double width, bool figureInside, Func<Node, Brush> dotBrush)
     {
         if (placed.Count == 0) return;
         var culture = System.Globalization.CultureInfo.CurrentCulture;
         var typeface = new Typeface("Segoe UI Variable Text");
         var brush = (Brush)FindResource("TextPrimaryBrush");
+        var secondary = (Brush)FindResource("TextSecondaryBrush");
         var pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        double Measure(string text) => new FormattedText(text, culture, System.Windows.FlowDirection.LeftToRight,
-            typeface, 10.5, brush, pixelsPerDip).WidthIncludingTrailingWhitespace;
+        FormattedText Text(string text, Brush colour) => new(text, culture,
+            System.Windows.FlowDirection.LeftToRight, typeface, FontSize, colour, pixelsPerDip);
+        double Measure(string text) => Text(text, brush).WidthIncludingTrailingWhitespace;
 
         var metrics = placed.Select(entry => FormatValue(entry.Node.Value)).ToArray();
-        var nameWidths = metrics.Select(metric => Math.Max(20, width - Measure($"  {metric}") - 1)).ToArray();
+        var figureWidth = metrics.Length == 0 ? 0 : metrics.Max(Measure);
+        var nameWidth = Math.Max(20, width - figureWidth - LabelGap - DotSize - DotGap);
+        var nameWidths = Enumerable.Repeat(nameWidth, placed.Count).ToArray();
         var fitted = SankeyLabelLayout.FitDistinct(placed.Select(entry => entry.Node.Name).ToArray(), nameWidths, Measure);
+
         for (var index = 0; index < placed.Count; index++)
         {
             // Width fitting happens exactly once above with the same font and
             // DPI. Do not ask WPF to append a second ellipsis here.
-            var formatted = new FormattedText($"{fitted[index]}  {metrics[index]}", culture,
-                System.Windows.FlowDirection.LeftToRight, typeface, 10.5, brush, pixelsPerDip);
-            var x = alignment == TextAlignment.Right
-                ? originX + width - formatted.WidthIncludingTrailingWhitespace
-                : originX;
-            drawing.DrawText(formatted, new Point(Math.Max(originX, x), placed[index].Y));
+            var name = Text(fitted[index], brush);
+            var figure = Text(metrics[index], secondary);
+            var y = placed[index].Y;
+            var dot = dotBrush(placed[index].Node);
+            // Centred on the text it belongs to, using the text's own measured
+            // height rather than the row pitch: the two differ, and a dot
+            // aligned to the pitch sits low on every row.
+            var middle = y + name.Height / 2;
+            if (figureInside)
+            {
+                // Source column: the dot, then the name, then the figure
+                // against the diagram.
+                drawing.DrawEllipse(dot, null,
+                    new Point(originX + DotSize / 2, middle), DotSize / 2, DotSize / 2);
+                drawing.DrawText(name, new Point(originX + DotSize + DotGap, y));
+                drawing.DrawText(figure,
+                    new Point(originX + width - figure.WidthIncludingTrailingWhitespace, y));
+            }
+            else
+            {
+                // Destination column, the mirror of it: the figure against the
+                // diagram, the dot against the outer edge.
+                drawing.DrawText(figure, new Point(originX, y));
+                drawing.DrawEllipse(dot, null,
+                    new Point(originX + width - DotSize / 2, middle), DotSize / 2, DotSize / 2);
+                drawing.DrawText(name,
+                    new Point(originX + width - DotSize - DotGap - name.WidthIncludingTrailingWhitespace, y));
+            }
         }
     }
 
