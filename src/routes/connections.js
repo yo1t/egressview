@@ -58,7 +58,10 @@ const SERVER_FILTER_COLS = ['src', 'dst', 'dport', 'proto', 'country', 'org', 's
 // of not answering anyone. A cheap answer keeps the short TTL, because there
 // is nothing to buy with it.
 const SUMMARY_CACHE_MIN_TTL_MS = 10_000;
-const SUMMARY_CACHE_MAX_TTL_MS = 120_000;
+// Matches the coarsest grid below. A shorter ceiling would expire an answer
+// while the key naming it is still in use, which is the `expired=22` that
+// measurement found after the grid was fixed.
+const SUMMARY_CACHE_MAX_TTL_MS = 5 * 60_000;
 // 3.7 seconds of work buys about 110 seconds of reuse; 26 ms buys the minimum.
 const SUMMARY_CACHE_TTL_PER_COST_MS = 30;
 // How coarse the grid is that a rolling window's key snaps to.
@@ -237,11 +240,26 @@ function summaryCacheSnapshot() {
   };
 }
 
-function summaryCacheTtl(computeMs) {
-  if (!Number.isFinite(computeMs) || computeMs <= 0) return SUMMARY_CACHE_MIN_TTL_MS;
+/**
+ * How long an answer may be served for: as long as the key that names it.
+ *
+ * Fixing the grid made keys repeat, and measurement then showed the next
+ * problem: hits=36 misses=70, of which expired=22. The grid for that view was
+ * three minutes and the answer's TTL was seventy-two seconds, so roughly six
+ * tenths of every cell was uncovered and the same window was recomputed
+ * inside its own cell. An answer that costs more still earns more, but never
+ * less than its own key's lifetime.
+ */
+function summaryCacheTtl(computeMs, quantumMs = SUMMARY_CACHE_MIN_QUANTUM_MS) {
+  const earned = Number.isFinite(computeMs) && computeMs > 0
+    ? Math.round(computeMs * SUMMARY_CACHE_TTL_PER_COST_MS)
+    : 0;
+  const floor = Number.isFinite(quantumMs) && quantumMs > 0
+    ? quantumMs
+    : SUMMARY_CACHE_MIN_QUANTUM_MS;
   return Math.min(
     SUMMARY_CACHE_MAX_TTL_MS,
-    Math.max(SUMMARY_CACHE_MIN_TTL_MS, Math.round(computeMs * SUMMARY_CACHE_TTL_PER_COST_MS)),
+    Math.max(SUMMARY_CACHE_MIN_TTL_MS, earned, floor),
   );
 }
 
@@ -297,7 +315,7 @@ function cachedRead(kind, keyParts, compute, { from = null, to = null } = {}) {
   const startedAt = Date.now();
   const body = compute();
   const computeMs = Date.now() - startedAt;
-  const ttlMs = summaryCacheTtl(computeMs);
+  const ttlMs = summaryCacheTtl(computeMs, summaryCacheQuantum(from, to));
   if (computeMs > summaryCacheStats.slowestMs) {
     summaryCacheStats.slowestMs = computeMs;
     summaryCacheStats.slowestRange = label;
