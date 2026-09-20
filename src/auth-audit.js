@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const Database = require('better-sqlite3');
 const logger = require('./logger');
+const { applyWalPragmas } = require('./sqlite-wal');
 
 const DEFAULT_RETENTION_DAYS = 180;
 const MAX_METADATA_BYTES = 4096;
@@ -24,7 +25,7 @@ function initDb(dbPath, options = {}) {
   lastDbPath = dbPath || DEFAULT_DB_PATH;
   if (options.hashKey) hashKey = Buffer.from(options.hashKey);
   db = new Database(lastDbPath);
-  db.pragma('journal_mode = WAL');
+  applyWalPragmas(db);
   lastWriteError = null;
 }
 

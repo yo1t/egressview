@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const Database = require('better-sqlite3');
 const { AGENT_PERMISSIONS } = require('./permissions');
+const { applyWalPragmas } = require('./sqlite-wal');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', '.egressview.db');
 const AGENT_TOKEN_PREFIX = 'egva_';
@@ -60,7 +61,7 @@ function initDb(dbPath) {
   if (!hashKey) throw new Error('Agent credential store must be keyed before DB initialization');
   lastDbPath = dbPath || DEFAULT_DB_PATH;
   db = new Database(lastDbPath);
-  db.pragma('journal_mode = WAL');
+  applyWalPragmas(db);
   db.pragma('busy_timeout = 5000');
 }
 

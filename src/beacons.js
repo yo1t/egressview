@@ -3,6 +3,7 @@
 'use strict';
 
 const Database = require('better-sqlite3');
+const { applyWalPragmas } = require('./sqlite-wal');
 
 const DB_PATH = process.env.EGRESSVIEW_DB || '.egressview.db';
 const EVENT_RETENTION_MS = 7 * 24 * 3600_000; // 7 days
@@ -15,7 +16,7 @@ let _lastDbPath = DB_PATH;  // tracks the path most recently passed to initDb()
 function initDb(dbPath) {
   _lastDbPath = dbPath || DB_PATH;
   db = new Database(_lastDbPath);
-  db.pragma('journal_mode = WAL');
+  applyWalPragmas(db);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS connection_events (

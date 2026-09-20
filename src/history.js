@@ -17,6 +17,7 @@ const { createAiUsageStore } = require('./ai-usage-store');
 const { createAiNotificationStore } = require('./ai-notification-store');
 const { CONNECTIONS_SQL, OBSERVATIONS_SQL, EVENTS_SQL } = require('./history-schema');
 const { reportSchemaCompleteness } = require('./schema-completeness');
+const { applyWalPragmas } = require('./sqlite-wal');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -140,7 +141,7 @@ function _secureDbFiles() {
 
 function _openDb(p) {
   const d = new Database(p);
-  d.pragma('journal_mode = WAL');
+  applyWalPragmas(d);
   d.pragma('busy_timeout = 5000');
   return d;
 }

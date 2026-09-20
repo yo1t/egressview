@@ -21,6 +21,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 
 const { ALL_PERMISSIONS, assertKnownPermissions } = require('./permissions');
+const { applyWalPragmas } = require('./sqlite-wal');
 
 const DB_PATH = path.join(__dirname, '..', '.egressview.db');
 
@@ -47,7 +48,7 @@ function isApiIdentityToken(value) {
 function initDb(dbPath) {
   _lastDbPath = dbPath || DB_PATH;
   db = new Database(_lastDbPath);
-  db.pragma('journal_mode = WAL');
+  applyWalPragmas(db);
   db.pragma('busy_timeout = 5000');
   // Schema is owned by db-migrate (v10); creating it here would let a fresh
   // process race the migration owner.
