@@ -61,6 +61,33 @@ const SUMMARY_CACHE_MIN_TTL_MS = 10_000;
 const SUMMARY_CACHE_MAX_TTL_MS = 120_000;
 // 3.7 seconds of work buys about 110 seconds of reuse; 26 ms buys the minimum.
 const SUMMARY_CACHE_TTL_PER_COST_MS = 30;
+// How coarse the grid is that a rolling window's key snaps to.
+//
+// The key, not the TTL, is what decided whether this cache ever served
+// anything. Measured on the Hub 2026-09-20 with the miss reasons in hand:
+// expired=0, keyNeverSeen=89. The browser sends `from = now - N`, the grid was
+// a fixed ten seconds, and the summary is asked for about once a minute, so
+// consecutive requests always landed in different cells and no TTL could be
+// reached. A grid finer than the request interval can never repeat a key.
+//
+// Proportional to the window rather than fixed, because the error it
+// introduces is an error in where the window starts: five minutes is nothing
+// on a fourteen-day view and is the whole of a five-minute one.
+// A ladder, not a ratio. Sizing the grid as a fraction of the span was tried
+// first and does not work: the span is `now - from`, so it changes with every
+// request, the grid changes with it, and the key moves anyway -- the very
+// failure this is here to fix. Fixed rungs keep the grid still while the
+// window slides across it.
+// The rungs sit between the ranges the UI offers, never on one. A boundary
+// that a preset lands on is a boundary the window slides across, which puts
+// the key back in motion for the most common view of all.
+const SUMMARY_CACHE_QUANTUM_LADDER = [
+  [20 * 60_000, 10_000],       // live and 15m: keep today's ten seconds
+  [2 * 60 * 60_000, 60_000],   // 1h: a minute, against a request a minute apart
+  [8 * 60 * 60_000, 180_000],  // 3h and 6h: three minutes
+];
+const SUMMARY_CACHE_MIN_QUANTUM_MS = 10_000;
+const SUMMARY_CACHE_MAX_QUANTUM_MS = 5 * 60_000;
 const summaryCache = new Map();
 const THREAT_FILTER_SCAN_CHUNK = 1000;
 
@@ -122,14 +149,28 @@ const connectionsQuerySchema = z.object({
  * share a key. `null` (an open-ended "up to now") is preserved: it already
  * means the same thing on every request.
  */
-function quantiseForCache(value) {
+/**
+ * The grid this window's key snaps to, sized from the window itself.
+ *
+ * A request is only ever answered from cache if another request produced the
+ * same key, so the grid has to be coarser than the interval between requests.
+ * Sizing it from the span keeps the distortion proportional: a view of the
+ * last hour may start up to three minutes early, a view of the last five
+ * minutes up to fifteen seconds.
+ */
+function summaryCacheQuantum(from, to) {
+  if (from == null) return SUMMARY_CACHE_MIN_QUANTUM_MS;
+  const spanMs = (to ?? Date.now()) - from;
+  if (!Number.isFinite(spanMs) || spanMs <= 0) return SUMMARY_CACHE_MIN_QUANTUM_MS;
+  for (const [upToMs, quantumMs] of SUMMARY_CACHE_QUANTUM_LADDER) {
+    if (spanMs <= upToMs) return quantumMs;
+  }
+  return SUMMARY_CACHE_MAX_QUANTUM_MS;
+}
+
+function quantiseForCache(value, quantumMs = SUMMARY_CACHE_MIN_QUANTUM_MS) {
   if (!Number.isFinite(value)) return value ?? null;
-  // The minimum TTL, not the one the answer earns: this decides how often a
-  // rolling range mints a new key, which is a different question from how long
-  // an answer stays good. A rolling range that is also expensive still misses
-  // every quantum; the all-time range, whose key never moves, is what the cost
-  // -based TTL above is for.
-  return Math.floor(value / SUMMARY_CACHE_MIN_TTL_MS) * SUMMARY_CACHE_MIN_TTL_MS;
+  return Math.floor(value / quantumMs) * quantumMs;
 }
 
 /**
@@ -406,9 +447,10 @@ function connectionsRoutes(ctx) {
     // own `cached` field is the only place that said so -- and nobody reads a
     // field on a response nobody kept. Measured 2026-09-06: 369 responses over
     // three seconds in six hours, every one of them this route.
+    const summaryQuantum = summaryCacheQuantum(from, to);
     const { body: summary, cached } = cachedRead('summary', {
-      from: quantiseForCache(from),
-      to: quantiseForCache(to),
+      from: quantiseForCache(from, summaryQuantum),
+      to: quantiseForCache(to, summaryQuantum),
       src,
       buckets,
       sourceScope,
@@ -483,12 +525,14 @@ function connectionsRoutes(ctx) {
     // Threat counts are derived from the same scoped scan the log itself runs,
     // and the tab asks for both at once. Cache the grouping, not the verdicts:
     // the feeds can change between polls and re-matching them is cheap.
+    const threatQuantum = summaryCacheQuantum(from, to);
     const { body: groups } = cachedRead('threat-counts', {
-      from: quantiseForCache(from),
-      to: quantiseForCache(to),
+      from: quantiseForCache(from, threatQuantum),
+      to: quantiseForCache(to, threatQuantum),
       filters,
       sourceScope: scoped.scope,
-    }, () => history.groupDstByTimeRange(from, to, { filters, sourceScope: scoped.scope }));
+    }, () => history.groupDstByTimeRange(from, to, { filters, sourceScope: scoped.scope }),
+    { from, to });
     let safe = 0, warn = 0, danger = 0;
     for (const { dst, dstHost, cnt } of groups) {
       const threat = threatIntel?.matchThreatIntel(dst, dstHost || dst);
@@ -573,14 +617,15 @@ function connectionsRoutes(ctx) {
       // to produce one number. Paging through a log re-asks it per page with an
       // unchanged answer, so it is cached on the terms that decide it -- window,
       // filters, and scope -- and deliberately not on the page offset.
+      const totalQuantum = summaryCacheQuantum(from, to);
       const { body: total } = cachedRead('connections-total', {
-        from: quantiseForCache(from),
-        to: quantiseForCache(to),
+        from: quantiseForCache(from, totalQuantum),
+        to: quantiseForCache(to, totalQuantum),
         filters: opts.filters,
         sourceScope: opts.sourceScope,
       }, () => history.countByTimeRange(from, to, {
         filters: opts.filters, sourceScope: opts.sourceScope,
-      }));
+      }), { from, to });
       const connections = attachApplications(attachThreats(
         history.queryByTimeRangePaged(from, to, clampedLimit, offset, opts), threatIntel
       ), history, opts.sourceScope, from, to);
@@ -632,3 +677,4 @@ module.exports._summaryRangeLabel = summaryRangeLabel;
 // Drops the cached bodies but keeps the memory of which keys were served, so a
 // test can produce the expiry case without waiting out a TTL.
 module.exports._expireSummaryEntriesForTest = () => { summaryCache.clear(); };
+module.exports._summaryCacheQuantum = summaryCacheQuantum;
