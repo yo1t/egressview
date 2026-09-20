@@ -163,7 +163,7 @@ that the publisher is unknown when you download one.
 Check it against the SHA-256 published on the download page.
 
 ```powershell
-Get-FileHash -Algorithm SHA256 $HOME\Downloads\EgressView-Agent-Windows-<version>-x64.msi
+Get-FileHash -Algorithm SHA256 $HOME\Downloads\EgressView-Agent-Windows-<version>-<arch>.msi
 ```
 
 This is not a substitute for a signature. **While the builds are unsigned, the

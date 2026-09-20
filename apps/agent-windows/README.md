@@ -57,8 +57,10 @@ dotnet publish src/EgressView.Agent.Ui -c Release -r win-x64 --self-contained tr
 .\scripts\build-msi.ps1 -Version 0.1.0
 ```
 
-利用者向けには`artifacts\windows\EgressView-Agent-Windows-0.1.0-unsigned.msi`を使います。MSIは
-self-contained x64 buildを内包するため、.NET runtimeの事前導入は不要です。Windowsの通常のinstaller UI、
+利用者向けには`artifacts\windows\EgressView-Agent-Windows-<version>-<arch>-unsigned.msi`を使います。
+`-Runtime win-x64`（既定）と`-Runtime win-arm64`があり、MSIはself-contained buildを内包するため、
+.NET runtimeの事前導入は不要です。ETW callbackの解析がhot pathであるため、ARM機ではx64 emulationに
+任せず、ARM64 buildを使ってください。Windowsの通常のinstaller UI、
 Program Filesへの配置、LocalService、スタートメニュー、ログオン時のtray起動、メジャーアップグレード、
 「インストールされているアプリ」からのアンインストールを管理します。`-unsigned`は開発成果物であり、
 一般配布前にはAuthenticode署名、署名検証、SmartScreen実測が必要です。
