@@ -482,7 +482,7 @@ describe('collection source scope', () => {
     let writer;
     try {
       history._initForTest(dbPath);
-      insert({ src: '192.0.2.10', dst: '198.51.100.10', observedBy: ['router-a'], firstSeen: now, lastSeen: now });
+      insert({ src: '192.0.2.10', srcMac: '02:00:00:00:00:aa', dst: '198.51.100.10', observedBy: ['router-a'], firstSeen: now, lastSeen: now });
       insert({ src: '192.0.2.20', dst: '198.51.100.20', observedBy: ['router-b'], firstSeen: now, lastSeen: now });
       insert({
         src: '192.0.2.30', dst: '203.0.113.53', dport: 53, proto: 'UDP',
@@ -576,8 +576,15 @@ describe('collection source scope', () => {
       const currentAgentRows = history.queryByTimeRange(now - 1000, now + 1000, { sourceScope: agentScope });
       assert.equal(currentAgentRows.find(row => row.dst === '203.0.113.53').firstSeen, now);
       assert.equal(currentAgentRows.find(row => row.dst === '203.0.113.53').process, 'mDNSResponder');
-      assert.deepEqual(new Set(history.listSourceDeviceKeys(agentScope).map(row => row.src)),
+      const agentDeviceKeys = history.listSourceDeviceKeys(agentScope);
+      assert.deepEqual(new Set(agentDeviceKeys.map(row => row.src)),
         new Set(['192.0.2.10', '192.0.2.30']));
+      // The device list filters on both address and MAC, so a flow a router
+      // also saw has to keep its MAC when the view is scoped to the Agent.
+      assert.equal(agentDeviceKeys.find(row => row.src === '192.0.2.10' && row.srcMac)?.srcMac,
+        '02:00:00:00:00:aa');
+      // A flow only the Agent saw has no router observation, so no MAC.
+      assert.equal(agentDeviceKeys.find(row => row.src === '192.0.2.30')?.srcMac, null);
 
       const attributedRows = history.attachAgentAttributions(agentRows, { sourceScope: agentScope });
       const routerBacked = attributedRows.find(row => row.dst === '198.51.100.10');

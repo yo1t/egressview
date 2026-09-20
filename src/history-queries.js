@@ -357,6 +357,35 @@ function createHistoryQueries({
   function listSourceDeviceKeys(sourceScope) {
     const db = getDb();
     if (!db || !sourceScope) return [];
+    // The device list wants two columns: which addresses this source has seen,
+    // and the MAC if a router also saw the flow. Asking connectionSource() for
+    // them made an Agent scope rebuild the Agent's entire retained history --
+    // the UNION branch synthesises a connection row per uncorrelated flow,
+    // with six aggregates and a LEFT JOIN over 1.3 million observations -- and
+    // it cannot use the time index, because this question has no time range.
+    //
+    // Measured on the production Hub 2026-09-20: 10,123 ms, for 32 pairs.
+    // GET /api/devices runs it whenever the scope changes, and better-sqlite3
+    // is synchronous, so choosing an Agent froze the Hub for everyone. Asked
+    // directly, the same 32 pairs come back in 517 ms.
+    if (sourceScope.sourceKind === 'agent') {
+      return db.prepare(`
+        SELECT DISTINCT c.src, c.srcMac
+        FROM connections c
+        WHERE EXISTS (
+          SELECT 1 FROM connection_agent_observations link
+          WHERE link.src = c.src AND link.dst = c.dst
+            AND link.dport = c.dport AND link.proto = c.proto
+            AND link.agentId = ?
+        )
+        UNION
+        -- Flows only the Agent saw. No router observed them, so no MAC, which
+        -- is what the synthesised rows carried for these anyway.
+        SELECT DISTINCT o.localAddress AS src, NULL AS srcMac
+        FROM agent_observations o
+        WHERE o.agentId = ?
+      `).all(sourceScope.sourceId, sourceScope.sourceId);
+    }
     const source = connectionSource(sourceScope);
     const scoped = sourceScopeCondition(sourceScope, 'c');
     const where = scoped.condition ? ` WHERE ${scoped.condition}` : '';
