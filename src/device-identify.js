@@ -1,6 +1,7 @@
 // OUI vendor lookup, mDNS, SSDP, NetBIOS, Apple model dictionary, investigation
 'use strict';
 const logger = require('./logger');
+const { isStableMac } = require('./mac');
 
 const axios = require('axios');
 const crypto = require('crypto');
@@ -84,13 +85,19 @@ async function loadOuiDb() {
   logger.info(`[oui] ${ouiDb.size.toLocaleString()} OUI entries ready`);
 }
 
+// A locally administered address has no manufacturer to look up. Reading an
+// OUI off one returns whichever company happens to own that prefix, which is
+// not the device: on the production Hub the same randomised address was shown
+// as "CANDY HOUSE, Inc." at one address and "iRobot Corporation" at another,
+// and it was the same MacBook both times. No name is better than a wrong one.
 function lookupVendor(mac) {
+  if (!isStableMac(mac)) return '';
   const oui = mac.replace(/[:\-.]/g, '').slice(0, 6).toUpperCase();
   return ouiDb.get(oui) || '';
 }
 
 function getOuiVendor(mac) {
-  if (!mac || !ouiDb) return null;
+  if (!ouiDb || !isStableMac(mac)) return null;
   const prefix = mac.replace(/:/g, '').substring(0, 6).toUpperCase();
   return ouiDb.get(prefix) || null;
 }
