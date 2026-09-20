@@ -43,7 +43,24 @@ const ALLOWED_SORT_DIRS = new Set(['asc', 'desc']);
 const ALLOWED_FILTER_MODES = new Set(['contains', 'startsWith', 'endsWith', 'exact']);
 // Columns whose filters can be applied server-side (maps to DB columns)
 const SERVER_FILTER_COLS = ['src', 'dst', 'dport', 'proto', 'country', 'org', 'srcMac'];
-const SUMMARY_CACHE_TTL_MS = 10_000;
+// How long an answer may be served for is decided by what it cost to produce.
+//
+// A fixed ten seconds looked prudent and was the reason the cache served
+// almost nothing: measured on the Hub 2026-09-20, hits=2 misses=393 (1%). The
+// dashboard asks for the all-time summary about once a minute, its cache key
+// is stable -- `from` and `to` are both null -- and the entry had always
+// expired by the time the next request arrived. Every one of those misses
+// re-ran five GROUP BY scans of 478,424 rows and blocked the event loop for
+// 3.7 seconds.
+//
+// Caching an expensive answer for longer is the trade the operator wants:
+// staleness costs nothing here, and freshness costs the whole Hub two seconds
+// of not answering anyone. A cheap answer keeps the short TTL, because there
+// is nothing to buy with it.
+const SUMMARY_CACHE_MIN_TTL_MS = 10_000;
+const SUMMARY_CACHE_MAX_TTL_MS = 120_000;
+// 3.7 seconds of work buys about 110 seconds of reuse; 26 ms buys the minimum.
+const SUMMARY_CACHE_TTL_PER_COST_MS = 30;
 const summaryCache = new Map();
 const THREAT_FILTER_SCAN_CHUNK = 1000;
 
@@ -107,7 +124,12 @@ const connectionsQuerySchema = z.object({
  */
 function quantiseForCache(value) {
   if (!Number.isFinite(value)) return value ?? null;
-  return Math.floor(value / SUMMARY_CACHE_TTL_MS) * SUMMARY_CACHE_TTL_MS;
+  // The minimum TTL, not the one the answer earns: this decides how often a
+  // rolling range mints a new key, which is a different question from how long
+  // an answer stays good. A rolling range that is also expensive still misses
+  // every quantum; the all-time range, whose key never moves, is what the cost
+  // -based TTL above is for.
+  return Math.floor(value / SUMMARY_CACHE_MIN_TTL_MS) * SUMMARY_CACHE_MIN_TTL_MS;
 }
 
 /**
@@ -127,17 +149,25 @@ function summaryCacheSnapshot() {
   };
 }
 
+function summaryCacheTtl(computeMs) {
+  if (!Number.isFinite(computeMs) || computeMs <= 0) return SUMMARY_CACHE_MIN_TTL_MS;
+  return Math.min(
+    SUMMARY_CACHE_MAX_TTL_MS,
+    Math.max(SUMMARY_CACHE_MIN_TTL_MS, Math.round(computeMs * SUMMARY_CACHE_TTL_PER_COST_MS)),
+  );
+}
+
 function getSummaryCache(key) {
   const hit = summaryCache.get(key);
-  if (!hit || Date.now() - hit.at > SUMMARY_CACHE_TTL_MS) {
+  if (!hit || Date.now() - hit.at > hit.ttlMs) {
     summaryCache.delete(key);
     return null;
   }
   return hit.body;
 }
 
-function setSummaryCache(key, body) {
-  summaryCache.set(key, { at: Date.now(), body });
+function setSummaryCache(key, body, ttlMs = SUMMARY_CACHE_MIN_TTL_MS) {
+  summaryCache.set(key, { at: Date.now(), body, ttlMs });
   if (summaryCache.size > 20) {
     const oldest = summaryCache.keys().next().value;
     summaryCache.delete(oldest);
@@ -167,8 +197,9 @@ function cachedRead(kind, keyParts, compute) {
   const cached = getSummaryCache(key);
   summaryCacheStats[cached ? 'hits' : 'misses'] += 1;
   if (cached) return { body: cached, cached: true };
+  const startedAt = Date.now();
   const body = compute();
-  setSummaryCache(key, body);
+  setSummaryCache(key, body, summaryCacheTtl(Date.now() - startedAt));
   return { body, cached: false };
 }
 
@@ -529,3 +560,4 @@ module.exports._resetReadCacheForTest = () => {
   summaryCacheStats.misses = 0;
 };
 module.exports._sendLargeJson = sendLargeJson;
+module.exports._summaryCacheTtl = summaryCacheTtl;

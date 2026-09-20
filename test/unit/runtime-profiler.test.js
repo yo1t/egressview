@@ -256,6 +256,49 @@ describe('停止の見張り', () => {
     assert.equal(cuts[0].toMs, 2000);
   });
 
+  it('停止で切り出した直後は、窓の境目でもう一度切らない', async () => {
+    const cuts = [];
+    let currentTime = 0;
+    const intervalCallbacks = [];
+    const profiler = createRuntimeProfiler({
+      now: () => currentTime,
+      cpuUsage: () => ({ user: 0, system: 0 }),
+      memoryUsage: () => ({ rss: 0, heapUsed: 0 }),
+      createHistogram: () => ({
+        max: 0, enable: () => {}, disable: () => {}, reset: () => {}, percentile: () => 0,
+      }),
+      scheduleInterval: callback => { intervalCallbacks.push(callback); return { unref: () => {} }; },
+      clearScheduledInterval: () => {},
+      createStallSampler: () => ({
+        start: async () => true,
+        cut: async span => { cuts.push(span); return { samples: 1, totalMs: 1, frames: [], cutMs: 170 }; },
+        stop: () => {},
+        isRunning: () => true,
+      }),
+    });
+    profiler.start({ stallProfile: true, observeGc: false, logger: { info: () => {}, warn: () => {} } });
+    await Promise.resolve();
+
+    // A stall near the end of the window cuts the profile...
+    currentTime += 2000;
+    intervalCallbacks[1]();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cuts.length, 1);
+
+    // ...and the window boundary right behind it does not pay for it again.
+    currentTime += 100;
+    intervalCallbacks[0]();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cuts.length, 1);
+
+    // A window with no stall in it still gets its cut.
+    currentTime += 60000;
+    intervalCallbacks[0]();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cuts.length, 2);
+    assert.equal(cuts[1].summarise, false);
+  });
+
   it('窓の要約に、その窓で何回止まったかを載せる', () => {
     const h = createHarness();
     h.advance({ wallMs: 2000 });

@@ -65,6 +65,9 @@ function createRuntimeProfiler(deps = {}) {
   let stallThresholdMs = DEFAULT_STALL_THRESHOLD_MS;
   let stallCount = 0;
   let stallSampler = null;
+  // When the rolling profile was last cut, so the window boundary does not cut
+  // again moments after a stall already did.
+  let lastCutAt = 0;
 
   function remember(list, entry, limit) {
     list.push(entry);
@@ -145,16 +148,22 @@ function createRuntimeProfiler(deps = {}) {
    */
   function reportStallStacks(gapStart, gapEnd, atMs) {
     if (!stallSampler) return;
+    lastCutAt = now();
     stallSampler.cut({ fromMs: gapStart, toMs: gapEnd })
       .then(summary => {
-        if (!summary || !summary.frames.length) return;
+        if (!summary?.frames?.length) return;
         const warn = typeof logger.warn === 'function' ? logger.warn : logger.info;
         warn.call(logger, '[runtime-stall-stack]', {
           atMs,
           sampledMs: summary.totalMs,
           samples: summary.samples,
+          // What reading the samples cost the loop. It is not part of the
+          // stall being reported -- it happens after it -- but it is loop time
+          // this diagnostic spent, and the next stall may well be it.
+          cutMs: summary.cutMs,
           frames: summary.frames,
         });
+        if (summary.cutMs) record('stallSampler.cut', summary.cutMs);
       })
       .catch(() => { /* a diagnostic must never break the server */ });
   }
@@ -250,9 +259,15 @@ function createRuntimeProfiler(deps = {}) {
     // has to be explained by what ran just before it.
     gcPauses = gcPauses.slice(-RECENT_OPERATION_LIMIT);
     histogram.reset();
-    // Cut the rolling profile loose each window: samples nobody asked about
-    // would otherwise accumulate for as long as the Hub runs.
-    stallSampler?.cut({ summarise: false }).catch(() => { /* not worth a log */ });
+    // Cut the rolling profile loose each window, so a profile never runs long
+    // enough that stopping it becomes a stall of its own. A stall in this
+    // window has already paid that cost, so skip it rather than pay twice.
+    if (stallSampler && endedAt - lastCutAt >= windowMs / 2) {
+      lastCutAt = endedAt;
+      stallSampler.cut({ summarise: false })
+        .then(result => { if (result?.cutMs) record('stallSampler.cut', result.cutMs); })
+        .catch(() => { /* not worth a log */ });
+    }
     windowStartedAt = endedAt;
     windowCpuStart = cpuUsage();
     return snapshot;
