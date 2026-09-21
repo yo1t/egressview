@@ -60,7 +60,13 @@ describe('GET /api/connections/summary over HTTP', () => {
     base = `http://127.0.0.1:${server.address().port}`;
   });
 
-  after(() => new Promise(resolve => server.close(resolve)));
+  after(() => new Promise(resolve => {
+    // Node's fetch pool can keep the test connection alive after the last
+    // assertion. Close it explicitly so this HTTP contract test cannot hold
+    // the whole unit suite open.
+    server.closeAllConnections?.();
+    server.close(resolve);
+  }));
 
   it('answers 200 with a JSON body', async () => {
     const response = await fetch(`${base}/api/connections/summary`);

@@ -1548,7 +1548,7 @@ test('stats tab renders map coverage label and chart svgs without console errors
     .poll(() => page.locator('#chart-bar rect').count(), { timeout: 15_000 })
     .toBeGreaterThan(0);
   await expect
-    .poll(() => page.locator('#chart-timeline path').count(), { timeout: 15_000 })
+    .poll(() => page.locator('#chart-timeline .timeline-hit-target').count(), { timeout: 15_000 })
     .toBeGreaterThan(0);
   await expect
     .poll(() => page.locator('#st-app-pie-svg *').count(), { timeout: 15_000 })
@@ -1558,6 +1558,28 @@ test('stats tab renders map coverage label and chart svgs without console errors
     .toBeGreaterThan(0);
 
   expect(fatalErrors(errors), `Stats render errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+test('stats timeline uses discrete windows and compares one destination with the total', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  await page.locator('#time-filter-select').selectOption('14d');
+  await page.click('#btn-stats');
+
+  const windows = page.locator('#chart-timeline .timeline-hit-target');
+  await expect.poll(() => windows.count(), { timeout: 15_000 }).toBeGreaterThan(0);
+  await expect(page.locator('#chart-timeline .stack-area, #chart-timeline .stats-line')).toHaveCount(0);
+  await expect(page.locator('.chart-mode-btn[data-mode="composition"]')).toHaveClass(/active/);
+
+  await page.locator('.chart-mode-btn[data-mode="compare"]').click();
+  await expect.poll(() => page.locator('#chart-timeline .timeline-total').count()).toBeGreaterThan(0);
+  await expect.poll(() => page.locator('#chart-timeline .timeline-selected').count()).toBeGreaterThan(0);
+
+  await windows.first().focus();
+  await expect(page.locator('#chart-timeline .stats-timeline-tooltip')).toHaveAttribute('visibility', 'visible');
+  expect(fatalErrors(errors), `Timeline errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
 test('graph map uses summary without full-history requests or console errors', async ({ page }) => {
