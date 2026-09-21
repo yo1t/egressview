@@ -22,8 +22,8 @@ beforeEach(() => store._initForTest());
 after(() => store.closeDb());
 
 describe('Agent ingest store', () => {
-  it('stores one batch atomically and preserves uint64 byte counts as text', () => {
-    const ack = store.storeBatch(agentId, copy(), { receivedAt });
+  it('stores one batch atomically and preserves uint64 byte counts as text', async () => {
+    const ack = await store.storeBatch(agentId, copy(), { receivedAt });
     assert.deepEqual(ack, {
       batchId: golden.batchId,
       accepted: 1,
@@ -43,12 +43,12 @@ describe('Agent ingest store', () => {
     assert.equal(appRollup.appIdentity, golden.observations[0].bundleID);
   });
 
-  it('accepts the Windows ETW collector under the production DB contract', () => {
+  it('accepts the Windows ETW collector under the production DB contract', async () => {
     const envelope = copy();
     envelope.agent.platform = 'windows';
     envelope.observations[0].collector = 'etw';
 
-    const ack = store.storeBatch(agentId, envelope, { receivedAt });
+    const ack = await store.storeBatch(agentId, envelope, { receivedAt });
 
     assert.equal(ack.accepted, 1);
     assert.equal(ack.duplicate, 0);
@@ -58,8 +58,8 @@ describe('Agent ingest store', () => {
     ).get().collector, 'etw');
   });
 
-  it('separates accepted, duplicate, and DB-rejected observations', () => {
-    store.storeBatch(agentId, copy(), { receivedAt });
+  it('separates accepted, duplicate, and DB-rejected observations', async () => {
+    await store.storeBatch(agentId, copy(), { receivedAt });
     const envelope = copy();
     envelope.batchId = '00000000-0000-4000-8000-000000000099';
     envelope.observations.push({
@@ -72,7 +72,7 @@ describe('Agent ingest store', () => {
       collector: 'etw',
     });
 
-    const ack = store.storeBatch(agentId, envelope, { receivedAt: receivedAt + 1 });
+    const ack = await store.storeBatch(agentId, envelope, { receivedAt: receivedAt + 1 });
 
     assert.deepEqual(ack, {
       batchId: envelope.batchId,
@@ -90,17 +90,17 @@ describe('Agent ingest store', () => {
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 1);
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_ingest_batches').get().n, 1);
 
-    const retry = store.storeBatch(agentId, envelope, { receivedAt: receivedAt + 2 });
+    const retry = await store.storeBatch(agentId, envelope, { receivedAt: receivedAt + 2 });
     assert.equal(retry.replayed, false);
     assert.equal(retry.accepted, 0);
     assert.equal(retry.duplicate, 2);
     assert.equal(retry.rejected, 1);
   });
 
-  it('returns the original ACK for 100 retries without duplicating storage', () => {
-    const first = store.storeBatch(agentId, copy(), { receivedAt });
+  it('returns the original ACK for 100 retries without duplicating storage', async () => {
+    const first = await store.storeBatch(agentId, copy(), { receivedAt });
     for (let index = 0; index < 100; index += 1) {
-      const replay = store.storeBatch(agentId, copy(), { receivedAt: receivedAt + index + 1 });
+      const replay = await store.storeBatch(agentId, copy(), { receivedAt: receivedAt + index + 1 });
       assert.deepEqual(replay, { ...first, replayed: true });
     }
     const database = store._dbForTest();
@@ -109,7 +109,7 @@ describe('Agent ingest store', () => {
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 1);
   });
 
-  it('folds the same hourly app identity but preserves a second app on the same flow', () => {
+  it('folds the same hourly app identity but preserves a second app on the same flow', async () => {
     const envelope = copy();
     const original = envelope.observations[0];
     envelope.observations = [
@@ -130,7 +130,7 @@ describe('Agent ingest store', () => {
       },
     ];
 
-    const ack = store.storeBatch(agentId, envelope, { receivedAt });
+    const ack = await store.storeBatch(agentId, envelope, { receivedAt });
     const rows = store._dbForTest().prepare(
       'SELECT * FROM agent_app_hourly ORDER BY appIdentity'
     ).all();
@@ -143,25 +143,86 @@ describe('Agent ingest store', () => {
     assert(rows.some(row => row.appIdentity === 'com.example.second'));
   });
 
-  it('counts an observation reused by a different batch as a duplicate', () => {
-    store.storeBatch(agentId, copy(), { receivedAt });
+  it('counts an observation reused by a different batch as a duplicate', async () => {
+    await store.storeBatch(agentId, copy(), { receivedAt });
     const second = copy();
     second.batchId = '00000000-0000-4000-8000-000000000099';
-    const ack = store.storeBatch(agentId, second, { receivedAt: receivedAt + 1 });
+    const ack = await store.storeBatch(agentId, second, { receivedAt: receivedAt + 1 });
     assert.equal(ack.accepted, 0);
     assert.equal(ack.duplicate, 1);
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 1);
   });
 
-  it('keeps the same observationId independent across Agents', () => {
-    store.storeBatch(agentId, copy(), { receivedAt });
+  it('keeps the same observationId independent across Agents', async () => {
+    await store.storeBatch(agentId, copy(), { receivedAt });
     const otherAgent = '00000000-0000-4000-8000-000000000002';
-    const ack = store.storeBatch(otherAgent, copy(), { receivedAt });
+    const ack = await store.storeBatch(otherAgent, copy(), { receivedAt });
     assert.equal(ack.accepted, 1);
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 2);
   });
 
-  it('rolls back the whole batch when any observation cannot be stored', () => {
+  it('大きなバッチでも、1回に書くのは50件まで', async () => {
+    // A whole batch in one transaction was 71 to 149 ms on the Hub, and that
+    // figure is set by the batch size, not by how many agents there are. The
+    // loop gets a turn between chunks so nothing waits that long for it.
+    const envelope = copy();
+    const original = envelope.observations[0];
+    envelope.observations = Array.from({ length: 120 }, (_, i) => ({
+      ...structuredClone(original),
+      observationId: `00000000-0000-4000-8000-${String(i + 100).padStart(12, '0')}`,
+      localPort: 1024 + i,
+    }));
+
+    let turns = 0;
+    const tick = setInterval(() => { turns += 1; }, 1);
+    const ack = await store.storeBatch(agentId, envelope, { receivedAt });
+    clearInterval(tick);
+
+    assert.equal(ack.accepted, 120);
+    assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 120);
+    assert.equal(turns > 0, true, '書いている間、他が一度も走れていない');
+  });
+
+  it('途中で落ちても、再送で完成する', async () => {
+    // The batch is no longer written atomically, and that is safe by
+    // construction: an observation carries its own primary key, and the batch
+    // row is written only once every chunk is in. A Hub that dies halfway
+    // leaves observations with no batch row; the agent resends the same
+    // batchId and the second attempt counts them as duplicates and finishes.
+    const database = store._dbForTest();
+    const envelope = copy();
+    const original = envelope.observations[0];
+    envelope.observations = Array.from({ length: 60 }, (_, i) => ({
+      ...structuredClone(original),
+      observationId: `00000000-0000-4000-8000-${String(i + 200).padStart(12, '0')}`,
+      localPort: 2048 + i,
+      // The 55th cannot be stored, which is in the second chunk.
+      processName: i === 55 ? 'RejectThisObservation' : original.processName,
+    }));
+    database.exec(`
+      CREATE TRIGGER reject_test_observation
+      BEFORE INSERT ON agent_observations
+      WHEN NEW.processName = 'RejectThisObservation'
+      BEGIN SELECT RAISE(ABORT, 'test rejection'); END;
+    `);
+
+    await assert.rejects(
+      () => store.storeBatch(agentId, envelope, { receivedAt }),
+      /test rejection/
+    );
+    // The first chunk stands; the batch does not.
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 50);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_ingest_batches').get().n, 0);
+
+    database.exec('DROP TRIGGER reject_test_observation');
+    const retry = await store.storeBatch(agentId, envelope, { receivedAt: receivedAt + 1 });
+    assert.equal(retry.duplicate, 50, '入っている分は重複として数える');
+    assert.equal(retry.accepted, 10);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 60);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_ingest_batches').get().n, 1);
+  });
+
+  it('rolls back the whole batch when any observation cannot be stored', async () => {
     const database = store._dbForTest();
     database.exec(`
       CREATE TRIGGER reject_test_observation
@@ -175,7 +236,7 @@ describe('Agent ingest store', () => {
       observationId: '00000000-0000-4000-8000-000000000088',
       processName: 'RejectThisObservation',
     });
-    assert.throws(
+    await assert.rejects(
       () => store.storeBatch(agentId, envelope, { receivedAt }),
       /test rejection/
     );
@@ -187,18 +248,18 @@ describe('Agent ingest store', () => {
   // the point was that a broken correlation table could not lose an accepted
   // batch. Ingest no longer touches correlation at all, so the stronger
   // property is asserted instead -- it does not even look.
-  it('does not correlate on the ingest path', () => {
+  it('does not correlate on the ingest path', async () => {
     const database = store._dbForTest();
     database.exec('DROP TABLE connection_agent_observations');
 
-    const ack = store.storeBatch(agentId, copy(), { receivedAt });
+    const ack = await store.storeBatch(agentId, copy(), { receivedAt });
 
     assert.equal(ack.accepted, 1);
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 1);
   });
 
-  it('prunes expired originals and their orphaned batch receipts', () => {
-    store.storeBatch(agentId, copy(), { receivedAt });
+  it('prunes expired originals and their orphaned batch receipts', async () => {
+    await store.storeBatch(agentId, copy(), { receivedAt });
     const result = store.pruneObservations({ before: receivedAt + 1 });
     assert.deepEqual(result, { correlations: 0, observations: 1, batches: 1 });
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
@@ -209,23 +270,23 @@ describe('Agent ingest store', () => {
 // P3-14 stage 2: the name the client actually used, carried from the agent
 // rather than guessed by a reverse lookup.
 describe('観測に付いてきた宛先名', () => {
-  it('送られてきた名前を保存する', () => {
+  it('送られてきた名前を保存する', async () => {
     const envelope = copy();
     envelope.observations[0].remoteHostname = 'api.example.com';
-    store.storeBatch(agentId, envelope, { receivedAt });
+    await store.storeBatch(agentId, envelope, { receivedAt });
     const row = store._dbForTest()
       .prepare('SELECT remoteHostname FROM agent_observations WHERE observationId = ?')
       .get(envelope.observations[0].observationId);
     assert.equal(row.remoteHostname, 'api.example.com');
   });
 
-  it('名前が無い観測はNULLで保存され、拒否されない', () => {
+  it('名前が無い観測はNULLで保存され、拒否されない', async () => {
     // An agent that does not send the field, and a flow the Network Extension
     // could not name, must both keep working -- that is the whole point of the
     // field being optional.
     const envelope = copy();
     delete envelope.observations[0].remoteHostname;
-    const ack = store.storeBatch(agentId, envelope, { receivedAt });
+    const ack = await store.storeBatch(agentId, envelope, { receivedAt });
     assert.equal(ack.rejected, 0);
     const row = store._dbForTest()
       .prepare('SELECT remoteHostname FROM agent_observations WHERE observationId = ?')

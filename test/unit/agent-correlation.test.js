@@ -21,8 +21,8 @@ function copy() {
 // Ingest no longer correlates as a side effect: it stores, and the periodic
 // runner reconciles. These are the two steps a delivered batch goes through, so
 // a test that cares about links has to ask for both.
-function deliver(envelope = copy(), receivedAt = observedAt + 1_000) {
-  const ack = store.storeBatch(agentId, envelope, { receivedAt });
+async function deliver(envelope = copy(), receivedAt = observedAt + 1_000) {
+  const ack = await store.storeBatch(agentId, envelope, { receivedAt });
   store.reconcileCorrelations({ agentId });
   return ack;
 }
@@ -59,11 +59,11 @@ beforeEach(() => {
 after(() => store.closeDb());
 
 describe('Agent/router correlation read model', () => {
-  it('links an exact five-tuple with overlapping time and exposes router-backed metadata', () => {
+  it('links an exact five-tuple with overlapping time and exposes router-backed metadata', async () => {
     const database = store._dbForTest();
     addConnection(database);
 
-    deliver();
+    await deliver();
 
     const link = database.prepare('SELECT * FROM connection_agent_observations').get();
     assert.equal(link.matchKind, 'exact-5tuple');
@@ -84,44 +84,44 @@ describe('Agent/router correlation read model', () => {
     assert.equal(row.connectionSrc, '192.0.2.10');
   });
 
-  it('uses the weaker four-tuple match only for one candidate with unknown router sport', () => {
+  it('uses the weaker four-tuple match only for one candidate with unknown router sport', async () => {
     const database = store._dbForTest();
     addConnection(database, { sport: null, firstSeen: observedAt + 30_000, lastSeen: observedAt + 30_000 });
 
-    deliver();
+    await deliver();
 
     const link = database.prepare('SELECT * FROM connection_agent_observations').get();
     assert.equal(link.matchKind, 'unique-4tuple-time');
     assert.equal(link.timeDeltaMs, 30_000);
   });
 
-  it('uses an overlapping unique four-tuple when the Agent local port is unknown', () => {
+  it('uses an overlapping unique four-tuple when the Agent local port is unknown', async () => {
     const database = store._dbForTest();
     addConnection(database);
     const envelope = copy();
     envelope.observations[0].localPort = 0;
 
-    deliver(envelope);
+    await deliver(envelope);
 
     const link = database.prepare('SELECT * FROM connection_agent_observations').get();
     assert.equal(link.matchKind, 'unique-4tuple-time');
     assert.equal(store.queryCorrelationReadModel({ agentId })[0].sport, null);
   });
 
-  it('does not guess between router sessions when the Agent local port is unknown', () => {
+  it('does not guess between router sessions when the Agent local port is unknown', async () => {
     const database = store._dbForTest();
     addConnection(database, { sport: 49152 });
     addConnection(database, { sport: 49153, proto: 'tcp' });
     const envelope = copy();
     envelope.observations[0].localPort = 0;
 
-    deliver(envelope);
+    await deliver(envelope);
 
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
     assert.equal(store.getCorrelationDiagnostics().ambiguous, 1);
   });
 
-  it('ignores a non-overlapping candidate when one four-tuple match overlaps', () => {
+  it('ignores a non-overlapping candidate when one four-tuple match overlaps', async () => {
     const database = store._dbForTest();
     addConnection(database, { sport: 49152 });
     addConnection(database, {
@@ -133,30 +133,30 @@ describe('Agent/router correlation read model', () => {
     const envelope = copy();
     envelope.observations[0].localPort = 0;
 
-    deliver(envelope);
+    await deliver(envelope);
 
     const link = database.prepare('SELECT * FROM connection_agent_observations').get();
     assert.equal(link.matchKind, 'unique-4tuple-time');
     assert.equal(link.timeDeltaMs, 0);
   });
 
-  it('does not label a same-port candidate exact unless observation periods overlap', () => {
+  it('does not label a same-port candidate exact unless observation periods overlap', async () => {
     const database = store._dbForTest();
     addConnection(database, { firstSeen: observedAt + 30_000, lastSeen: observedAt + 30_000 });
 
-    deliver();
+    await deliver();
 
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
     assert.equal(store.queryCorrelationReadModel({ agentId })[0].agentOnly, true);
   });
 
-  it('does not guess when protocol-normalized candidates are ambiguous', () => {
+  it('does not guess when protocol-normalized candidates are ambiguous', async () => {
     const database = store._dbForTest();
     addConnection(database, { proto: 'TCP', sport: null });
     addConnection(database, { proto: 'tcp', sport: null });
 
     const envelope = copy();
-    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+    await store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
     const result = store.reconcileCorrelations({ agentId });
 
     assert.equal(result.ambiguous, 1);
@@ -171,7 +171,7 @@ describe('Agent/router correlation read model', () => {
     });
   });
 
-  it('keeps known sport mismatches and observations outside the time window Agent-only', () => {
+  it('keeps known sport mismatches and observations outside the time window Agent-only', async () => {
     const database = store._dbForTest();
     addConnection(database, { sport: 60000 });
     const envelope = copy();
@@ -186,7 +186,7 @@ describe('Agent/router correlation read model', () => {
       lastSeen: observedAt + 90_001,
     });
 
-    deliver(envelope);
+    await deliver(envelope);
 
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
     const rows = store.queryCorrelationReadModel({ agentId });
@@ -194,7 +194,7 @@ describe('Agent/router correlation read model', () => {
     assert.ok(rows.every(row => row.agentOnly));
   });
 
-  it('reconciles Agent-first data after router data arrives and retains multiple processes', () => {
+  it('reconciles Agent-first data after router data arrives and retains multiple processes', async () => {
     const database = store._dbForTest();
     const envelope = copy();
     envelope.observations.push({
@@ -204,7 +204,7 @@ describe('Agent/router correlation read model', () => {
       processName: 'SecondExample',
       bundleID: 'com.example.second',
     });
-    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+    await store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
     addConnection(database);
 
     const result = store.reconcileCorrelations({ agentId });
@@ -215,7 +215,7 @@ describe('Agent/router correlation read model', () => {
     assert.ok(rows.every(row => !row.agentOnly));
   });
 
-  it('unions only Agent-only flows while attaching every correlated process to one router row', () => {
+  it('unions only Agent-only flows while attaching every correlated process to one router row', async () => {
     const database = store._dbForTest();
     addConnection(database);
     const envelope = copy();
@@ -232,7 +232,7 @@ describe('Agent/router correlation read model', () => {
       processID: 126,
       processName: 'AgentOnlyExample',
     });
-    deliver(envelope);
+    await deliver(envelope);
 
     const rows = store.queryUnifiedReadModel([{
       src: '192.0.2.10', dst: '198.51.100.20', dport: 443, proto: 'TCP',
@@ -252,9 +252,9 @@ describe('Agent/router correlation read model', () => {
     assert.equal(agentOnly.processName, 'AgentOnlyExample');
   });
 
-  it('can bound periodic retries to recent observations', () => {
+  it('can bound periodic retries to recent observations', async () => {
     const database = store._dbForTest();
-    store.storeBatch(agentId, copy(), { receivedAt: observedAt + 1_000 });
+    await store.storeBatch(agentId, copy(), { receivedAt: observedAt + 1_000 });
     addConnection(database);
 
     const result = store.reconcileCorrelations({ agentId, since: observedAt + 1 });
@@ -263,10 +263,10 @@ describe('Agent/router correlation read model', () => {
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
   });
 
-  it('removes correlation links before pruning their observations', () => {
+  it('removes correlation links before pruning their observations', async () => {
     const database = store._dbForTest();
     addConnection(database);
-    deliver();
+    await deliver();
 
     const result = store.pruneObservations({ before: observedAt + 1 });
 
