@@ -83,11 +83,22 @@ function hasConnectionBuckets(db) {
   ).get();
 }
 
-function earliestConnectionBucket(db) {
+// Where the record begins, and where it begins covering everything.
+//
+// Before `routerFrom` only the Agents' own observations exist -- they carry
+// their times, so they can be counted for the past, while router-observed
+// flows cannot. A line drawn there is the traffic the Agents saw, not
+// everything that left the network, and the screen has to say so.
+function connectionBucketCoverage(db) {
   try {
-    return db.prepare('SELECT MIN(bucketStart) AS oldest FROM connection_buckets').get()?.oldest ?? null;
+    const row = db.prepare(`
+      SELECT MIN(bucketStart) AS oldest,
+             MIN(CASE WHEN source = 'router' THEN bucketStart END) AS oldestRouter
+      FROM connection_buckets
+    `).get();
+    return { from: row?.oldest ?? null, routerFrom: row?.oldestRouter ?? null };
   } catch {
-    return null;
+    return { from: null, routerFrom: null };
   }
 }
 
@@ -647,9 +658,11 @@ function createHistoryQueries({
     // upward. Measured on one Hub, six hours rose from 156 to 1,115 with no
     // change in traffic (P3-155).
     //
-    // `connection_buckets` is folded once per closed five-minute window, when
-    // a window can still be counted correctly. The label is resolved here
-    // rather than at fold time because `org` and `dstHost` arrive later from
+    // `connection_buckets` holds each window counted from evidence that records
+    // a time: the router half folded in the seconds after the window closed,
+    // the agent half from the observation times the Agents keep. The two are
+    // stored separately and summed here. The label is resolved here rather
+    // than at fold time because `org` and `dstHost` arrive later from
     // enrichment.
     //
     // The scoped path is left on the old query on purpose: the fold is not
@@ -685,9 +698,12 @@ function createHistoryQueries({
          GROUP BY key, bucket ORDER BY bucket ASC, count DESC`
       ).all(...source.params, rangeFrom, rangeTo, bucketCount - 1, rangeFrom, bucketMs, ...params)));
 
-    // Where the record begins. A range that starts before this has no record,
-    // and the screen has to say so rather than draw a line through nothing.
-    const timelineFrom = useBuckets ? earliestConnectionBucket(db) : null;
+    // Where the record begins, and where it begins covering everything. A
+    // range reaching past either has to say so rather than let the reader take
+    // a partial record for a complete one.
+    const coverage = useBuckets ? connectionBucketCoverage(db) : { from: null, routerFrom: null };
+    const timelineFrom = coverage.from;
+    const timelineFullFrom = coverage.routerFrom;
     const result = {
       byDst,
       byDevice,
@@ -705,6 +721,7 @@ function createHistoryQueries({
       },
       appGroups: summarizeAppGroups(appRows),
       timelineFrom,
+      timelineFullFrom,
       timeline,
       total,
       buckets: bucketCount,

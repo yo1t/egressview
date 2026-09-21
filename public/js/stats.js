@@ -79,13 +79,21 @@ function showTimelineGap(summary, fromT) {
     note.hidden = !empty;
     return;
   }
-  if (earliest <= fromT) {
-    note.hidden = true;
-    note.textContent = '';
-    return;
+  // Two different things to admit, and the earlier one wins: a period with no
+  // record at all, and a period covered only by the Agents. Routers keep no
+  // record of when a flow was seen, so the stretch before the Hub started
+  // folding shows agent-observed traffic alone -- reading it as the whole
+  // network would understate everything else.
+  const notes = [];
+  if (earliest > fromT) {
+    notes.push(tVars('stats.timeline.gap', { from: new Date(earliest).toLocaleString() }));
   }
-  note.textContent = tVars('stats.timeline.gap', { from: new Date(earliest).toLocaleString() });
-  note.hidden = false;
+  const fullFrom = summary?.timelineFullFrom;
+  if (fullFrom != null && fullFrom > Math.max(fromT, earliest)) {
+    notes.push(tVars('stats.timeline.agentOnly', { until: new Date(fullFrom).toLocaleString() }));
+  }
+  note.textContent = notes.join(' ');
+  note.hidden = notes.length === 0;
 }
 
 function renderStatsSummary(summary, selIp) {
