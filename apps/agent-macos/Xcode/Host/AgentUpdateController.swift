@@ -17,6 +17,13 @@ final class AgentUpdateController: ObservableObject {
     private static let readyPackageKey = "verifiedUpdatePackagePath"
     private static let notifiedVersionKey = "notifiedUpdateVersion"
 
+    /// How often to ask whether a check is due. Not how often a check happens:
+    /// `AgentUpdatePreferences.shouldCheck` still refuses until a day has
+    /// passed. This only decides how soon after that day the check actually
+    /// runs.
+    private static let pollInterval: TimeInterval = 3_600
+
+    private let timer = PeriodicWork()
     private let preferences: AgentUpdatePreferences
     private let defaults: UserDefaults
     private let coordinator: AgentUpdateCoordinator
@@ -65,10 +72,35 @@ final class AgentUpdateController: ObservableObject {
         preferences.isEnabled = enabled
         isEnabled = enabled
         if enabled {
-            Task { await runIfDue() }
+            start()
         } else {
+            timer.stop()
             render(.disabled)
         }
+    }
+
+    /// Begin checking, and keep checking.
+    ///
+    /// This used to be a single `runIfDue()` at launch and nothing after it,
+    /// which made "checked once per day" mean "checked once per launch". An
+    /// agent is meant to be left running, so on a Mac that stays up for a week
+    /// the check ran once in that week -- and the access log agreed: 31 clients
+    /// produced 55 checks across 38 days, about one and a half each, which is
+    /// how often a Mac is restarted rather than how often a day passes.
+    ///
+    /// `PeriodicWork` rather than a `Timer` for the reason written on that
+    /// class: this app is a background accessory, App Nap stops its run-loop
+    /// timers, and a 60-second `Timer` was measured firing zero times in 200
+    /// seconds. The same mistake was found in the health check in August and
+    /// fixed there; this was the last place still making it.
+    func start() {
+        timer.start(every: Self.pollInterval, runNow: true) { [weak self] in
+            Task { @MainActor in await self?.runIfDue() }
+        }
+    }
+
+    func stop() {
+        timer.stop()
     }
 
     func runIfDue() async {
