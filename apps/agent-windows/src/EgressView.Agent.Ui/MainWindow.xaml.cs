@@ -319,7 +319,7 @@ public partial class MainWindow : Window
             new[] { coverageNote, sleepNote, unmeasuredNote }.Where(value => value.Length > 0));
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
-        Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods);
+        Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods, data.BucketCount);
         DescribeCharts(data);
         SleepLegend.Visibility = data.SleepPeriods.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         FlowCaption.Text = IsByteMetric ? LocalizationManager.Text("RibbonBytes") : LocalizationManager.Text("RibbonConnections");

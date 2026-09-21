@@ -1109,14 +1109,15 @@ try
             "the hour still in progress is read from the observations, so nothing is missing from the end");
     }
 
-    // A long period is drawn from the folded hours, not from a day of rows.
+    // Every period keeps the bucket count it asked for.
     //
-    // Sixty buckets over a day is a bucket of twenty-four minutes, and an
-    // hourly row cannot be cut into those, so every period the UI offers fell
-    // back to raw observations and the fold was never used for the chart at
-    // all. Measured on one machine, a day held 6,500,653 observations and the
-    // timeline query took 14.9 seconds -- against a window that refreshes
-    // every five, on the single pipe that also answers "is the agent running".
+    // An hourly row cannot be cut into a bucket shorter than an hour, so a
+    // period whose buckets are narrower than that reads the raw rows for the
+    // whole of itself -- which is what the Mac Agent does, and what makes the
+    // two charts comparable. Widening a day's buckets to an hour was tried and
+    // taken out again: it made a day's bars two and a half times wider than
+    // every other period's, and the bar width is how a reader tells one chart
+    // from another.
     using (var wideStore = new ObservationStore(Path.Combine(directory, "hourly-buckets.db")))
     {
         var from = new DateTimeOffset(2026, 9, 22, 0, 0, 0, TimeSpan.Zero);
@@ -1129,15 +1130,17 @@ try
 
         var day = wideStore.ReadPeriodAnalysis(from, from.AddHours(24), bucketCount: 60);
         Assert(day.Timeline.Select(item => item.Bucket).Distinct().Count() == 20 &&
-            day.Timeline.Select(item => item.Bucket).Max() <= 23,
-            "a day is drawn in hourly bars, so the folded hours can fill them");
-        // Each hour's traffic in its own hour. julianday returns a fractional
+            day.Timeline.Select(item => item.Bucket).Max() < 60,
+            "a day keeps sixty buckets and reads them from the raw rows");
+        // Each hour's traffic in its own bar. julianday returns a fractional
         // day that cannot hold an exact hour: 04:00 came back as 14,399.999987
         // seconds after midnight, which truncates into the bucket before it,
-        // and every other bar landed one place to the left of its traffic.
+        // and every bar landed one place to the left of its traffic. With
+        // twenty-four minute buckets an hour falls every 2.5 buckets, so the
+        // hours land on 0, 2, 5, 7, 10 and so on.
         Assert(day.Timeline.Select(item => item.Bucket).OrderBy(bucket => bucket)
-                .SequenceEqual(Enumerable.Range(0, 20)),
-            "and each hour lands in its own bar rather than one to the left of it");
+                .SequenceEqual(Enumerable.Range(0, 20).Select(hour => hour * 60 / 24)),
+            "and each hour lands in the bar its traffic happened in");
         Assert(day.Timeline.Sum(item => item.Connections) == 20 && day.Timeline.Sum(item => item.Bytes) == 6000,
             "and every hour's traffic is still counted exactly once");
 
@@ -1145,7 +1148,19 @@ try
         // and costs little.
         var sixHours = wideStore.ReadPeriodAnalysis(from, from.AddHours(6), bucketCount: 60);
         Assert(sixHours.Timeline.Select(item => item.Bucket).Max() > 23,
-            "a shorter period keeps its finer buckets rather than being widened to hours");
+            "and a shorter period spreads its traffic across the same sixty");
+
+        // How many bars the chart has to draw, said rather than inferred.
+        //
+        // The drawing took the highest bucket it had been given and floored it
+        // at sixty, which was right only while every period asked for sixty.
+        // Once a day was drawn in twenty-four hourly bars, twenty-four bars
+        // were laid across sixty bars' worth of width and the right-hand 60%
+        // of the card was empty -- with the traffic in the database the whole
+        // time. Nothing could have caught that from the timeline rows alone,
+        // because those rows were right.
+        Assert(day.BucketCount == 60 && sixHours.BucketCount == 60,
+            "a period reports how many buckets it was divided into, so the drawing need not guess");
     }
 
     // The chart counts connections, because that is what its legend says.

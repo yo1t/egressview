@@ -102,6 +102,16 @@ public sealed record PeriodAnalysis(
 {
     public long StorageBytes { get; init; }
 
+    /// How many buckets this period was divided into.
+    ///
+    /// Said rather than inferred. The chart used to take the highest bucket it
+    /// had been given and floor it at sixty, which was right only while every
+    /// period asked for sixty. A day is now drawn in twenty-four hourly bars,
+    /// so the floor laid twenty-four bars across sixty bars' worth of width
+    /// and left the right-hand 60% of the card empty -- with the traffic in
+    /// the database the whole time.
+    public int BucketCount { get; init; }
+
     /// Sent and received kept apart, because they answer different questions.
     /// "How much left this machine" is the product's subject; a single total
     /// mixes it with everything that arrived and answers neither.

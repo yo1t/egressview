@@ -2252,10 +2252,6 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
-    /// The fewest hourly bars worth drawing. Under this a period is read raw,
-    /// which is cheap at that length and keeps the finer resolution.
-    private const int MinimumHourlyBuckets = 12;
-
     public PeriodAnalysis ReadPeriodAnalysis(DateTimeOffset from, DateTimeOffset to, int bucketCount = 60)
     {
         if (from >= to) throw new ArgumentOutOfRangeException(nameof(from));
@@ -2390,30 +2386,21 @@ public sealed partial class ObservationStore : IDisposable
             var durationSeconds = Math.Max(1, (to - from).TotalSeconds);
             var timeline = new List<AppTimelineAggregate>();
             var widthSeconds = durationSeconds / bucketCount;
-            // A long period is drawn from the folded hours, by widening its
-            // buckets to an hour rather than by reading a day of raw rows.
+            // Buckets narrower than an hour are filled from the raw rows, for
+            // the whole period, exactly as the Mac Agent does it.
             //
-            // Sixty buckets over a day is a bucket of twenty-four minutes, and
-            // an hourly row cannot be cut into those, so every period the UI
-            // offers fell back to raw observations and the fold was never used
-            // for the chart at all. Measured on this machine, a day held
-            // 6,500,653 observations and the timeline query took 14.9 seconds
-            // -- against a window that refreshes every five, on the single
-            // pipe that also answers "is the agent running", which is why the
-            // screen said it could not get the status.
+            // An hourly row cannot be cut into a shorter bucket. Reading it
+            // into one puts a whole hour into a single bar and leaves its
+            // neighbours empty -- a chart of spikes and gaps that looks like
+            // the machine stopped talking.
             //
-            // Twenty-four bars for a day is a better chart than sixty anyway.
-            // Below this the period is short enough to read raw: six hours
-            // measured 0.28 seconds.
-            var hours = durationSeconds / 3600.0;
-            if (widthSeconds < 3600 && hours >= MinimumHourlyBuckets)
-            {
-                bucketCount = (int)Math.Floor(hours);
-                widthSeconds = durationSeconds / bucketCount;
-            }
-            // Still narrower than an hour, so the hourly rows cannot fill it
-            // and the raw observations must. The totals above are unaffected:
-            // they are not drawn in buckets.
+            // Widening the buckets to an hour instead was tried and taken out
+            // again: it made a day's bars two and a half times wider than
+            // every other period's, and the bar width is how a reader tells
+            // one chart from another. Measured after the summing landed, a day
+            // is 849,249 rows and 1.2 seconds -- the cost that made the
+            // widening look necessary was 6,500,653 rows of one-row-per-packet
+            // history, and that is gone.
             if (widthSeconds < 3600) aggregateEnd = aggregateStart;
             var widthText = widthSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             // Whole seconds, not a difference of julian days.
@@ -2489,6 +2476,7 @@ public sealed partial class ObservationStore : IDisposable
             return new(from, to, connections, applications, destinations, bytes, unknown, coverage,
                 monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline)
             {
+                BucketCount = bucketCount,
                 StorageBytes = ReadStorageBytes(),
                 BytesSent = sent,
                 BytesReceived = received,
