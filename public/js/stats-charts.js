@@ -255,21 +255,31 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
   }
 
   const formatTime = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
-  const tipWidth = Math.min(260, Math.max(180, iw * 0.55));
+  const detailLabels = chartMode === 'compare' && selectedTimelineTarget
+    ? [selectedTimelineTarget]
+    : visibleLabels;
+  const tipWidth = Math.min(300, Math.max(200, iw * 0.62));
+  const tipHeight = 48 + detailLabels.length * 14;
   const tip = g.append('g').attr('class', 'stats-timeline-tooltip').attr('visibility', 'hidden');
-  tip.append('rect').attr('width', tipWidth).attr('height', 48).attr('rx', 4);
+  tip.append('rect').attr('width', tipWidth).attr('height', tipHeight).attr('rx', 4);
   const tipLine1 = tip.append('text').attr('x', 8).attr('y', 17);
   const tipLine2 = tip.append('text').attr('x', 8).attr('y', 35);
+  const tipDetails = detailLabels.map((label, index) => tip.append('text')
+    .attr('x', 8).attr('y', 52 + index * 14));
   const showTip = (index) => {
     const start = fromT + index * bw;
     const end = Math.min(toT, start + bw);
     const x = Math.min(Math.max(0, xScale(start) + 5), Math.max(0, iw - tipWidth));
     tip.attr('transform', `translate(${x},4)`).attr('visibility', 'visible');
     tipLine1.text(`${t('stats.timeline.tooltip.interval')}: ${formatTime.format(start)}–${formatTime.format(end)}`);
-    const selectedValue = selectedTimelineTarget ? (series.get(selectedTimelineTarget)?.[index] || 0) : null;
-    tipLine2.text(chartMode === 'compare' && selectedTimelineTarget
-      ? `${t('stats.timeline.tooltip.selected')}: ${selectedTimelineTarget} ${selectedValue.toLocaleString()} / ${t('stats.timeline.tooltip.total')} ${totals[index].toLocaleString()}`
-      : `${t('stats.timeline.tooltip.total')}: ${totals[index].toLocaleString()}`);
+    tipLine2.text(`${t('stats.timeline.tooltip.total')}: ${totals[index].toLocaleString()}`);
+    detailLabels.forEach((label, detailIndex) => {
+      const value = series.get(label)?.[index] || 0;
+      const percent = totals[index] ? ((value / totals[index]) * 100).toFixed(1) : '0.0';
+      const name = label === '__other__' ? t('stats.legend.other') : truncateLabel(label, 24);
+      const prefix = chartMode === 'compare' ? `${t('stats.timeline.tooltip.selected')}: ` : '';
+      tipDetails[detailIndex].text(`${prefix}${name}: ${value.toLocaleString()} (${percent}%)`);
+    });
   };
   const hideTip = () => tip.attr('visibility', 'hidden');
   g.append('g').selectAll('rect').data(totals).join('rect')

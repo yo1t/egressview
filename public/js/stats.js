@@ -141,12 +141,17 @@ function renderStatsSummary(summary, selIp) {
   drawBarChart(isMobile ? sortedTargets.slice(0, 15) : sortedTargets, topTargets);
 
   const buckets = summary.buckets || 60;
-  // The bars span what the record covers, which is not always the period that
-  // was asked for -- see `timelineRange` on the server. The axis has to follow
-  // them, or every bar is drawn at the wrong time.
+  // The bars begin where the record begins, which is not always the period
+  // that was asked for. Their width comes from the record itself; deriving it
+  // again from an inclusive newest-window timestamp clips the newest bar.
   const fromT = summary.timelineRange?.from ?? summary.from ?? Date.now();
-  const toT = summary.timelineRange?.to ?? summary.to ?? Date.now();
-  const bw = Math.max(1, (Math.max(toT, fromT + 1) - fromT) / buckets);
+  const recordedTo = summary.timelineRange?.to ?? summary.to ?? Date.now();
+  const bw = Math.max(1, summary.timelineBucketMs
+    || (Math.max(recordedTo, fromT + 1) - fromT) / buckets);
+  // `timelineRange.to` is the start of the newest folded window. The axis
+  // must include that window's full width rather than pinning its bar to the
+  // right edge and clipping it.
+  const toT = fromT + buckets * bw;
   const series = new Map();
   for (const key of topTargets) series.set(key, new Array(buckets).fill(0));
   series.set('__other__', new Array(buckets).fill(0));
