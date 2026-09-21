@@ -471,6 +471,27 @@ describe('要約の時系列が、畳んだ窓を読む（P3-155）', () => {
       `空の棒が${summary.buckets - filled}本もあってはいけない`);
   });
 
+  it('名前を引くのは、画面に出す宛先だけ', () => {
+    // Naming inside the query made SQLite group all of `connections` to answer
+    // for the few thousand destinations on screen: 1,107 ms against 486,236
+    // rows on a Hub, where naming them by name is 250 ms for the same answer.
+    const now = Date.now();
+    const at = Math.floor(now / BUCKET_MS) * BUCKET_MS - BUCKET_MS;
+    const insert = db.prepare(`INSERT INTO connections (src, dst, dport, proto, org, firstSeen, lastSeen)
+      VALUES (?, ?, ?, 'TCP', ?, ?, ?)`);
+    // One destination on the chart, and a thousand that are not.
+    insert.run('10.0.0.1', '203.0.113.1', 443, 'Example Org', at, at);
+    for (let i = 0; i < 1000; i += 1) {
+      insert.run('10.0.0.2', `198.51.100.${i % 254}`, 1000 + i, 'Noise Org', at - 86400e3, at - 86400e3);
+    }
+    clock = at + BUCKET_MS + 1000;
+    buckets.foldRouter();
+
+    const summary = queriesOn(db).summarizeByTimeRange(at - BUCKET_MS, null, { buckets: 60 });
+    assert.deepEqual([...new Set(summary.timeline.map(r => r.key))], ['Example Org'],
+      '畳んだ窓にある宛先だけが名前で出るべき');
+  });
+
   it('宛先の名前は、いまの enrichment で解決する', () => {
     const now = Date.now();
     const at = Math.floor(now / BUCKET_MS) * BUCKET_MS - BUCKET_MS;
