@@ -16,15 +16,17 @@ public sealed class TrafficTimelineControl : FrameworkElement
 
     private IReadOnlyList<AppTimelineAggregate> items = [];
     private bool useBytes;
+    private int buckets;
     private DateTimeOffset from;
     private DateTimeOffset to;
     private IReadOnlyList<SleepPeriod> sleepPeriods = [];
 
     public void SetItems(IReadOnlyList<AppTimelineAggregate> value, bool bytes, DateTimeOffset periodFrom, DateTimeOffset periodTo,
-        IReadOnlyList<SleepPeriod>? sleeps = null)
+        IReadOnlyList<SleepPeriod>? sleeps = null, int bucketCount = 0)
     {
         items = value;
         useBytes = bytes;
+        buckets = bucketCount;
         from = periodFrom;
         to = periodTo;
         sleepPeriods = sleeps ?? [];
@@ -48,7 +50,12 @@ public sealed class TrafficTimelineControl : FrameworkElement
         var plotRight = Math.Max(plotLeft + 1, ActualWidth);
 
         var series = items.Select(item => item.Application).Distinct().OrderBy(name => name == "Other").ThenBy(name => name).ToArray();
-        var bucketCount = Math.Max(60, items.Count == 0 ? 0 : items.Max(item => item.Bucket) + 1);
+        // The number the period was divided into, not a guess from the data.
+        // Empty buckets at the end are still buckets: a period whose last hour
+        // was quiet must not squeeze the rest of the day to fill the card.
+        var bucketCount = buckets > 0
+            ? buckets
+            : Math.Max(60, items.Count == 0 ? 0 : items.Max(item => item.Bucket) + 1);
         var values = items.ToDictionary(item => (item.Bucket, item.Application), item => useBytes ? item.Bytes : item.Connections);
         var totals = Enumerable.Range(0, bucketCount).Select(bucket => series.Sum(name => values.GetValueOrDefault((bucket, name)))).ToArray();
         var axis = TimelineAxisScale.Fit(totals, useBytes);
