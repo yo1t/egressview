@@ -334,6 +334,56 @@ describe('要約の時系列が、畳んだ窓を読む（P3-155）', () => {
     assert.ok(summary.timelineFrom <= b(3), '記録の始まりを返す');
   });
 
+  it('記録より細かい刻みでは描かない', () => {
+    // 5-minute windows drawn into 2.5-minute bars leaves every second bar
+    // empty. Measured on a Hub: 31 of 60 bars came back zero and the chart
+    // drew a row of spikes, which reads as traffic stopping and restarting
+    // every few minutes. The numbers were right; the shape was not.
+    const now = Date.now();
+    const b = (n) => Math.floor(now / BUCKET_MS) * BUCKET_MS - n * BUCKET_MS;
+    for (let i = 6; i >= 1; i -= 1) {
+      db.prepare(`INSERT INTO connections (src, dst, dport, proto, firstSeen, lastSeen)
+        VALUES ('10.0.0.1', ?, 443, 'TCP', ?, ?)
+        ON CONFLICT(src, dst, dport, proto) DO UPDATE SET lastSeen = excluded.lastSeen`)
+        .run(`203.0.113.${i}`, b(i), b(i));
+      clock = b(i) + BUCKET_MS + 1000;
+      buckets.foldRouter();
+    }
+
+    // Six windows, asked for as sixty bars: about 30 seconds each.
+    const summary = queriesOn(db).summarizeByTimeRange(b(7), null, { buckets: 60 });
+    const counted = new Map();
+    for (const row of summary.timeline) {
+      counted.set(row.bucket, (counted.get(row.bucket) || 0) + row.count);
+    }
+    assert.equal(summary.buckets <= 8, true,
+      `記録が${6}窓しかないのに${summary.buckets}本を返してはいけない`);
+    assert.equal(counted.size, summary.timeline.length ? counted.size : 0);
+    const emptyBars = summary.buckets - counted.size;
+    assert.equal(emptyBars <= 2, true, `空の棒が${emptyBars}本もあってはいけない`);
+  });
+
+  it('まだ閉じていない窓は描かない', () => {
+    // The current window is still collecting. Drawn anyway it is a bar at
+    // nearly nothing on the right-hand edge of every chart, which reads as
+    // traffic having just stopped.
+    const now = Date.now();
+    const b = (n) => Math.floor(now / BUCKET_MS) * BUCKET_MS - n * BUCKET_MS;
+    for (let i = 3; i >= 1; i -= 1) {
+      db.prepare(`INSERT INTO connections (src, dst, dport, proto, firstSeen, lastSeen)
+        VALUES ('10.0.0.1', '203.0.113.1', 443, 'TCP', ?, ?)
+        ON CONFLICT(src, dst, dport, proto) DO UPDATE SET lastSeen = excluded.lastSeen`)
+        .run(b(3), b(i));
+      clock = b(i) + BUCKET_MS + 1000;
+      buckets.foldRouter();
+    }
+
+    const summary = queriesOn(db).summarizeByTimeRange(b(4), null, { buckets: 60 });
+    const lastBar = Math.max(...summary.timeline.map(r => r.bucket));
+    assert.equal(lastBar, summary.buckets - 1,
+      '最後の棒まで値があること（空の棒で終わってはいけない）');
+  });
+
   it('宛先の名前は、いまの enrichment で解決する', () => {
     const now = Date.now();
     const at = Math.floor(now / BUCKET_MS) * BUCKET_MS - BUCKET_MS;
