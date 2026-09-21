@@ -417,10 +417,10 @@ function parsePaginationOpts(query) {
 }
 
 /**
- * @param {{ requireAdmin, history, threatIntel? }} ctx
+ * @param {{ requireAdmin, history, threatIntel?, appState? }} ctx
  */
 function connectionsRoutes(ctx) {
-  const { requireAdmin, history, threatIntel, routerManager, agentIdentities } = ctx;
+  const { requireAdmin, history, threatIntel, routerManager, agentIdentities, appState } = ctx;
   const router = Router();
   const readScope = (query, res) => requireKnownSourceScope(query, { routerManager, agentIdentities }, res);
 
@@ -466,16 +466,24 @@ function connectionsRoutes(ctx) {
     // field on a response nobody kept. Measured 2026-09-06: 369 responses over
     // three seconds in six hours, every one of them this route.
     const summaryQuantum = summaryCacheQuantum(from, to);
+    // Which record the chart is drawn from. Default is the observed one; an
+    // operator can ask for the original last-seen chart back while the
+    // observed record is still filling in (P3-155).
+    const timelineSource = appState?.timelineSource === 'lastSeen' ? 'lastSeen' : 'observed';
     const { body: summary, cached } = cachedRead('summary', {
       from: quantiseForCache(from, summaryQuantum),
       to: quantiseForCache(to, summaryQuantum),
       src,
       buckets,
       sourceScope,
+      // Part of the cache key: the two settings answer the same question from
+      // different records and must not be served each other's answer.
+      timelineSource,
     }, () => history.summarizeByTimeRange(from, to, {
       src,
       buckets,
       ...(sourceScope ? { sourceScope } : {}),
+      timelineSource,
     }), { from, to });
     res.json({ ...summary, serverTime: Date.now(), cached });
   });

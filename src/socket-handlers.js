@@ -33,6 +33,7 @@ function buildClientConfig({
     language:        appState.uiLanguage,
     autoInvestigate: appState.autoInvestigate,
     retentionDays:   appState.retentionDays,
+    timelineSource:  appState.timelineSource,
     notes:           notes.getAll(),
     dnsmasqEnabled:  appState.dnsmasqEnabled,
     dnsmasqLogFile:  appState.dnsmasqLogFile,

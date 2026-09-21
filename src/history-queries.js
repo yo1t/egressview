@@ -468,7 +468,7 @@ function createHistoryQueries({
     ).all(...source.params, ...scoped.params);
   }
 
-  function summarizeByTimeRange(from, to, { src = null, buckets = 60, sourceScope = null } = {}) {
+  function summarizeByTimeRange(from, to, { src = null, buckets = 60, sourceScope = null, timelineSource = 'observed' } = {}) {
     const startedAt = process.hrtime.bigint();
     const timings = {};
     const timed = (name, operation) => {
@@ -668,7 +668,12 @@ function createHistoryQueries({
     // The scoped path is left on the old query on purpose: the fold is not
     // per-source, so it cannot answer "this Agent only". A wrong answer to a
     // narrower question is worse than the same answer as before.
-    const useBuckets = !sourceScope && src == null && hasConnectionBuckets(db);
+    // `lastSeen` restores the original chart on request: it buckets flows by
+    // their last sighting, which slopes upward on its own, but it reaches back
+    // as far as `connections` does. A Hub whose observed record has only just
+    // started may prefer the familiar shape to a short one (P3-155).
+    const useBuckets = timelineSource !== 'lastSeen'
+      && !sourceScope && src == null && hasConnectionBuckets(db);
     const timeline = timed('timeline', () => (useBuckets
       ? db.prepare(
         `SELECT COALESCE(NULLIF(c.org, ''), NULLIF(c.dstHost, ''), b.dst) AS key,

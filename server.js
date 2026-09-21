@@ -246,7 +246,7 @@ function saveConfig(sectionOverrides = {}) {
     yamaha:  { ip: yamaha.getIp(), user: yamaha.getUser(), pass: '', enabled: yamaha.isEnabled(), hostFp: yamaha.getHostFp(), nat: yamaha.getNat() },
     cisco:   { ip: cisco.getIp(), user: cisco.getUser(), pass: '', enablePass: '', enabled: cisco.isEnabled(), hostFp: cisco.getHostFp() },
     asus:    { ip: asus.getRouterIp(), user: asus.getUser(), pass: '', enabled: asus.isEnabled() },
-    general: { homeCountry: appState.homeCountry, language: appState.uiLanguage, autoInvestigate: appState.autoInvestigate, retentionDays: appState.retentionDays },
+    general: { homeCountry: appState.homeCountry, language: appState.uiLanguage, autoInvestigate: appState.autoInvestigate, retentionDays: appState.retentionDays, timelineSource: appState.timelineSource },
     backup:  backup.getConfig(),
     slack:   { ...notifier.getConfig(), tokenSet: undefined },
     detectionNotifications: notifier.getDetectionConfig(),

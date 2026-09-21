@@ -467,6 +467,9 @@ socket.on('config', cfg => {
   if (typeof cfg.autoInvestigate === 'boolean') {
     document.getElementById('s-auto-investigate').checked = cfg.autoInvestigate;
   }
+  if (cfg.timelineSource) {
+    document.getElementById('s-timeline-source').value = cfg.timelineSource;
+  }
   if (cfg.retentionDays) {
     document.getElementById('s-retention').value = String(cfg.retentionDays);
     document.getElementById('s-retention').dataset.saved = String(cfg.retentionDays);
@@ -518,6 +521,7 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
   const newLang    = document.getElementById('s-language').value;
   const newAuto    = document.getElementById('s-auto-investigate').checked;
   const newRetention = parseInt(document.getElementById('s-retention').value);
+  const newTimelineSource = document.getElementById('s-timeline-source').value;
   // Confirm if retention is being shortened
   const currentRetention = parseInt(document.getElementById('s-retention').dataset.saved || '730');
   if (newRetention < currentRetention) {
@@ -528,7 +532,10 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
   try {
     const res = await apiFetch(_BASE+'/api/config/general', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ homeCountry: newCountry, language: newLang, autoInvestigate: newAuto, retentionDays: newRetention }),
+      body: JSON.stringify({
+        homeCountry: newCountry, language: newLang, autoInvestigate: newAuto,
+        retentionDays: newRetention, timelineSource: newTimelineSource,
+      }),
     });
     if (res.ok) {
       setHomeCountry(newCountry);
