@@ -817,7 +817,10 @@ describe('summarizeByTimeRange', () => {
     const result = history.summarizeByTimeRange(t - 20_000, t, { buckets: 4 });
 
     assert.equal(result.total, 2);
-    assert.equal(result.buckets, 4);
+    // Four bars were asked for across twenty seconds. Traffic is recorded in
+    // five-minute windows, so four bars would be three empty ones and a
+    // spike -- the chart is held to the resolution the record actually has.
+    assert.equal(result.buckets, 1);
     assert.ok(result.byTarget.some(r => r.key === 'Amazon.com, Inc.' && r.count === 1));
     assert.ok(result.byEdge.some(r => r.src === '192.168.1.10' && r.key === 'Amazon.com, Inc.' && r.count === 1));
     assert.ok(result.byLocation.some(r => r.org === 'Google LLC' && r.totalSessions === 1));

@@ -1,6 +1,8 @@
 // Read/query side of connection history. The caller retains DB ownership.
 'use strict';
 
+const { BUCKET_MS: FOLDED_WINDOW_MS } = require('./connection-buckets');
+
 const SORT_COL_SQL = {
   lastSeen: 'lastSeen',
   src: 'src',
@@ -498,8 +500,40 @@ function createHistoryQueries({
     const total = countRow.total || 0;
     const rangeFrom = from ?? countRow.minLastSeen ?? Date.now();
     const rangeTo = to ?? countRow.maxLastSeen ?? Date.now();
-    const bucketCount = Math.max(1, Math.min(240, Number(buckets) || 60));
-    const bucketMs = Math.max(1, (Math.max(rangeTo, rangeFrom + 1) - rangeFrom) / bucketCount);
+    // Drawn from the folded windows when nothing narrows the question -- see
+    // the timeline query below for why the scoped path cannot use them.
+    const useBuckets = timelineSource !== 'lastSeen'
+      && !sourceScope && src == null && hasConnectionBuckets(db);
+
+    // The window in progress has not been counted and cannot be: it is still
+    // collecting. Drawn anyway it is a bar at nearly zero on the right-hand
+    // edge of every chart, which reads as traffic having just stopped. So the
+    // chart ends at the last window that closed.
+    const timelineTo = useBuckets
+      ? Math.min(rangeTo, Math.floor(Date.now() / FOLDED_WINDOW_MS) * FOLDED_WINDOW_MS - FOLDED_WINDOW_MS)
+      : rangeTo;
+
+    let bucketCount = Math.max(1, Math.min(240, Number(buckets) || 60));
+    let bucketMs = Math.max(1, (Math.max(timelineTo, rangeFrom + 1) - rangeFrom) / bucketCount);
+
+    // Never finer than the record. Traffic is folded into five-minute windows,
+    // so asking for a two-and-a-half-minute bar means every second bar has
+    // nothing to hold -- measured on a Hub, 31 of 60 bars came back empty and
+    // the chart drew a row of spikes with zero between each pair. The values
+    // were right; the shape was a lie about when traffic stopped.
+    //
+    // Always a whole number of windows, at every zoom. A bar that is not one
+    // holds four windows sometimes and five others: measured over a day, that
+    // alone swung neighbouring bars between 7,270 and 11,130 with no change in
+    // traffic. The ripple is the bar width beating against the window width,
+    // and it reads exactly like a rhythm in the network.
+    if (useBuckets) {
+      bucketMs = Math.max(FOLDED_WINDOW_MS, Math.ceil(bucketMs / FOLDED_WINDOW_MS) * FOLDED_WINDOW_MS);
+      // One bar per window, inclusive of the newest: `rangeTo` is a window's
+      // start, and that window occupies a whole bar of its own.
+      bucketCount = Math.max(1,
+        Math.floor((Math.max(timelineTo, rangeFrom) - rangeFrom) / bucketMs) + 1);
+    }
 
     const byDst = timed('destinations', () => db.prepare(
       `${source.cte} SELECT dst, dstHost, country, org,
@@ -672,8 +706,6 @@ function createHistoryQueries({
     // their last sighting, which slopes upward on its own, but it reaches back
     // as far as `connections` does. A Hub whose observed record has only just
     // started may prefer the familiar shape to a short one (P3-155).
-    const useBuckets = timelineSource !== 'lastSeen'
-      && !sourceScope && src == null && hasConnectionBuckets(db);
     const timeline = timed('timeline', () => (useBuckets
       ? db.prepare(
         `SELECT COALESCE(NULLIF(c.org, ''), NULLIF(c.dstHost, ''), b.dst) AS key,
@@ -690,7 +722,7 @@ function createHistoryQueries({
          -- which is the one being looked at.
          WHERE b.bucketStart >= ? AND b.bucketStart <= ?
          GROUP BY key, bucket ORDER BY bucket ASC, count DESC`
-      ).all(bucketCount - 1, rangeFrom, bucketMs, rangeFrom, rangeTo)
+      ).all(bucketCount - 1, rangeFrom, bucketMs, rangeFrom, timelineTo)
       : db.prepare(
         `${source.cte} SELECT ${targetExpr} AS key,
                 CASE
