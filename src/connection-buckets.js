@@ -23,13 +23,20 @@
 //   was measured and rejected: it falls from 1,949 to 42 across six hours of
 //   steady traffic, which is the original defect mirrored.
 //
-//   Agent-observed flows do carry their times. `agent_app_hourly` keeps, for
+//   Agent-observed flows do carry their times. `agent_observations` keeps, for
 //   every flow an Agent saw, the interval it was observed in, and those times
 //   never move. That makes the agent half of a window countable at any point:
 //   it can be filled in for the past, and it can be counted again later when a
 //   batch uploaded late adds to a window that was already folded. Before this,
 //   a window folded five seconds after closing held 22 flows where the Agent's
 //   own record says 1,081 -- the upload simply had not arrived yet.
+//
+//   The rollup `agent_app_hourly` was used first and cannot be: its intervals
+//   are cut at each clock hour, so an interval spread over five-minute windows
+//   covers the middle of an hour more often than its edges. Measured over six
+//   hours, that alone drew a triangle wave from 1,069 at :00 to 2,007 at :25
+//   and back to 1,088 at :55, on traffic the raw observations show as flat
+//   (1,075 / 1,103 / 1,095). An hourly rhythm that is not in the network.
 //
 // Each half is stored under its own `source`, so neither can overwrite the
 // other and the chart can say which part of a period it actually has.
@@ -155,27 +162,26 @@ function createConnectionBuckets({ getDb, logger = console, now = () => Date.now
    */
   function foldAgentWindow(bucketStart, bucketMs = BUCKET_MS) {
     const db = getDb();
-    if (!db || !hasTable(db) || !hasTable(db, 'agent_app_hourly')) return 0;
+    if (!db || !hasTable(db) || !hasTable(db, 'agent_observations')) return 0;
 
     const clear = db.prepare('DELETE FROM connection_buckets WHERE bucketStart = ? AND source = ?');
-    // An hour's rows can overlap the hour either side of their own -- 475 of
-    // them did on one Hub -- so both are searched.
+    // A flow counts in every window its observation covers. The raw
+    // observations are used rather than the hourly rollup because the rollup's
+    // intervals stop at each clock hour, which puts an hourly rhythm into the
+    // chart that is not in the network.
     const insert = db.prepare(`
       INSERT INTO connection_buckets (bucketStart, dst, source, flows)
       SELECT ?, remoteAddress, '${SOURCE_AGENT}',
              COUNT(DISTINCT localAddress || '|' || remotePort || '|' || networkProtocol)
-      FROM agent_app_hourly
-      WHERE hourStart >= ? AND hourStart <= ?
-        AND firstObservedAt < ? AND lastObservedAt >= ?
+      FROM agent_observations
+      WHERE firstObservedAt < ? AND lastObservedAt >= ?
       GROUP BY remoteAddress
     `);
 
-    const end = bucketStart + bucketMs;
-    const hour = Math.floor(bucketStart / 3600000) * 3600000;
     let rows = 0;
     db.transaction(() => {
       clear.run(bucketStart, SOURCE_AGENT);
-      rows = insert.run(bucketStart, hour - 3600000, hour + 3600000, end, bucketStart).changes;
+      rows = insert.run(bucketStart, bucketStart + bucketMs, bucketStart).changes;
     })();
     return rows;
   }
@@ -203,13 +209,13 @@ function createConnectionBuckets({ getDb, logger = console, now = () => Date.now
    */
   function queueNextPastAgentWindow({ bucketMs = BUCKET_MS, retentionMs = RETENTION_MS } = {}) {
     const db = getDb();
-    if (!db || !hasTable(db) || !hasTable(db, 'agent_app_hourly')) return null;
+    if (!db || !hasTable(db) || !hasTable(db, 'agent_observations')) return null;
 
-    const oldestAgentHour = db.prepare('SELECT MIN(hourStart) AS oldest FROM agent_app_hourly').get()?.oldest;
-    if (oldestAgentHour == null) return null;
+    const oldestAgentAt = db.prepare('SELECT MIN(firstObservedAt) AS oldest FROM agent_observations').get()?.oldest;
+    if (oldestAgentAt == null) return null;
 
     const floor = Math.max(
-      bucketStartFor(oldestAgentHour, bucketMs),
+      bucketStartFor(oldestAgentAt, bucketMs),
       bucketStartFor(now() - retentionMs, bucketMs)
     );
     if (agentBackfilledFrom == null) {

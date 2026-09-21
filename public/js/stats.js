@@ -85,6 +85,12 @@ function showTimelineGap(summary, fromT) {
   // folding shows agent-observed traffic alone -- reading it as the whole
   // network would understate everything else.
   const notes = [];
+  // Few enough windows that the chart shows bars and no shape between them.
+  // Saying so is cheaper than letting someone wonder why it looks different.
+  const bars = summary?.buckets || 0;
+  if (bars > 0 && bars <= 8 && (summary?.timeline || []).length) {
+    notes.push(tVars('stats.timeline.coarse', { count: bars }));
+  }
   if (earliest > fromT) {
     notes.push(tVars('stats.timeline.gap', { from: new Date(earliest).toLocaleString() }));
   }

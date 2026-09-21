@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 27;
+const SCHEMA_VERSION = 28;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -1136,6 +1136,26 @@ const MIGRATIONS = [
         );
         CREATE INDEX idx_connection_buckets_start ON connection_buckets(bucketStart);
       `);
+    },
+  },
+  {
+    version: 28,
+    description: 'recount the agent half from raw observations, not the hourly rollup (P3-155)',
+    up(db) {
+      // The agent half was counted from `agent_app_hourly`, whose intervals are
+      // cut at each clock hour. Spreading such an interval over five-minute
+      // windows covers the middle of an hour more often than its edges, and
+      // over six hours that drew a triangle wave from 1,069 flows at :00 to
+      // 2,007 at :25 and back to 1,088 at :55 -- an hourly rhythm that is not
+      // in the network. The raw observations show the same traffic as flat.
+      //
+      // Every agent row here carries that shape, so they are dropped and
+      // counted again from `agent_observations`.
+      const hasTable = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get('connection_buckets');
+      if (!hasTable) return;
+      db.prepare("DELETE FROM connection_buckets WHERE source = 'agent'").run();
     },
   },
 ];

@@ -541,7 +541,11 @@ function createHistoryQueries({
     // traffic. The ripple is the bar width beating against the window width,
     // and it reads exactly like a rhythm in the network.
     if (useBuckets) {
-      bucketMs = Math.max(FOLDED_WINDOW_MS, Math.ceil(bucketMs / FOLDED_WINDOW_MS) * FOLDED_WINDOW_MS);
+      // The nearest whole number of windows, not the next one up. Six hours at
+      // sixty bars asks for six minutes: rounding up gave ten-minute bars and
+      // threw away half the detail the record actually holds, when five-minute
+      // bars fit it exactly.
+      bucketMs = Math.max(FOLDED_WINDOW_MS, Math.round(bucketMs / FOLDED_WINDOW_MS) * FOLDED_WINDOW_MS);
       // One bar per window, inclusive of the newest: `rangeTo` is a window's
       // start, and that window occupies a whole bar of its own.
       bucketCount = Math.max(1,

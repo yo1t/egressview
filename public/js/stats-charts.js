@@ -189,6 +189,14 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
     ? '#6b7280'
     : STATS_COLORS[labels.indexOf(label) % STATS_COLORS.length];
 
+  // Few enough windows that a curve between them would be mostly invention.
+  // A fifteen-minute period is three five-minute windows: drawn as an area,
+  // d3 runs a monotone curve through three points and fills it, and the result
+  // is a smooth slope that reads as a trend. There is no trend in three
+  // numbers, and nothing was measured between them.
+  const sparse = buckets <= 8;
+  const columnWidth = Math.max(2, (xScale(fromT + bw) - xScale(fromT)) - 2);
+
   if (chartMode === 'stack') {
     // ─── Stacked area chart ──────────────────────────
     // Reshape data into [{time, label1: v, label2: v, ...}] for d3.stack
@@ -208,18 +216,31 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
     g.append('g').attr('class', 'stats-axis')
       .call(d3.axisLeft(yScale).ticks(5).tickSizeOuter(0));
 
-    const area = d3.area()
-      .x((_, i) => xScale(times[i]))
-      .y0(d => yScale(d[0]))
-      .y1(d => yScale(d[1]))
-      .curve(d3.curveMonotoneX);
-    g.selectAll('path.stack-area').data(layers).join('path')
-      .attr('class', 'stack-area')
-      .attr('d', area)
-      .attr('fill', d => colorFor(d.key))
-      .attr('fill-opacity', 0.85)
-      .attr('stroke', d => colorFor(d.key))
-      .attr('stroke-width', 0.5);
+    if (sparse) {
+      // One column per window, each as wide as the window it stands for.
+      for (const layer of layers) {
+        g.append('g').selectAll('rect').data(layer).join('rect')
+          .attr('x', (_, i) => xScale(times[i]) - columnWidth / 2)
+          .attr('y', d => yScale(d[1]))
+          .attr('width', columnWidth)
+          .attr('height', d => Math.max(0, yScale(d[0]) - yScale(d[1])))
+          .attr('fill', colorFor(layer.key))
+          .attr('fill-opacity', 0.85);
+      }
+    } else {
+      const area = d3.area()
+        .x((_, i) => xScale(times[i]))
+        .y0(d => yScale(d[0]))
+        .y1(d => yScale(d[1]))
+        .curve(d3.curveMonotoneX);
+      g.selectAll('path.stack-area').data(layers).join('path')
+        .attr('class', 'stack-area')
+        .attr('d', area)
+        .attr('fill', d => colorFor(d.key))
+        .attr('fill-opacity', 0.85)
+        .attr('stroke', d => colorFor(d.key))
+        .attr('stroke-width', 0.5);
+    }
   } else {
     // ─── Line chart ──────────────────────────────────
     const maxY = Math.max(1, ...visibleLabels.map(l => Math.max(...series.get(l))));
@@ -231,16 +252,29 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
     g.append('g').attr('class', 'stats-axis')
       .call(d3.axisLeft(yScale).ticks(5).tickSizeOuter(0));
 
-    const line = d3.line()
-      .x((_, i) => xScale(times[i]))
-      .y(d => yScale(d))
-      .curve(d3.curveMonotoneX);
-    for (const label of visibleLabels) {
-      g.append('path').datum(series.get(label))
-        .attr('class', 'stats-line')
-        .attr('fill', 'none')
-        .attr('stroke', colorFor(label))
-        .attr('d', line);
+    if (sparse) {
+      // Marks where the windows are, and nothing between them. A line through
+      // three points would draw a slope that was never measured.
+      for (const label of visibleLabels) {
+        g.append('g').selectAll('rect').data(series.get(label)).join('rect')
+          .attr('x', (_, i) => xScale(times[i]) - columnWidth / 2)
+          .attr('y', d => yScale(d) - 1)
+          .attr('width', columnWidth)
+          .attr('height', 2)
+          .attr('fill', colorFor(label));
+      }
+    } else {
+      const line = d3.line()
+        .x((_, i) => xScale(times[i]))
+        .y(d => yScale(d))
+        .curve(d3.curveMonotoneX);
+      for (const label of visibleLabels) {
+        g.append('path').datum(series.get(label))
+          .attr('class', 'stats-line')
+          .attr('fill', 'none')
+          .attr('stroke', colorFor(label))
+          .attr('d', line);
+      }
     }
   }
 

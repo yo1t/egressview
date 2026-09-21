@@ -798,13 +798,15 @@ server.listen(PORT, HOST, () => {
   };
   scheduleFold();
 
-  // Counting the agent half of one window takes about 54 ms on a Hub with a
-  // million and a half observations, so exactly one window is counted per
-  // tick. Counting twenty-four of them in one pass held the event loop for
-  // 1.3 seconds and put back the stalls P3-139 removed. Nothing waits on this
-  // work, so it can take the slow way round: a week of history is walked in
-  // about ten minutes and the loop stays free throughout.
-  const AGENT_FOLD_TICK_MS = 250;
+  // Counting the agent half of one window reads about 28 ms of raw
+  // observations on a Hub with a million and a half of them, and writing the
+  // result costs more again -- so exactly one window is counted per tick.
+  // Counting twenty-four of them in one pass held the event loop for 1.3
+  // seconds and put back the stalls P3-139 removed. Nothing waits on this
+  // work, so it takes the slow way round: half a second between windows keeps
+  // this under a tenth of the loop's time, and a week of history is still
+  // walked within the hour.
+  const AGENT_FOLD_TICK_MS = 500;
   // Said once, when the walk backwards reaches the end. The recent past is
   // counted again every five minutes, which empties the queue again each time
   // -- reporting "filled in" on every one of those would be a line every five
