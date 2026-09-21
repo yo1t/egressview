@@ -1001,10 +1001,11 @@
       </div>
       <div class="stats-chart" id="stats-timeline">
         <div class="stats-chart-title-row">
-          <span class="stats-chart-title" data-i18n="stats.title.timeline">通信先別セッション数（時間推移）</span>
+          <span class="stats-chart-title" id="stats-timeline-title" data-i18n="stats.title.timeline.observed">時間窓で観測したセッション</span>
+          <span class="stats-timeline-basis-badge" id="stats-timeline-basis-badge" hidden></span>
           <div class="chart-mode-toggle">
-            <button class="chart-mode-btn active" data-mode="stack" data-i18n="stats.mode.stack">📈 積み上げ</button>
-            <button class="chart-mode-btn"        data-mode="line"  data-i18n="stats.mode.line">📊 線</button>
+            <button class="chart-mode-btn active" data-mode="composition" data-i18n="stats.mode.composition">構成</button>
+            <button class="chart-mode-btn" data-mode="compare" data-i18n="stats.mode.compare">通信先を比較</button>
           </div>
         </div>
         <svg id="chart-timeline"></svg>

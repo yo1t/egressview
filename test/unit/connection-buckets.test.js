@@ -430,6 +430,15 @@ describe('要約の時系列が、畳んだ窓を読む（P3-155）', () => {
     }
 
     const summary = queriesOn(db).summarizeByTimeRange(b(4), null, { buckets: 60 });
+    assert.equal(summary.timelineBasis, 'observed');
+    assert.equal(summary.timelineBucketMs, BUCKET_MS);
+    assert.equal(summary.timelineScopeFallback, false);
+    const legacy = queriesOn(db).summarizeByTimeRange(b(4), null, {
+      buckets: 60,
+      timelineSource: 'lastSeen',
+    });
+    assert.equal(legacy.timelineBasis, 'lastSeen');
+    assert.equal(legacy.timelineScopeFallback, false);
     const lastBar = Math.max(...summary.timeline.map(r => r.bucket));
     assert.equal(lastBar, summary.buckets - 1,
       '最後の棒まで値があること（空の棒で終わってはいけない）');

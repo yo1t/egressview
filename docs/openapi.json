@@ -7411,6 +7411,13 @@
                     "type": "integer",
                     "minimum": -9007199254740991,
                     "maximum": 9007199254740991
+                  },
+                  "timelineSource": {
+                    "type": "string",
+                    "enum": [
+                      "observed",
+                      "lastSeen"
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -8083,6 +8090,27 @@
                     "total": {
                       "type": "number"
                     },
+                    "timelineBasis": {
+                      "type": "string",
+                      "enum": [
+                        "observed",
+                        "lastSeen"
+                      ]
+                    },
+                    "timelineBucketMs": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "timelineScopeFallback": {
+                      "type": "boolean"
+                    },
                     "serverTime": {
                       "type": "number"
                     },
@@ -8094,6 +8122,9 @@
                     "byDst",
                     "byDevice",
                     "total",
+                    "timelineBasis",
+                    "timelineBucketMs",
+                    "timelineScopeFallback",
                     "serverTime",
                     "cached"
                   ],

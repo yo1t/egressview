@@ -225,6 +225,9 @@ function createRegistry() {
     byDst: z.array(z.unknown()),
     byDevice: z.array(z.unknown()),
     total: z.number(),
+    timelineBasis: z.enum(['observed', 'lastSeen']),
+    timelineBucketMs: z.number().positive().nullable(),
+    timelineScopeFallback: z.boolean(),
     serverTime: z.number(),
     cached: z.boolean(),
   }).loose(), { bounded: false, arrayElementsObserved: true });
