@@ -51,11 +51,14 @@ const MAX_FOLD_LAG_BUCKETS = 2;
 // hour, because a window measured on the Hub was still filling half an hour
 // after it closed.
 const AGENT_REFOLD_WINDOWS = 12;
-// How much of the past one backfill pass rebuilds. Measured at 6.6 ms per
-// window on a Hub with 1.7 million agent observations, so this is about 160 ms
-// of work -- under the event-loop budget P3-139 was fought for, and a week of
-// history is filled in within the hour.
-const AGENT_BACKFILL_WINDOWS_PER_PASS = 24;
+// One window at a time, always. Counting a window and writing the result was
+// measured at about 54 ms on a Hub with 1.7 million agent observations -- a
+// read-only estimate of 6.6 ms left out the delete and the insert, and
+// twenty-four of them in one transaction blocked the event loop for 1.3
+// seconds, undoing P3-139 the day after it was verified. Whatever needs
+// counting is queued and drained one window per tick, each in its own
+// transaction, so the longest thing this can hold the loop for is one window.
+const AGENT_WINDOWS_PER_TICK = 1;
 
 const SOURCE_ROUTER = 'router';
 const SOURCE_AGENT = 'agent';
@@ -70,6 +73,9 @@ function bucketStartFor(at, bucketMs = BUCKET_MS) {
 function createConnectionBuckets({ getDb, logger = console, now = () => Date.now() }) {
   let lastFoldedThrough = null;
   let agentBackfilledFrom = null;
+  // Windows waiting to be counted, oldest request first. Draining it one
+  // window at a time is what keeps the event loop free.
+  const agentQueue = [];
 
   function hasTable(db, name = 'connection_buckets') {
     return !!db.prepare(
@@ -141,15 +147,15 @@ function createConnectionBuckets({ getDb, logger = console, now = () => Date.now
   }
 
   /**
-   * Count the agent half of a range of windows, replacing whatever was there.
+   * Count the agent half of one window, replacing whatever was there.
    *
    * Safe to run over the same window any number of times: the Agent's
    * observation times do not move, so the answer only improves as late uploads
-   * land.
+   * land. One window, one transaction -- see AGENT_WINDOWS_PER_TICK.
    */
-  function foldAgentRange(fromBucket, toBucket, bucketMs = BUCKET_MS) {
+  function foldAgentWindow(bucketStart, bucketMs = BUCKET_MS) {
     const db = getDb();
-    if (!db || !hasTable(db) || !hasTable(db, 'agent_app_hourly')) return { folded: 0, rows: 0 };
+    if (!db || !hasTable(db) || !hasTable(db, 'agent_app_hourly')) return 0;
 
     const clear = db.prepare('DELETE FROM connection_buckets WHERE bucketStart = ? AND source = ?');
     // An hour's rows can overlap the hour either side of their own -- 475 of
@@ -164,62 +170,74 @@ function createConnectionBuckets({ getDb, logger = console, now = () => Date.now
       GROUP BY remoteAddress
     `);
 
-    let folded = 0;
+    const end = bucketStart + bucketMs;
+    const hour = Math.floor(bucketStart / 3600000) * 3600000;
     let rows = 0;
-    const run = db.transaction(() => {
-      for (let start = fromBucket; start <= toBucket; start += bucketMs) {
-        const end = start + bucketMs;
-        const hour = Math.floor(start / 3600000) * 3600000;
-        clear.run(start, SOURCE_AGENT);
-        rows += insert.run(start, hour - 3600000, hour + 3600000, end, start).changes;
-        folded += 1;
-      }
-    });
-    run();
-    return { folded, rows };
+    db.transaction(() => {
+      clear.run(bucketStart, SOURCE_AGENT);
+      rows = insert.run(bucketStart, hour - 3600000, hour + 3600000, end, bucketStart).changes;
+    })();
+    return rows;
   }
 
   /**
-   * Keep the agent half of the recent past current, including windows that
-   * were already counted before a late upload arrived.
+   * Queue the recent past for counting again, including windows already
+   * counted before a late upload arrived.
    */
-  function foldAgent({ bucketMs = BUCKET_MS, refoldWindows = AGENT_REFOLD_WINDOWS } = {}) {
+  function queueRecentAgentWindows({ bucketMs = BUCKET_MS, refoldWindows = AGENT_REFOLD_WINDOWS } = {}) {
     const currentStart = bucketStartFor(now(), bucketMs);
-    const from = currentStart - bucketMs * refoldWindows;
-    return foldAgentRange(from, currentStart - bucketMs, bucketMs);
+    let queued = 0;
+    for (let i = refoldWindows; i >= 1; i -= 1) {
+      const start = currentStart - bucketMs * i;
+      if (!agentQueue.includes(start)) { agentQueue.push(start); queued += 1; }
+    }
+    return queued;
   }
 
   /**
-   * Fill in the agent half of the past, a stretch at a time.
-   *
-   * Returns `{ done }` so the caller can stop scheduling once the Agent's own
-   * history has been walked back to its beginning. Nothing here is an
-   * estimate: every window is counted from the times the Agent recorded.
+   * Take the next window of the past that has never been counted, so the
+   * backfill walks backwards without ever holding the loop for more than one
+   * window. Returns null once the Agents' own history has been walked to its
+   * beginning -- nothing here is an estimate, so there is nothing to invent
+   * beyond it.
    */
-  function backfillAgent({
-    bucketMs = BUCKET_MS,
-    retentionMs = RETENTION_MS,
-    windowsPerPass = AGENT_BACKFILL_WINDOWS_PER_PASS,
-  } = {}) {
+  function queueNextPastAgentWindow({ bucketMs = BUCKET_MS, retentionMs = RETENTION_MS } = {}) {
     const db = getDb();
-    if (!db || !hasTable(db) || !hasTable(db, 'agent_app_hourly')) return { folded: 0, rows: 0, done: true };
+    if (!db || !hasTable(db) || !hasTable(db, 'agent_app_hourly')) return null;
 
     const oldestAgentHour = db.prepare('SELECT MIN(hourStart) AS oldest FROM agent_app_hourly').get()?.oldest;
-    if (oldestAgentHour == null) return { folded: 0, rows: 0, done: true };
+    if (oldestAgentHour == null) return null;
 
-    const floor = Math.max(bucketStartFor(oldestAgentHour, bucketMs), bucketStartFor(now() - retentionMs, bucketMs));
+    const floor = Math.max(
+      bucketStartFor(oldestAgentHour, bucketMs),
+      bucketStartFor(now() - retentionMs, bucketMs)
+    );
     if (agentBackfilledFrom == null) {
       const oldest = db.prepare('SELECT MIN(bucketStart) AS oldest FROM connection_buckets WHERE source = ?')
         .get(SOURCE_AGENT)?.oldest;
       agentBackfilledFrom = oldest ?? bucketStartFor(now(), bucketMs);
     }
-    if (agentBackfilledFrom <= floor) return { folded: 0, rows: 0, done: true };
+    if (agentBackfilledFrom <= floor) return null;
 
-    const to = agentBackfilledFrom - bucketMs;
-    const from = Math.max(floor, to - bucketMs * (windowsPerPass - 1));
-    const result = foldAgentRange(from, to, bucketMs);
-    agentBackfilledFrom = from;
-    return { ...result, done: from <= floor };
+    agentBackfilledFrom -= bucketMs;
+    agentQueue.push(agentBackfilledFrom);
+    return agentBackfilledFrom;
+  }
+
+  /**
+   * Count whatever is queued, one window per call.
+   *
+   * Returns `{ folded, rows, pending }` so the caller can log progress and
+   * know whether to come back.
+   */
+  function drainAgentQueue({ bucketMs = BUCKET_MS, windows = AGENT_WINDOWS_PER_TICK } = {}) {
+    let folded = 0;
+    let rows = 0;
+    for (let i = 0; i < windows && agentQueue.length; i += 1) {
+      rows += foldAgentWindow(agentQueue.shift(), bucketMs);
+      folded += 1;
+    }
+    return { folded, rows, pending: agentQueue.length };
   }
 
   /** Drop buckets older than the window `connections` itself keeps. */
@@ -258,12 +276,15 @@ function createConnectionBuckets({ getDb, logger = console, now = () => Date.now
   function _resetForTest() {
     lastFoldedThrough = null;
     agentBackfilledFrom = null;
+    agentQueue.length = 0;
   }
 
   return {
     foldRouter,
-    foldAgent,
-    backfillAgent,
+    foldAgentWindow,
+    queueRecentAgentWindows,
+    queueNextPastAgentWindow,
+    drainAgentQueue,
     prune,
     foldedThrough,
     coverage,
@@ -281,6 +302,7 @@ module.exports = {
   BUCKET_MS,
   RETENTION_MS,
   MAX_FOLD_LAG_BUCKETS,
+  AGENT_WINDOWS_PER_TICK,
   SOURCE_ROUTER,
   SOURCE_AGENT,
 };
