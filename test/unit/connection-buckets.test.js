@@ -144,6 +144,26 @@ describe('通信があった時刻を記録する（P3-155）', () => {
     assert.equal(buckets.earliestBucket() >= at(18, 0), true, '記録はいま始まる');
   });
 
+  it('閉じた直後に畳まないと、続いているフローを取りこぼす', () => {
+    // Why the fold has to sit on the boundary and not merely tick at the
+    // window's length. A flow keeps its lastSeen inside its window only until
+    // it is seen again; fold late and only the flows that stopped are left.
+    const stillRunning = { src: '10.0.0.1', dst: '203.0.113.1', dport: 443 };
+    const stopped = { src: '10.0.0.2', dst: '203.0.113.9', dport: 443 };
+    seed([
+      { ...stillRunning, lastSeen: at(1, 200_000) },
+      { ...stopped, lastSeen: at(1, 200_000) },
+    ]);
+
+    // The flow that is still running is seen again early in the next window.
+    seed([{ ...stillRunning, lastSeen: at(2, 30_000) }]);
+    clock = at(2, 240_000);          // and only now does a late fold run
+    buckets.fold();
+
+    assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.9', flows: 1 }],
+      '遅れて畳むと、止まったフローしか残らない');
+  });
+
   it('保持期間を過ぎた窓は捨てる', () => {
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(1) }]);
     clock = at(2, 30_000);

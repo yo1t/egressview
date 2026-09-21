@@ -749,8 +749,17 @@ server.listen(PORT, HOST, () => {
   setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 
   // Fold the five-minute windows the timeline chart reads. Deliberately not in
-  // the poll loop: that loop is where P3-112 and P3-139 both went wrong, and a
-  // closed window can be counted just as well a moment later.
+  // the poll loop: that loop is where P3-112 and P3-139 both went wrong, and
+  // folding is its own small job on its own timer.
+  //
+  // That timer has to sit on the window boundary, though, not merely tick at
+  // the window's length. A flow keeps its lastSeen inside the window it was
+  // seen in only until it is seen again, and polling is a minute: fold four
+  // minutes late and every flow still running has already moved on, leaving
+  // just the ones that stopped -- which is the histogram this whole table
+  // exists to get away from. Measured when the fold ran on its own schedule,
+  // one window held 30 flows where the minute-by-minute count says 1,000 to
+  // 2,000 passed through it.
   //
   // Nothing is folded for the past. A window can only be counted while its
   // flows still have their lastSeen inside it, so a Hub upgrading to this has
@@ -772,8 +781,21 @@ server.listen(PORT, HOST, () => {
       logger.warn('[connection-buckets] fold failed:', error.message);
     }
   };
+  // A few seconds past the boundary: long enough that the window is certainly
+  // closed, short enough that almost nothing has been seen again since.
+  const FOLD_BUCKET_MS = history.connectionBuckets.BUCKET_MS;
+  const FOLD_AFTER_BOUNDARY_MS = 5_000;
   foldConnectionBuckets();
-  setInterval(foldConnectionBuckets, 5 * 60 * 1000).unref();
+  const scheduleFold = () => {
+    const sinceBoundary = Date.now() % FOLD_BUCKET_MS;
+    let wait = FOLD_AFTER_BOUNDARY_MS - sinceBoundary;
+    while (wait <= 0) wait += FOLD_BUCKET_MS;
+    setTimeout(() => {
+      foldConnectionBuckets();
+      setInterval(foldConnectionBuckets, FOLD_BUCKET_MS).unref();
+    }, wait).unref();
+  };
+  scheduleFold();
   setInterval(() => {
     try {
       const dropped = history.connectionBuckets.prune();
