@@ -19,6 +19,7 @@ const { CONNECTIONS_SQL, OBSERVATIONS_SQL, EVENTS_SQL } = require('./history-sch
 const { reportSchemaCompleteness } = require('./schema-completeness');
 const { applyWalPragmas } = require('./sqlite-wal');
 const { createConnectionBuckets } = require('./connection-buckets');
+const { createAgentAppDaily } = require('./agent-app-daily');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -128,6 +129,7 @@ const {
 // When traffic happened, folded once per closed five-minute window. See
 // connection-buckets.js for why `connections` cannot answer this itself.
 const connectionBuckets = createConnectionBuckets({ getDb: () => db, logger });
+const agentAppDaily = createAgentAppDaily({ getDb: () => db, logger });
 
 const aiConversationStore = createAiConversationStore({ getDb: () => db });
 const aiUsageStore = createAiUsageStore({ getDb: () => db });
@@ -765,6 +767,7 @@ module.exports = {
   appendHistoryLogs,
   snapshotHistory,
   connectionBuckets,
+  agentAppDaily,
   compactHistoryLog,
   pruneHistory,
   getConnectionHistory,

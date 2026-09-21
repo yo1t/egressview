@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 29;
+const SCHEMA_VERSION = 30;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -1183,6 +1183,42 @@ const MIGRATIONS = [
         CREATE INDEX IF NOT EXISTS idx_agent_observations_long
           ON agent_observations(firstObservedAt)
           WHERE lastObservedAt - firstObservedAt >= 3600000;
+      `);
+    },
+  },
+  {
+    version: 30,
+    description: 'roll the app attribution up by day so a long view is cheap (P3-150)',
+    up(db) {
+      // The summary groups `agent_app_hourly` down to one row per flow per app
+      // across the whole period. That grouping key does not match the table's
+      // primary key, so SQLite builds a temporary B-tree over every hourly row
+      // in range: measured on a Hub, reading them cost 113 ms and grouping them
+      // 1,275 ms, which froze a fourteen-day view for 1.6 seconds.
+      //
+      // Collapsing the hours into days does not change the set of distinct
+      // flow-and-app pairs, so the answer is the same and there is a quarter as
+      // much of it. Measured against that Hub's own data: 674,958 rows become
+      // 154,696, 97.6 MB becomes 22.4 MB, and the fourteen-day aggregation goes
+      // from 1,609 ms to 343 ms with identical results at every range tried.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_app_daily (
+          dayStart        INTEGER NOT NULL,
+          agentId         TEXT    NOT NULL,
+          appIdentity     TEXT    NOT NULL,
+          processName     TEXT    NOT NULL,
+          localAddress    TEXT    NOT NULL,
+          remoteAddress   TEXT    NOT NULL,
+          remotePort      INTEGER NOT NULL,
+          networkProtocol TEXT    NOT NULL,
+          firstObservedAt INTEGER NOT NULL,
+          lastObservedAt  INTEGER NOT NULL,
+          PRIMARY KEY (
+            dayStart, agentId, appIdentity, localAddress,
+            remoteAddress, remotePort, networkProtocol
+          )
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_agent_app_daily_day ON agent_app_daily(dayStart);
       `);
     },
   },
