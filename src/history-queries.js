@@ -91,6 +91,33 @@ function hasConnectionBuckets(db) {
 // their times, so they can be counted for the past, while router-observed
 // flows cannot. A line drawn there is the traffic the Agents saw, not
 // everything that left the network, and the screen has to say so.
+// Names for the destinations a chart is about to draw, and only those.
+//
+// The labels live in `connections`, where the same destination has a row per
+// flow -- five and a half of them on average. Asking SQLite to group the whole
+// table and join the result cost 1,107 ms against 486,236 rows, to name 3,056
+// destinations. Asked for by name instead it is 250 ms, and the answer is
+// identical.
+//
+// A covering index on (dst, org, dstHost) would make this an index-only read,
+// but `connections` is written on every poll and that is the loop P3-139 was
+// fought over. Not worth a write on the hot path to save a read on a cached
+// one.
+const LABEL_LOOKUP_CHUNK = 900;
+
+function resolveDestinationLabels(db, destinations) {
+  const labels = new Map();
+  for (let i = 0; i < destinations.length; i += LABEL_LOOKUP_CHUNK) {
+    const part = destinations.slice(i, i + LABEL_LOOKUP_CHUNK);
+    const rows = db.prepare(
+      `SELECT dst, MAX(NULLIF(org, '')) AS org, MAX(NULLIF(dstHost, '')) AS dstHost
+       FROM connections WHERE dst IN (${part.map(() => '?').join(',')}) GROUP BY dst`
+    ).all(...part);
+    for (const row of rows) labels.set(row.dst, row.org || row.dstHost || row.dst);
+  }
+  return labels;
+}
+
 function connectionBucketCoverage(db) {
   try {
     const row = db.prepare(`
@@ -724,22 +751,39 @@ function createHistoryQueries({
     // as far as `connections` does. A Hub whose observed record has only just
     // started may prefer the familiar shape to a short one (P3-155).
     const timeline = timed('timeline', () => (useBuckets
-      ? db.prepare(
-        `SELECT COALESCE(NULLIF(c.org, ''), NULLIF(c.dstHost, ''), b.dst) AS key,
-                MIN(?, MAX(0, CAST((b.bucketStart - ?) / ? AS INTEGER))) AS bucket,
-                SUM(b.flows) AS count
-         FROM connection_buckets b
-         LEFT JOIN (
-           SELECT dst, MAX(NULLIF(org, '')) AS org, MAX(NULLIF(dstHost, '')) AS dstHost
-           FROM connections GROUP BY dst
-         ) AS c ON c.dst = b.dst
-         -- Inclusive at the top: a bucket covers [start, start + width), and
-         -- rangeTo is often exactly the newest bucket's start (it defaults to
-         -- the newest lastSeen). Excluding it dropped the most recent window,
-         -- which is the one being looked at.
-         WHERE b.bucketStart >= ? AND b.bucketStart <= ?
-         GROUP BY key, bucket ORDER BY bucket ASC, count DESC`
-      ).all(bucketCount - 1, timelineFrom, bucketMs, timelineFrom, timelineTo)
+      ? (() => {
+        // Counted by destination first, named afterwards. Naming inside the
+        // query made SQLite group all of `connections` to answer for the few
+        // thousand destinations on screen.
+        const counted = db.prepare(
+          `SELECT b.dst AS dst,
+                  MIN(?, MAX(0, CAST((b.bucketStart - ?) / ? AS INTEGER))) AS bucket,
+                  SUM(b.flows) AS count
+           FROM connection_buckets b
+           -- Inclusive at the top: a bucket covers [start, start + width), and
+           -- rangeTo is often exactly the newest bucket's start (it defaults to
+           -- the newest lastSeen). Excluding it dropped the most recent window,
+           -- which is the one being looked at.
+           WHERE b.bucketStart >= ? AND b.bucketStart <= ?
+           GROUP BY dst, bucket`
+        ).all(bucketCount - 1, timelineFrom, bucketMs, timelineFrom, timelineTo);
+
+        const labels = resolveDestinationLabels(db, [...new Set(counted.map(r => r.dst))]);
+        const folded = new Map();
+        for (const row of counted) {
+          const key = labels.get(row.dst) || row.dst;
+          const at = folded.get(key) || (folded.set(key, new Map()), folded.get(key));
+          at.set(row.bucket, (at.get(row.bucket) || 0) + row.count);
+        }
+        const out = [];
+        for (const [key, byBucket] of folded) {
+          for (const [bucket, count] of byBucket) out.push({ key, bucket, count });
+        }
+        // The old query ordered by bucket then size, and callers read it in
+        // that order.
+        out.sort((a, b) => a.bucket - b.bucket || b.count - a.count);
+        return out;
+      })()
       : db.prepare(
         `${source.cte} SELECT ${targetExpr} AS key,
                 CASE
