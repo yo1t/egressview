@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 25;
+const SCHEMA_VERSION = 26;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -1081,6 +1081,27 @@ const MIGRATIONS = [
         CREATE INDEX IF NOT EXISTS idx_connection_buckets_start
           ON connection_buckets(bucketStart);
       `);
+    },
+  },
+  {
+    version: 26,
+    description: 'drop buckets that were filled in for windows nobody watched close (P3-155)',
+    up(db) {
+      // The first release of the fold started from the oldest lastSeen in
+      // `connections` and counted forward. Those windows had already closed
+      // unwatched: every flow that kept running had moved its lastSeen to now,
+      // so the counts left behind were the flows that *stopped* during each
+      // window -- the same distortion the table was added to remove. On the
+      // Hub it produced buckets of 1 to 6 flows for periods that carried tens
+      // of thousands.
+      //
+      // There is no way to repair them, because the evidence is gone. They are
+      // dropped, and folding starts again from the next window to close.
+      const hasTable = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get('connection_buckets');
+      if (!hasTable) return;
+      db.exec('DELETE FROM connection_buckets;');
     },
   },
 ];

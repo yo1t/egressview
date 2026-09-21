@@ -23,7 +23,17 @@ const BUCKET_MS = 5 * 60 * 1000;
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 // A fold that has fallen a long way behind -- a Hub that was off for a week --
 // must not try to catch up in one pass and stall the loop doing it.
-const MAX_BUCKETS_PER_PASS = 24;
+// A window can only be counted while the flows seen in it still carry a
+// lastSeen inside it. Once a flow is seen again, its row moves, and the window
+// it used to belong to is gone -- counting it then returns the flows that
+// *stopped* during it, which is the distortion this table exists to remove. So
+// a window is folded once, just after it closes, and never afterwards. If the
+// Hub was down when it closed, that window has no record and the screen says
+// so; inventing a number for it would be worse than admitting the gap.
+//
+// One window of slack, because the timer that folds is the same length as the
+// window and may land either side of the boundary.
+const MAX_FOLD_LAG_BUCKETS = 2;
 
 function bucketStartFor(at, bucketMs = BUCKET_MS) {
   return Math.floor(at / bucketMs) * bucketMs;
@@ -56,18 +66,25 @@ function createConnectionBuckets({ getDb, logger = console, now = () => Date.now
    *
    * Returns what it did, so a caller can log it and a test can assert it.
    */
-  function fold({ bucketMs = BUCKET_MS, maxBuckets = MAX_BUCKETS_PER_PASS } = {}) {
+  function fold({ bucketMs = BUCKET_MS, maxLagBuckets = MAX_FOLD_LAG_BUCKETS } = {}) {
     const db = getDb();
-    if (!db || !hasTable(db)) return { folded: 0, rows: 0, more: false };
+    if (!db || !hasTable(db)) return { folded: 0, rows: 0, skipped: 0 };
 
     const currentStart = bucketStartFor(now(), bucketMs);
+    // The oldest window still countable. Anything older closed while we were
+    // not looking, and no longer has its flows.
+    const oldestFoldable = currentStart - bucketMs * maxLagBuckets;
+
     let from = foldedThrough();
-    if (from == null) {
-      // First run: start at the oldest flow we could still describe, but no
-      // further back than the retention window.
-      const oldest = db.prepare('SELECT MIN(lastSeen) AS oldest FROM connections').get()?.oldest;
-      const floorAt = now() - RETENTION_MS;
-      from = bucketStartFor(Math.max(oldest ?? currentStart, floorAt), bucketMs) - bucketMs;
+    // First run: nothing is folded for the past. A Hub that starts today can
+    // describe today, and `earliestBucket()` tells the screen where the record
+    // begins so it can say what it has no answer for.
+    if (from == null) from = oldestFoldable - bucketMs;
+
+    let skipped = 0;
+    if (from + bucketMs < oldestFoldable) {
+      skipped = Math.round((oldestFoldable - (from + bucketMs)) / bucketMs);
+      from = oldestFoldable - bucketMs;
     }
 
     const insert = db.prepare(`
@@ -80,16 +97,15 @@ function createConnectionBuckets({ getDb, logger = console, now = () => Date.now
 
     let folded = 0;
     let rows = 0;
-    let start = from + bucketMs;
     const run = db.transaction(() => {
-      for (; start < currentStart && folded < maxBuckets; start += bucketMs) {
+      for (let start = from + bucketMs; start < currentStart; start += bucketMs) {
         rows += insert.run(start, start, start + bucketMs).changes;
         folded += 1;
         lastFoldedThrough = start;
       }
     });
     run();
-    return { folded, rows, more: start < currentStart };
+    return { folded, rows, skipped };
   }
 
   /** Drop buckets older than the window `connections` itself keeps. */
@@ -120,4 +136,4 @@ function createConnectionBuckets({ getDb, logger = console, now = () => Date.now
   return { fold, prune, foldedThrough, earliestBucket, bucketStartFor, BUCKET_MS, _resetForTest, logger };
 }
 
-module.exports = { createConnectionBuckets, bucketStartFor, BUCKET_MS, RETENTION_MS };
+module.exports = { createConnectionBuckets, bucketStartFor, BUCKET_MS, RETENTION_MS, MAX_FOLD_LAG_BUCKETS };

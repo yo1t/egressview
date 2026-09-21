@@ -114,12 +114,34 @@ describe('通信があった時刻を記録する（P3-155）', () => {
     assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.1', flows: 1 }]);
   });
 
-  it('大きく遅れても、一度に全部やろうとしない', () => {
+  it('止まっていた間の窓は、数えずに飛ばす', () => {
+    // A window that closed while the Hub was down cannot be counted any more:
+    // every flow that kept running has moved its lastSeen to now, so what is
+    // left in that window is only the flows that stopped. Counting it would
+    // put the original defect back into the table one window at a time.
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(1) }]);
-    clock = at(500, 0);              // a Hub that was off for nearly two days
-    const result = buckets.fold({ maxBuckets: 5 });
-    assert.equal(result.folded, 5);
-    assert.equal(result.more, true, '残りがあることを言わなければならない');
+    clock = at(2, 30_000);
+    buckets.fold();
+    seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(500) }]);
+    clock = at(501, 30_000);         // back after nearly two days off
+    const result = buckets.fold();
+    assert.equal(result.skipped > 0, true, '飛ばした窓の数を言わなければならない');
+    assert.deepEqual(flowsIn(250), [], '見ていなかった窓に数字を作ってはいけない');
+    assert.deepEqual(flowsIn(500), [{ dst: '203.0.113.1', flows: 1 }],
+      '閉じたばかりの窓は数える');
+  });
+
+  it('初回は過去を作らない。記録はいまから始まる', () => {
+    // Sixteen buckets of history sitting in `connections`, and none of it can
+    // be described: this is the first fold this Hub has ever run.
+    seed([
+      { src: '10.0.0.1', dst: '203.0.113.1', dport: 443, firstSeen: at(1), lastSeen: at(1) },
+      { src: '10.0.0.2', dst: '203.0.113.9', dport: 443, firstSeen: at(1), lastSeen: at(19) },
+    ]);
+    clock = at(20, 30_000);
+    buckets.fold();
+    assert.deepEqual(flowsIn(1), [], '過去の窓を lastSeen で数え直してはいけない');
+    assert.equal(buckets.earliestBucket() >= at(18, 0), true, '記録はいま始まる');
   });
 
   it('保持期間を過ぎた窓は捨てる', () => {
