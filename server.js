@@ -748,6 +748,35 @@ server.listen(PORT, HOST, () => {
   authAudit.prune();
   setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 
+  // Fold the five-minute windows the timeline chart reads. Deliberately not in
+  // the poll loop: that loop is where P3-112 and P3-139 both went wrong, and a
+  // closed window can be counted just as well a moment later.
+  //
+  // Nothing is folded for the past. A window can only be counted while its
+  // flows still have their lastSeen inside it, so a Hub upgrading to this has
+  // no history to recover -- and the screen says so rather than drawing a line
+  // through nothing.
+  const foldConnectionBuckets = () => {
+    try {
+      const result = history.connectionBuckets.fold();
+      if (result.folded) {
+        logger.debug(`[connection-buckets] folded ${result.folded} window(s), ${result.rows} row(s)`);
+      }
+    } catch (error) {
+      logger.warn('[connection-buckets] fold failed:', error.message);
+    }
+  };
+  foldConnectionBuckets();
+  setInterval(foldConnectionBuckets, 5 * 60 * 1000).unref();
+  setInterval(() => {
+    try {
+      const dropped = history.connectionBuckets.prune();
+      if (dropped) logger.info(`[connection-buckets] pruned ${dropped} row(s) past retention`);
+    } catch (error) {
+      logger.warn('[connection-buckets] prune failed:', error.message);
+    }
+  }, 6 * 60 * 60 * 1000).unref();
+
   // An IP that keeps being reported as two different machines, and a merge that
   // keeps having its observations dropped, are both facts about the network the
   // operator should be able to see. Both were already counted and neither was
