@@ -762,6 +762,12 @@ server.listen(PORT, HOST, () => {
       if (result.folded) {
         logger.debug(`[connection-buckets] folded ${result.folded} window(s), ${result.rows} row(s)`);
       }
+      if (result.skipped) {
+        logger.info(
+          `[connection-buckets] ${result.skipped} window(s) closed while this was not running; `
+          + 'the chart has no record for them'
+        );
+      }
     } catch (error) {
       logger.warn('[connection-buckets] fold failed:', error.message);
     }
