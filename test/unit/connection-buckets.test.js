@@ -60,6 +60,7 @@ beforeEach(() => {
     );
   `);
   clock = 0;
+  observationId = 0;
   buckets = createConnectionBuckets({ getDb: () => db, now: () => clock, logger: { info() {}, warn() {} } });
 });
 
@@ -87,15 +88,20 @@ function backfillAll(limit = 500) {
   return rows;
 }
 
+// The agent half is counted from the raw observations, not from the hourly
+// rollup: the rollup cuts every interval at the clock hour, which puts an
+// hourly rhythm into the chart that is not in the network.
+let observationId = 0;
 function seedAgentHour(bucket, rows) {
-  const hourStart = Math.floor((bucket * BUCKET_MS) / 3600000) * 3600000;
-  const insert = db.prepare(`INSERT INTO agent_app_hourly
-    (hourStart, agentId, appIdentity, processName, localAddress, remoteAddress, remotePort,
-     networkProtocol, firstObservedAt, lastObservedAt)
-    VALUES (?, 'agent-1', ?, ?, ?, ?, ?, 'TCP', ?, ?)
-    ON CONFLICT DO UPDATE SET lastObservedAt = excluded.lastObservedAt`);
+  void bucket;
+  const insert = db.prepare(`INSERT INTO agent_observations
+    (agentId, observationId, localAddress, localPort, remoteAddress, remotePort,
+     networkProtocol, processName, firstObservedAt, lastObservedAt)
+    VALUES ('agent-1', ?, ?, 0, ?, ?, 'TCP', ?, ?, ?)
+    ON CONFLICT(agentId, observationId) DO UPDATE SET lastObservedAt = excluded.lastObservedAt`);
   for (const r of rows) {
-    insert.run(hourStart, r.local, r.local, r.local, r.remote, r.port, r.from, r.to);
+    observationId += 1;
+    insert.run(`obs-${observationId}`, r.local, r.remote, r.port, r.local, r.from, r.to);
   }
 }
 const flowsIn = (bucket) => db.prepare(
@@ -212,6 +218,33 @@ describe('通信があった時刻を記録する（P3-155）', () => {
     const first = buckets.drainAgentQueue();
     assert.equal(first.folded, 1, '一度に1窓を超えて畳んではいけない');
     assert.equal(first.pending, queued - 1, '残りは次のティックに回す');
+  });
+
+  it('時計の1時間に同期した波を作らない', () => {
+    // The hourly rollup cuts every interval at the clock hour, so spreading one
+    // over five-minute windows covers mid-hour more often than the edges.
+    // Measured over six hours on a Hub, that drew 1,069 flows at :00, 2,007 at
+    // :25 and 1,088 at :55 on traffic the raw observations show as flat.
+    const hour = 3600000;
+    const base = 10 * hour;                 // a clock hour boundary
+    // One flow present for the whole hour, and nothing else.
+    seedAgentHour(0, [
+      { remote: '203.0.113.7', local: '10.0.0.1', port: 443, from: base, to: base + hour - 1 },
+    ]);
+    clock = base + hour + BUCKET_MS;
+    for (let i = 0; i < 12; i += 1) {
+      buckets.queueRecentAgentWindows({ refoldWindows: 13 });
+    }
+    drainAll();
+
+    const counts = [];
+    for (let i = 0; i < 12; i += 1) {
+      const at = base + i * BUCKET_MS;
+      counts.push(db.prepare('SELECT COALESCE(SUM(flows), 0) f FROM connection_buckets WHERE bucketStart = ?')
+        .get(at).f);
+    }
+    assert.deepEqual(counts, new Array(12).fill(1),
+      `1時間を通して1件のはずが ${counts.join(',')} になっている`);
   });
 
   it('保持期間を過ぎた窓は捨てる', () => {

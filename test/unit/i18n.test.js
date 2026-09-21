@@ -59,8 +59,8 @@ describe('shared i18n catalog', () => {
     // Grew by 1 on 2026-09-05: degraded-retention no-candidate guidance.
     // Grew by 5 on 2026-09-07: how long a source has been offline (P3-55).
     // Grew by 2 on 2026-09-19: the connection log's new-rows badge (P3-141).
-    assert.equal(jaKeys.size, 930);
-    assert.equal(enKeys.size, 930);
+    assert.equal(jaKeys.size, 931);
+    assert.equal(enKeys.size, 931);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
