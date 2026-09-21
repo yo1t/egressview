@@ -19,6 +19,7 @@ const generalConfigSchema = z.object({
   language: z.enum(['ja', 'en']).optional(),
   autoInvestigate: z.boolean().optional(),
   retentionDays: z.coerce.number().int().refine(value => [7, 30, 90, 180, 365, 730].includes(value)).optional(),
+  timelineSource: z.enum(['observed', 'lastSeen']).optional(),
 }).strict();
 const dataSourceSchema = z.object({ enabled: z.boolean().optional(), logFile: z.string().max(4096).optional() }).strict();
 const dataSourcesSchema = z.object({
@@ -104,12 +105,13 @@ module.exports = function configRoutes(ctx) {
   router.post('/config/general', requireAdmin, (req, res) => {
     const parsed = parseRequest(generalConfigSchema, req.body, res);
     if (!parsed.ok) return;
-    const { homeCountry: hc, language: lang, autoInvestigate: ai, retentionDays: rd } = parsed.data;
+    const { homeCountry: hc, language: lang, autoInvestigate: ai, retentionDays: rd, timelineSource: ts } = parsed.data;
     const previous = {
       homeCountry: appState.homeCountry,
       uiLanguage: appState.uiLanguage,
       autoInvestigate: appState.autoInvestigate,
       retentionDays: appState.retentionDays,
+      timelineSource: appState.timelineSource,
     };
 
     if (hc) {
@@ -131,6 +133,12 @@ module.exports = function configRoutes(ctx) {
       history.setRetentionDays(appState.retentionDays);
       logger.info(`[config] Retention set to ${appState.retentionDays} days`);
     }
+    if (ts) {
+      appState.timelineSource = ts;
+      logger.info(`[config] The timeline chart is drawn from ${ts === 'observed'
+        ? 'when traffic was observed'
+        : 'when each flow was last seen'}`);
+    }
 
     try {
       saveConfig();
@@ -148,6 +156,7 @@ module.exports = function configRoutes(ctx) {
       language:        appState.uiLanguage,
       autoInvestigate: appState.autoInvestigate,
       retentionDays:   appState.retentionDays,
+      timelineSource:  appState.timelineSource,
     });
   });
 

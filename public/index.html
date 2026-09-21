@@ -252,6 +252,16 @@
               <option value="730" selected data-i18n="settings.retention.2y">2年</option>
             </select>
           </div>
+          <div class="form-group settings-form-spaced">
+            <label class="form-label" data-i18n="settings.general.timeline">時間推移グラフの元にする記録</label>
+            <select id="s-timeline-source" class="form-input">
+              <option value="observed" data-i18n="settings.timeline.observed">通信があった時刻（正確・記録が始まった時点から）</option>
+              <option value="lastSeen" data-i18n="settings.timeline.lastSeen">最後に見た時刻（従来どおり・右肩上がりになります）</option>
+            </select>
+            <p class="settings-copy" data-i18n="settings.general.timeline.note">
+              「通信があった時刻」は、いつ通信があったかを記録として取り始めた時点からしか描けません。それより前を見たい間は「最後に見た時刻」を選べますが、まだ続いている通信がすべて右端に寄るため、グラフは実際の増減とは関係なく右肩上がりになります。
+            </p>
+          </div>
           <button class="connect-btn settings-save-spaced" id="general-save-btn" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="general-status"></div>
 

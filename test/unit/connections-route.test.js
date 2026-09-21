@@ -367,7 +367,32 @@ describe('connections route: GET /connections/summary', () => {
   it('passes src and buckets options to summary aggregation', () => {
     const res = callSummaryRoute({ src: '192.168.1.10', buckets: '120' });
     assert.equal(res._status, 200);
-    assert.deepEqual(lastSummaryArgs[2], { src: '192.168.1.10', buckets: 120 });
+    assert.deepEqual(lastSummaryArgs[2], {
+      src: '192.168.1.10', buckets: 120, timelineSource: 'observed',
+    });
+  });
+
+  it('設定で選ばれた記録から時間推移を描く', () => {
+    // The two settings answer the same question from different records, so the
+    // choice has to reach the query -- and the cache must not hand one of them
+    // the other's answer.
+    // Distinct src values so neither call can be answered from a cache entry
+    // an earlier test left behind.
+    const asked = callSummaryRoute({ src: '10.10.0.1' }, { appState: { timelineSource: 'lastSeen' } });
+    assert.equal(asked._status, 200);
+    assert.equal(lastSummaryArgs[2].timelineSource, 'lastSeen');
+
+    const fresh = callSummaryRoute({ src: '10.10.0.2' }, { appState: { timelineSource: 'observed' } });
+    assert.equal(fresh._status, 200);
+    assert.equal(lastSummaryArgs[2].timelineSource, 'observed');
+
+    // Same request, only the setting differs: the cache must not hand one the
+    // other's answer.
+    callSummaryRoute({ src: '10.10.0.3' }, { appState: { timelineSource: 'observed' } });
+    lastSummaryArgs = null;
+    callSummaryRoute({ src: '10.10.0.3' }, { appState: { timelineSource: 'lastSeen' } });
+    assert.equal(lastSummaryArgs?.[2]?.timelineSource, 'lastSeen',
+      '別の設定の答えをキャッシュから返してはいけない');
   });
 
   it('returns 400 for invalid buckets', () => {

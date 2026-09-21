@@ -7,6 +7,13 @@ function createDefaultAppState() {
     uiLanguage: 'ja',
     autoInvestigate: false,
     retentionDays: 730,
+    // Which record the "over time" chart is drawn from. 'observed' counts each
+    // window from evidence that records when traffic happened; 'lastSeen'
+    // restores the original chart, which buckets flows by their last sighting
+    // and therefore slopes upward on its own. Kept as a setting while the
+    // observed record is still filling in, so an operator who would rather
+    // have the familiar shape can have it (P3-155).
+    timelineSource: 'observed',
     dnsmasqEnabled: true,
     dnsmasqLogFile: '/var/log/dnsmasq-queries.log',
     inspectEnabled: true,
@@ -63,6 +70,9 @@ function applyConfigToAppState(appState, data, { isAllowedLogPath, logger }) {
   if (data.general?.language && ['ja', 'en'].includes(data.general.language)) appState.uiLanguage = data.general.language;
   if (typeof data.general?.autoInvestigate === 'boolean') appState.autoInvestigate = data.general.autoInvestigate;
   if (data.general?.retentionDays) appState.retentionDays = data.general.retentionDays;
+  if (data.general?.timelineSource === 'lastSeen' || data.general?.timelineSource === 'observed') {
+    appState.timelineSource = data.general.timelineSource;
+  }
   if (data.adminToken) appState.adminToken = data.adminToken;
 
   if (data.auth && typeof data.auth === 'object') {
