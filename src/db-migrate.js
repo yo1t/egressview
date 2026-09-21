@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 28;
+const SCHEMA_VERSION = 29;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -1156,6 +1156,34 @@ const MIGRATIONS = [
         .get('connection_buckets');
       if (!hasTable) return;
       db.prepare("DELETE FROM connection_buckets WHERE source = 'agent'").run();
+    },
+  },
+  {
+    version: 29,
+    description: 'make counting a window cost the same however old it is (P3-155)',
+    up(db) {
+      // Counting the agent half searched `lastObservedAt >= <window start>`,
+      // which matches more rows the further back it looks: 4 ms for the newest
+      // window on one Hub and 674 ms for one seven days old. The backfill walks
+      // backwards, so it got slower as it went and ended up holding the event
+      // loop 46 times in a single minute.
+      //
+      // Bounded by when an observation started instead, it is a narrow range
+      // scan at any depth -- 19 to 23 ms measured against 1.8 million rows.
+      // The partial index carries the few thousand observations that ran longer
+      // than an hour, which the bound would otherwise miss; its condition has
+      // to match the query's exactly or SQLite will not use it.
+      const hasTable = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get('agent_observations');
+      if (!hasTable) return;
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_agent_observations_firstObservedAt
+          ON agent_observations(firstObservedAt);
+        CREATE INDEX IF NOT EXISTS idx_agent_observations_long
+          ON agent_observations(firstObservedAt)
+          WHERE lastObservedAt - firstObservedAt >= 3600000;
+      `);
     },
   },
 ];

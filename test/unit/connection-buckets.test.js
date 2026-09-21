@@ -247,6 +247,24 @@ describe('通信があった時刻を記録する（P3-155）', () => {
       `1時間を通して1件のはずが ${counts.join(',')} になっている`);
   });
 
+  it('1時間より長く続いた観測も取りこぼさない', () => {
+    // The search is bounded by when an observation started, so that counting a
+    // window costs the same however old it is. Anything that ran longer than
+    // that bound has to be picked up separately -- dropping it would be a
+    // silent undercount, and silence is the thing this table exists to remove.
+    const long = { remote: '203.0.113.7', local: '10.0.0.1', port: 443 };
+    seedAgentHour(0, [
+      { ...long, from: at(0, 0), to: at(0, 0) + 5 * 3600e3 },   // five hours
+    ]);
+    clock = at(40, 0);
+    buckets.queueRecentAgentWindows({ refoldWindows: 2 });
+    drainAll();
+
+    const at39 = db.prepare('SELECT COALESCE(SUM(flows), 0) f FROM connection_buckets WHERE bucketStart = ?')
+      .get(39 * BUCKET_MS).f;
+    assert.equal(at39, 1, '5時間続いた観測が、始まりから離れた窓で消えてはいけない');
+  });
+
   it('保持期間を過ぎた窓は捨てる', () => {
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(1) }]);
     clock = at(2, 30_000);

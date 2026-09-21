@@ -67,6 +67,19 @@ const AGENT_REFOLD_WINDOWS = 12;
 // transaction, so the longest thing this can hold the loop for is one window.
 const AGENT_WINDOWS_PER_TICK = 1;
 
+// How far back an observation may have started and still be running inside a
+// window. Everything shorter is found by a range scan over firstObservedAt;
+// everything longer has an index of its own, because there are only a few
+// thousand of them against nearly two million. Without this bound the query
+// drove from `lastObservedAt >= start`, which matches more rows the further
+// back it looks: 4 ms for the newest window and 674 ms for one seven days old,
+// and the backfill walking backwards turned into 46 stalls in a single minute.
+//
+// The value is repeated verbatim in the partial index and in the SQL below.
+// SQLite only uses a partial index when the query's condition matches the
+// index's exactly, so these three have to stay identical.
+const LONG_OBSERVATION_MS = 60 * 60 * 1000;
+
 const SOURCE_ROUTER = 'router';
 const SOURCE_AGENT = 'agent';
 
@@ -173,15 +186,33 @@ function createConnectionBuckets({ getDb, logger = console, now = () => Date.now
       INSERT INTO connection_buckets (bucketStart, dst, source, flows)
       SELECT ?, remoteAddress, '${SOURCE_AGENT}',
              COUNT(DISTINCT localAddress || '|' || remotePort || '|' || networkProtocol)
-      FROM agent_observations
-      WHERE firstObservedAt < ? AND lastObservedAt >= ?
+      FROM (
+        -- Short observations: found by when they started, within one hour of
+        -- the window.
+        SELECT localAddress, remoteAddress, remotePort, networkProtocol
+        FROM agent_observations
+        WHERE firstObservedAt >= ? AND firstObservedAt < ? AND lastObservedAt >= ?
+        UNION ALL
+        -- The few that ran longer, which the bound above would miss. Counted
+        -- exactly rather than dropped: there are only a few thousand, and an
+        -- estimate here would be a silent undercount.
+        SELECT localAddress, remoteAddress, remotePort, networkProtocol
+        FROM agent_observations
+        WHERE lastObservedAt - firstObservedAt >= ${LONG_OBSERVATION_MS}
+          AND firstObservedAt < ? AND lastObservedAt >= ?
+      )
       GROUP BY remoteAddress
     `);
 
+    const end = bucketStart + bucketMs;
     let rows = 0;
     db.transaction(() => {
       clear.run(bucketStart, SOURCE_AGENT);
-      rows = insert.run(bucketStart, bucketStart + bucketMs, bucketStart).changes;
+      rows = insert.run(
+        bucketStart,
+        bucketStart - LONG_OBSERVATION_MS, end, bucketStart,
+        end, bucketStart
+      ).changes;
     })();
     return rows;
   }
@@ -309,6 +340,7 @@ module.exports = {
   RETENTION_MS,
   MAX_FOLD_LAG_BUCKETS,
   AGENT_WINDOWS_PER_TICK,
+  LONG_OBSERVATION_MS,
   SOURCE_ROUTER,
   SOURCE_AGENT,
 };
