@@ -4,6 +4,23 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.82
+
+**The update check runs more than once.**
+
+"Checked once per day" meant "checked once per launch". The check ran when the
+app started and never again on its own, so an agent left running -- which is
+how this one is meant to be used -- checked once and then not again until the
+Mac was restarted. A Mac left up for a week checked once in that week.
+
+The twenty-four hour rule was never the problem: it decides whether a check is
+allowed, not when one happens, and nothing was asking. There is now a schedule
+that asks, so a day passing is enough for the check to run.
+
+It still only tells you. Nothing is installed without you, because an update
+that silently stops the monitoring is worse than one you have not installed
+yet.
+
 ### Agent for Mac 0.5.81
 
 **Network status keeps up with the hour you are watching.**
