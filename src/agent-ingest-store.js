@@ -1,5 +1,7 @@
 'use strict';
 
+const runtimeProfiler = require('./runtime-profiler');
+
 const path = require('node:path');
 const Database = require('better-sqlite3');
 const { applyWalPragmas } = require('./sqlite-wal');
@@ -72,59 +74,88 @@ function isRejectedObservationError(error) {
   return REJECTED_OBSERVATION_CODES.has(error?.code);
 }
 
-function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
+// How many observations are written before the loop gets a turn.
+//
+// A whole batch in one transaction is up to 200 observations and was measured
+// on the Hub at 71 to 149 ms -- time during which nothing else on the Hub can
+// run, including /healthz. That figure does not grow with the number of agents;
+// it is set by the batch size, so it is the same jank on a Hub with three
+// agents and one with three hundred. Fifty is about 37 ms at the measured 0.75
+// ms an observation, which is under the event-loop budget P3-139 was fought
+// for.
+//
+// The batch stops being written atomically, and that is safe here by
+// construction rather than by luck: an observation carries its own primary key
+// and a repeat is counted as a duplicate, and `agent_ingest_batches` is written
+// only once every chunk is in. A Hub that dies halfway leaves observations with
+// no batch row, the agent resends the same batchId, and the second attempt
+// counts what is already there as duplicates and finishes the job.
+const OBSERVATIONS_PER_CHUNK = 50;
+
+function yieldToLoop() {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
+/**
+ * Store one agent batch.
+ *
+ * Asynchronous because it gives the event loop a turn between chunks; the work
+ * itself is synchronous SQLite, so the chunk is what bounds the pause.
+ */
+async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
   const database = requireDb();
   if (!Number.isFinite(receivedAt)) throw new TypeError('receivedAt must be finite');
 
-  const operation = database.transaction(() => {
-    const existing = database.prepare(`
-      SELECT batchId, acceptedCount, duplicateCount, rejectedCount, receivedAt
-      FROM agent_ingest_batches WHERE agentId = ? AND batchId = ?
-    `).get(agentId, envelope.batchId);
-    if (existing) return batchAck(existing, true);
+  const existing = database.prepare(`
+    SELECT batchId, acceptedCount, duplicateCount, rejectedCount, receivedAt
+    FROM agent_ingest_batches WHERE agentId = ? AND batchId = ?
+  `).get(agentId, envelope.batchId);
+  if (existing) return batchAck(existing, true);
 
-    const observationExists = database.prepare(`
-      SELECT 1 FROM agent_observations WHERE agentId = ? AND observationId = ?
-    `);
-    const insertObservation = database.prepare(`
-      INSERT INTO agent_observations (
-        agentId, observationId, batchId, networkProtocol,
-        localAddress, localPort, remoteAddress, remotePort,
-        processId, processName, bundleId,
-        firstObservedAt, lastObservedAt, bytesIn, bytesOut,
-        collector, confidence, receivedAt, remoteHostname
-      ) VALUES (
-        @agentId, @observationId, @batchId, @networkProtocol,
-        @localAddress, @localPort, @remoteAddress, @remotePort,
-        @processId, @processName, @bundleId,
-        @firstObservedAt, @lastObservedAt, @bytesIn, @bytesOut,
-        @collector, @confidence, @receivedAt, @remoteHostname
-      )
-    `);
-    const upsertAppHourly = database.prepare(`
-      INSERT INTO agent_app_hourly (
-        hourStart, agentId, appIdentity, processName,
-        localAddress, remoteAddress, remotePort, networkProtocol,
-        firstObservedAt, lastObservedAt
-      ) VALUES (
-        @hourStart, @agentId, @appIdentity, @processName,
-        @localAddress, @remoteAddress, @remotePort, @networkProtocol,
-        @firstObservedAt, @lastObservedAt
-      )
-      ON CONFLICT (
-        hourStart, agentId, appIdentity, localAddress,
-        remoteAddress, remotePort, networkProtocol
-      ) DO UPDATE SET
-        processName = excluded.processName,
-        firstObservedAt = MIN(agent_app_hourly.firstObservedAt, excluded.firstObservedAt),
-        lastObservedAt = MAX(agent_app_hourly.lastObservedAt, excluded.lastObservedAt)
-    `);
+  const observationExists = database.prepare(`
+    SELECT 1 FROM agent_observations WHERE agentId = ? AND observationId = ?
+  `);
+  const insertObservation = database.prepare(`
+    INSERT INTO agent_observations (
+      agentId, observationId, batchId, networkProtocol,
+      localAddress, localPort, remoteAddress, remotePort,
+      processId, processName, bundleId,
+      firstObservedAt, lastObservedAt, bytesIn, bytesOut,
+      collector, confidence, receivedAt, remoteHostname
+    ) VALUES (
+      @agentId, @observationId, @batchId, @networkProtocol,
+      @localAddress, @localPort, @remoteAddress, @remotePort,
+      @processId, @processName, @bundleId,
+      @firstObservedAt, @lastObservedAt, @bytesIn, @bytesOut,
+      @collector, @confidence, @receivedAt, @remoteHostname
+    )
+  `);
+  const upsertAppHourly = database.prepare(`
+    INSERT INTO agent_app_hourly (
+      hourStart, agentId, appIdentity, processName,
+      localAddress, remoteAddress, remotePort, networkProtocol,
+      firstObservedAt, lastObservedAt
+    ) VALUES (
+      @hourStart, @agentId, @appIdentity, @processName,
+      @localAddress, @remoteAddress, @remotePort, @networkProtocol,
+      @firstObservedAt, @lastObservedAt
+    )
+    ON CONFLICT (
+      hourStart, agentId, appIdentity, localAddress,
+      remoteAddress, remotePort, networkProtocol
+    ) DO UPDATE SET
+      processName = excluded.processName,
+      firstObservedAt = MIN(agent_app_hourly.firstObservedAt, excluded.firstObservedAt),
+      lastObservedAt = MAX(agent_app_hourly.lastObservedAt, excluded.lastObservedAt)
+  `);
 
-    let acceptedCount = 0;
-    let duplicateCount = 0;
-    let rejectedCount = 0;
-    const acceptedObservationIds = [];
-    for (const observation of envelope.observations) {
+  let acceptedCount = 0;
+  let duplicateCount = 0;
+  let rejectedCount = 0;
+  const acceptedObservationIds = [];
+
+  const writeChunk = database.transaction((chunk) => {
+    for (const observation of chunk) {
       if (observationExists.get(agentId, observation.observationId)) {
         duplicateCount += 1;
         continue;
@@ -170,7 +201,16 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
       acceptedCount += 1;
       acceptedObservationIds.push(observation.observationId);
     }
+  });
 
+  const observations = envelope.observations;
+  for (let i = 0; i < observations.length; i += OBSERVATIONS_PER_CHUNK) {
+    if (i > 0) await yieldToLoop();
+    const chunk = observations.slice(i, i + OBSERVATIONS_PER_CHUNK);
+    runtimeProfiler.measureSync('agentIngest.chunk', () => writeChunk.immediate(chunk));
+  }
+
+  const finish = database.transaction(() => {
     // A rejected row must remain retryable. Recording this batch as complete
     // would make every retry replay the rejection forever, even after a Hub
     // migration adds support for the observation. Accepted rows remain
@@ -203,15 +243,9 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
       receivedAt,
       agentId
     );
-
-    return batchAck({
-      batchId: envelope.batchId,
-      acceptedCount,
-      duplicateCount,
-      rejectedCount,
-      receivedAt,
-    }, false, acceptedObservationIds);
   });
+  if (observations.length > OBSERVATIONS_PER_CHUNK) await yieldToLoop();
+  runtimeProfiler.measureSync('agentIngest.finish', () => finish.immediate());
 
   // Correlation deliberately does not run here. It used to, once per ingest,
   // and because it passed no `since` it re-examined the newest 5,000
@@ -222,7 +256,13 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
   // whole server stalled behind an agent's routine upload -- /healthz included.
   // The ACK only promises durability, and the periodic runner reconciles on its
   // own schedule, so this side effect never belonged in the response path.
-  return operation.immediate();
+  return batchAck({
+    batchId: envelope.batchId,
+    acceptedCount,
+    duplicateCount,
+    rejectedCount,
+    receivedAt,
+  }, false, acceptedObservationIds);
 }
 
 function pruneObservations({ before }) {
@@ -379,6 +419,7 @@ function _dbForTest() {
 }
 
 module.exports = {
+  OBSERVATIONS_PER_CHUNK,
   closeDb,
   listGeoLocations,
   initDb,

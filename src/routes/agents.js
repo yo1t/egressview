@@ -679,14 +679,16 @@ module.exports = function agentRoutes({
       // Stack samples during the stalls of P3-156 put 700 to 1,011 ms inside
       // this call, while the per-minute profile listed nothing at all for
       // ingest -- so the biggest cost was the one an operator could not see.
-      const ack = await Promise.resolve(runtimeProfiler.measureSync(
-        'agentIngest.store',
-        () => agentIngest.storeBatch(
-          req.agentIdentity.agentId,
-          parsed.data,
-          { receivedAt: startedAt }
-        )
-      ));
+      // Wall time, not a synchronous measure: storing now gives the loop a
+      // turn between chunks, so the time this takes and the time it holds the
+      // loop are different numbers. `agentIngest.chunk` is the second one.
+      const storeStartedAt = Date.now();
+      const ack = await agentIngest.storeBatch(
+        req.agentIdentity.agentId,
+        parsed.data,
+        { receivedAt: startedAt }
+      );
+      runtimeProfiler.recordWall('agentIngest.store', Date.now() - storeStartedAt);
       if (ack.replayed) {
         ingestMetrics.duplicate += parsed.data.observations.length;
       } else {
