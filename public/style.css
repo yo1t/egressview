@@ -808,6 +808,14 @@
   .stats-bar { transition: opacity 0.15s; }
   .stats-bar:hover { opacity: 0.7; }
   .stats-legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10px; color: var(--muted); margin-top: 4px; }
+  /* Sits under the legend and reads like the legend: it is a footnote about the
+     chart, not a message about the network. It had no rule at all before, so a
+     browser's default paragraph size made one line of small print look like an
+     announcement. */
+  .stats-chart-note { font-size: 10px; line-height: 1.5; color: var(--muted); margin: 4px 0 0; }
+  .stats-chart-note[hidden] { display: none; }
+  .stats-chart-note-link { font: inherit; color: var(--accent, #60a5fa); background: none; border: 0;
+    padding: 0; cursor: pointer; text-decoration: underline; }
   .stats-legend-item { display: flex; align-items: center; gap: 4px; }
   .stats-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   /* ── Stats maps (globe + flat) ──────────────────────── */

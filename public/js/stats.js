@@ -7,6 +7,7 @@ import { updateStatsMaps, scheduleStatsMapResize } from './stats-map.js?v=__ASSE
 export { initStatsMaps, updateStatsMaps, scheduleStatsMapResize, stStopSpin, stStopFlatAnim, resetStatsMaps } from './stats-map.js?v=__ASSET_VERSION__';
 import { selectedMac, nodes, currentGraphRangeKey } from './graph.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
+import { openSettings } from './settings.js?v=__ASSET_VERSION__';
 import { statsTargetRows, appSlicesFromSummary, mapPointsFromSummary } from './stats-helpers.js?v=__ASSET_VERSION__';
 import { drawAppPieChart, drawTimeline, drawBarChart, getChartMode, initChartModeButtons } from './stats-charts.js?v=__ASSET_VERSION__';
 import { appendDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
@@ -72,34 +73,38 @@ function updateMapCoverageNotice(coverage) {
 function showTimelineGap(summary, fromT) {
   const note = document.getElementById('timeline-gap-note');
   if (!note) return;
+
+  // What this chart can and cannot answer takes a paragraph to say properly,
+  // and a paragraph under a chart is read once and then stopped being read.
+  // The caveats live in the setting that chooses how the chart is drawn, where
+  // someone goes when they want to know; here there is one line pointing at
+  // them. It appears only when there is actually something to know.
   const earliest = summary?.timelineFrom;
-  if (earliest == null) {
-    const empty = !(summary?.timeline || []).length;
-    note.textContent = empty ? t('stats.timeline.none') : '';
-    note.hidden = !empty;
-    return;
-  }
-  // Two different things to admit, and the earlier one wins: a period with no
-  // record at all, and a period covered only by the Agents. Routers keep no
-  // record of when a flow was seen, so the stretch before the Hub started
-  // folding shows agent-observed traffic alone -- reading it as the whole
-  // network would understate everything else.
-  const notes = [];
-  // Few enough windows that the chart shows bars and no shape between them.
-  // Saying so is cheaper than letting someone wonder why it looks different.
+  const drawn = (summary?.timeline || []).length;
   const bars = summary?.buckets || 0;
-  if (bars > 0 && bars <= 8 && (summary?.timeline || []).length) {
-    notes.push(tVars('stats.timeline.coarse', { count: bars }));
-  }
-  if (earliest > fromT) {
-    notes.push(tVars('stats.timeline.gap', { from: new Date(earliest).toLocaleString() }));
-  }
   const fullFrom = summary?.timelineFullFrom;
-  if (fullFrom != null && fullFrom > Math.max(fromT, earliest)) {
-    notes.push(tVars('stats.timeline.agentOnly', { until: new Date(fullFrom).toLocaleString() }));
-  }
-  note.textContent = notes.join(' ');
-  note.hidden = notes.length === 0;
+  const worthSaying = earliest == null
+    ? !drawn
+    : (earliest > fromT)
+      || (bars > 0 && bars <= 8 && drawn)
+      || (fullFrom != null && fullFrom > Math.max(fromT, earliest));
+
+  note.textContent = '';
+  note.hidden = !worthSaying;
+  if (!worthSaying) return;
+
+  note.appendChild(document.createTextNode(t('stats.timeline.seeSetting.before')));
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'stats-chart-note-link';
+  link.textContent = t('stats.timeline.seeSetting.link');
+  link.addEventListener('click', () => openSettings('general'));
+  note.appendChild(link);
+  note.appendChild(document.createTextNode(t('stats.timeline.seeSetting.after')));
+
+  // Below the legend: the legend is appended to this container on every draw,
+  // so the note has to be moved after it each time.
+  note.parentElement?.appendChild(note);
 }
 
 function renderStatsSummary(summary, selIp) {
