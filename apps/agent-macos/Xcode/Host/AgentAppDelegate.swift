@@ -211,7 +211,9 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         controller.startWatchingSleep()
         startChartFolding()
         showUpdateDisclosureIfNeeded()
-        Task { await updateController.runIfDue() }
+        // Starts the schedule as well as checking now: an agent left running
+        // for a week used to check once in that week (P3-154).
+        updateController.start()
         // Fetches immediately when nothing is stored yet. Making a fresh
         // install wait a day for its first map would be a strange welcome.
         geoCacheController.start()

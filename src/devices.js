@@ -34,16 +34,9 @@ let observeManyTxn        = null;
 
 // ─── isStableMac ──────────────────────────────────────────────────────────────
 
-/**
- * Returns true if mac is a globally unique (OUI-assigned) hardware MAC.
- * Returns false for privacy/locally-administered MACs, broadcast, all-zero, or invalid input.
- */
-function isStableMac(mac) {
-  if (!mac || !/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(mac)) return false;
-  if (mac === 'ff:ff:ff:ff:ff:ff' || mac === '00:00:00:00:00:00') return false;
-  const first = parseInt(mac.split(':')[0], 16);
-  return (first & 0x02) === 0;
-}
+// Moved to src/mac.js: what a MAC can tell you is a property of the address,
+// not of this store, and the OUI lookup needs the same answer.
+const { isStableMac } = require('./mac');
 
 // ─── Choosing between candidates that claim the same IP ───────────────────────
 
@@ -125,6 +118,12 @@ function getDiscardedRedirects() {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 function initDb(dbPath) {
+  // The hysteresis below is a debounce over a particular database. Opening a
+  // different one -- a test, or a restore from backup -- starts a new world,
+  // and carrying counters across would hold an identity steady on evidence
+  // that no longer exists.
+  pendingMacSwitch.clear();
+  heldMacSwitches.clear();
   _dbPath = dbPath || DB_PATH;
   db = new Database(_dbPath);
   applyWalPragmas(db);
@@ -330,6 +329,91 @@ function initDb(dbPath) {
  * Upsert a device into the summary devices table.
  * Returns the canonical deviceId for this device.
  */
+// ─── MAC hysteresis ───────────────────────────────────────────────────────────
+
+// How many consecutive polls must agree before a device is allowed to change
+// which hardware it is. The routers poll about every two minutes, so three
+// agreeing reports is roughly six minutes of the new MAC being the only answer.
+const MAC_SWITCH_CONFIRMATIONS = 3;
+// A debounce, not a record: it is rebuilt from the next few polls after a
+// restart, and it must not grow without bound on a large network.
+const MAC_SWITCH_PENDING_LIMIT = 500;
+
+// ip -> { mac, count }: how many polls in a row have reported this new MAC.
+const pendingMacSwitch = new Map();
+// Switches held back, so the flapping is visible rather than merely absent.
+// Key: "ip recorded>proposed".
+const heldMacSwitches = new Map();
+
+function _rememberPendingMac(ip, mac) {
+  const current = pendingMacSwitch.get(ip);
+  const next = current && _sameMac(current.mac, mac)
+    ? { mac, count: current.count + 1 }
+    : { mac, count: 1 };
+  pendingMacSwitch.set(ip, next);
+  if (pendingMacSwitch.size > MAC_SWITCH_PENDING_LIMIT) {
+    const oldest = pendingMacSwitch.keys().next().value;
+    if (oldest !== ip) pendingMacSwitch.delete(oldest);
+  }
+  return next.count;
+}
+
+function _countHeldMacSwitch(ip, recorded, proposed) {
+  const key = `${ip} ${recorded}>${proposed}`;
+  heldMacSwitches.set(key, (heldMacSwitches.get(key) || 0) + 1);
+}
+
+/**
+ * Which IPs keep being reported as two different machines, most often first.
+ *
+ * An empty answer means the network settled. A large one means the hysteresis
+ * is holding something back every poll, which is a fact about the network the
+ * operator should be able to see rather than a problem quietly absorbed here.
+ */
+function getHeldMacSwitches() {
+  return [...heldMacSwitches.entries()]
+    .map(([key, count]) => {
+      const [ip, pair] = key.split(' ');
+      const [recorded, proposed] = pair.split('>');
+      return { ip, recorded, proposed, count };
+    })
+    .sort((a, b) => b.count - a.count);
+}
+
+/**
+ * The MAC to record for this IP, which is not always the one just reported.
+ *
+ * A device does not change which hardware it is between one poll and the next.
+ * When an IP that already has a globally unique MAC is reported with a
+ * different globally unique MAC, one of the two reports is wrong, and taking
+ * the newer one on sight is what made two IPs on the production Hub alternate
+ * between two identities every two minutes -- the operator saw the vendor and
+ * name change under them, every flip wrote another observation row, and the
+ * merge logic absorbed live hardware into the wrong device eleven times.
+ *
+ * So the change has to be argued for: the same new MAC, in three polls in a
+ * row, before the identity moves. A genuine re-assignment still lands, about
+ * six minutes later. Flapping never does.
+ *
+ * The observation written further down is left alone on purpose. What the
+ * router said is evidence, and holding an identity steady is not a licence to
+ * record something the router did not report.
+ */
+function _macForRecord(ip, recordedMac, reportedMac) {
+  if (!ip || !isStableMac(reportedMac)) return reportedMac;
+  if (!isStableMac(recordedMac) || _sameMac(recordedMac, reportedMac)) {
+    pendingMacSwitch.delete(ip);
+    return reportedMac;
+  }
+  const agreed = _rememberPendingMac(ip, reportedMac);
+  if (agreed >= MAC_SWITCH_CONFIRMATIONS) {
+    pendingMacSwitch.delete(ip);
+    return reportedMac;
+  }
+  _countHeldMacSwitch(ip, recordedMac, reportedMac);
+  return recordedMac;
+}
+
 function upsert(d) {
   if (!db) return null;
   const now = Date.now();
@@ -363,8 +447,89 @@ function upsert(d) {
  *
  * @returns {string|null} deviceId
  */
+// ─── What counts as a device's address ────────────────────────────────────────
+
+// A device list should contain devices.
+//
+// Agents report every address their machine holds, and the Hub turned each one
+// into a row: measured on the production Hub 2026-09-20, 305 of 427 rows (72%)
+// were not devices. They were one machine's other addresses -- rotating IPv6
+// temporary addresses, per-interface link-local addresses including AirDrop's
+// `%awdl0`, virtual-machine bridges, loopback, broadcast and the unspecified
+// address. The IPv6 ones rotate every few days, so the list grew for ever.
+//
+// IPv6 is not excluded because it does not matter. It is excluded because a
+// device's IPv6 addresses are an attribute of the device here -- the `ipv6Addr`
+// column, filled from the neighbour cache -- and a device that owns eight
+// temporary addresses is one device, not eight.
+const NOT_A_DEVICE = [
+  { re: /^0\.0\.0\.0$/,                        why: 'unspecified' },
+  { re: /^127\./,                              why: 'loopback' },
+  { re: /^169\.254\./,                         why: 'link-local' },
+  { re: /^22[4-9]\.|^23\d\./,                  why: 'multicast' },
+  { re: /^255\.255\.255\.255$/,                why: 'broadcast' },
+  // 100.64/10, carrier-grade NAT. Tailscale hands these out; they name a peer
+  // on an overlay, not a machine on this network.
+  { re: /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, why: 'carrier-grade NAT' },
+];
+
+/**
+ * True when an address can name a device on the network being watched.
+ *
+ * Deliberately permissive about which IPv4 ranges are "local": a Hub may watch
+ * a network that is publicly addressed, and refusing anything outside RFC1918
+ * would make it blind there. What is refused is what cannot be a device under
+ * any addressing scheme.
+ */
+function isDeviceAddress(ip) {
+  if (typeof ip !== 'string' || !ip) return false;
+  if (ip.includes(':')) return false;                    // IPv6 is an attribute
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return false;
+  return !NOT_A_DEVICE.some(rule => rule.re.test(ip));
+}
+
+/**
+ * Correct what a device *is*, without claiming to have seen it.
+ *
+ * A DHCP lease is not a sighting. It says an address was assigned, and it
+ * stays assigned for days after the machine is switched off. Feeding leases
+ * through observeDevice() made every leased device permanently "seen just
+ * now": on the production Hub a printer that had last been seen two hours
+ * earlier read as zero minutes, and active / stale / archived stopped meaning
+ * anything (P3-138).
+ *
+ * So the lease updates identity and nothing else. It does not move lastSeen,
+ * and it does not create a row: a device becomes visible when something
+ * actually observes it -- ARP, or its own traffic -- and until then there is
+ * no evidence it is here.
+ *
+ * @returns {boolean} whether a row was updated
+ */
+function updateIdentity({ ip, mac = null, vendor = null, dnsName = null } = {}) {
+  if (!db || !isDeviceAddress(ip)) return false;
+  const existing = stmtSelectIp.get(ip);
+  if (!existing || existing.archivedAt != null) return false;
+  const next = {
+    mac: mac || existing.mac,
+    // The vendor is read from the MAC, so it travels with it. A caller that
+    // corrects the MAC and leaves the old vendor states something no source
+    // reported.
+    vendor: mac && mac !== existing.mac ? vendor : (existing.vendor || vendor),
+    dnsName: dnsName || existing.dnsName,
+  };
+  if (next.mac === existing.mac && next.vendor === existing.vendor && next.dnsName === existing.dnsName) {
+    return false;
+  }
+  return db.prepare(
+    'UPDATE devices SET mac = ?, vendor = ?, dnsName = ? WHERE deviceId = ?'
+  ).run(next.mac, next.vendor, next.dnsName, existing.deviceId).changes > 0;
+}
+
 function observeDevice(d) {
   if (!db) return null;
+  // The list is of devices, so an address that cannot name one does not make a
+  // row. See isDeviceAddress.
+  if (!isDeviceAddress(d?.ip)) return null;
   const now = Date.now();
 
   // ── 1. Look up by IP ──────────────────────────────────────────────────────
@@ -416,10 +581,17 @@ function observeDevice(d) {
   }
 
   // ── 3. Upsert summary table ───────────────────────────────────────────────
+  // What this IP is, not merely what the last poll called it. See
+  // _macForRecord: an identity that changes every two minutes is not an
+  // identity, and it was the source of eleven wrong merges on production.
+  const macForRecord = _macForRecord(d.ip, existingDevice?.mac || null, d.mac || null);
+  const heldBack = macForRecord !== (d.mac || null);
   const deviceId = upsert({
     ip:          d.ip,
-    mac:         d.mac         || null,
-    vendor:      d.vendor      || null,
+    mac:         macForRecord   || null,
+    // The vendor is derived from the MAC, so it follows it. Keeping the new
+    // vendor beside the old MAC would state something neither report made.
+    vendor:      (heldBack ? existingDevice?.vendor : d.vendor) || null,
     dnsName:     d.dnsName     || null,
     mdnsName:    d.mdnsName    || null,
     netbiosName: d.netbiosName || null,
@@ -887,6 +1059,10 @@ module.exports = {
   pruneObservations,
   getDiscardedRedirects,
   chooseForIp,
+  isDeviceAddress,
+  updateIdentity,
+  getHeldMacSwitches,
+  MAC_SWITCH_CONFIRMATIONS,
   _initForTest,
   _observationsForTest,
 };

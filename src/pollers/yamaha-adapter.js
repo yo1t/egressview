@@ -29,6 +29,15 @@ function createYamahaAdapter({ id = '' } = {}) {
     needsNdpRefresh: poller.needsNdpRefresh,
     getArpCache: poller.getArpCache,
     getArpMac: poller.getArpMac,
+
+    // Not in the common contract: only a router that is also the DHCP server
+    // has a lease table, and a Cisco switch here is not one. Callers check for
+    // the method rather than assume every adapter has it.
+    refreshDhcp: poller.refreshYamahaDhcp,
+    needsDhcpRefresh: poller.needsDhcpRefresh,
+    getDhcpCache: poller.getDhcpCache,
+    getDhcpLease: poller.getDhcpLease,
+    getDhcpMac: poller.getDhcpMac,
     getNdpByMac: poller.getNdpByMac,
 
     getIp: poller.getIp,

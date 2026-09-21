@@ -6,6 +6,7 @@ const { createRouterPollScheduler } = require('./router-poll-scheduler');
 const { createYamahaAdapter } = require('./pollers/yamaha-adapter');
 const { createCiscoAdapter } = require('./pollers/cisco-adapter');
 const { createConntrackAdapter } = require('./pollers/conntrack-adapter');
+const { getOuiVendor } = require('./device-identify');
 const { MAX_ROUTERS, normalizeRouterRecord, publicRouter } = require('./router-config');
 const { isAllowedRouterIp } = require('./utils');
 const { normalizeRouterHostName } = require('./pollers/router-prompt');
@@ -42,6 +43,32 @@ function createRouterManager({
         () => adapter.refreshArp({ signal }),
       );
       signal?.throwIfAborted();
+    }
+    // The DHCP server's own ledger, where there is one. It answers a question
+    // ARP cannot: not who replied at this address a moment ago, but who the
+    // address was actually given to. On this network ARP alternated between
+    // two machines for one address every poll and the device list followed it
+    // (P3-138); the lease table never did. It also carries the hostname the
+    // client asked for, which nothing else here has.
+    if (typeof adapter.refreshDhcp === 'function' && adapter.needsDhcpRefresh?.()) {
+      await runtimeProfiler.measureAsync(
+        `router.${kind}.poll.refreshDhcp`,
+        () => adapter.refreshDhcp({ signal }),
+      );
+      signal?.throwIfAborted();
+      // Identity only. A lease is not a sighting: it stays assigned for days
+      // after the machine is switched off, and feeding leases through
+      // observeDevice() made every leased device read as seen just now.
+      for (const [ip, lease] of adapter.getDhcpCache()) {
+        devices?.updateIdentity?.({
+          ip,
+          mac: lease.mac,
+          vendor: getOuiVendor(lease.mac),
+          // The name the client gave when it asked for the address. It is the
+          // device's own claim, like every other name here.
+          dnsName: lease.host || null,
+        });
+      }
     }
     if (adapter.needsNdpRefresh()) {
       await runtimeProfiler.measureAsync(

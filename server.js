@@ -748,6 +748,29 @@ server.listen(PORT, HOST, () => {
   authAudit.prune();
   setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 
+  // An IP that keeps being reported as two different machines, and a merge that
+  // keeps having its observations dropped, are both facts about the network the
+  // operator should be able to see. Both were already counted and neither was
+  // read by anything, which is the same as not counting them (P3-138).
+  setInterval(() => {
+    const held = devices.getHeldMacSwitches();
+    if (held.length) {
+      logger.warn(
+        `[device-identity] held MAC switches: ${held.slice(0, 5)
+          .map(entry => `${entry.ip} ${entry.recorded}->${entry.proposed} x${entry.count}`)
+          .join(', ')}`
+      );
+    }
+    const discarded = devices.getDiscardedRedirects();
+    if (discarded.length) {
+      logger.warn(
+        `[device-identity] observations dropped by a wrong merge: ${discarded.slice(0, 5)
+          .map(entry => `${entry.dropId}>${entry.keepId} x${entry.discarded}`)
+          .join(', ')}`
+      );
+    }
+  }, 15 * 60 * 1000).unref();
+
   if (DEMO_MODE) {
     const { seedDemoConnections } = require('./scripts/demo-seed');
     const seeded = seedDemoConnections(history);
