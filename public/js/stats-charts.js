@@ -7,16 +7,32 @@ import { truncateLabel, chartInnerWidth } from './stats-helpers.js?v=__ASSET_VER
 
 const STATS_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#a78bfa'];
 
-let chartMode = 'stack'; // 'stack' | 'line'
+let chartMode = 'composition'; // 'composition' | 'compare'
+let selectedTimelineTarget = null;
+let chartModeChanged = null;
 
 export function getChartMode() { return chartMode; }
+export function getSelectedTimelineTarget() { return selectedTimelineTarget; }
 
-/** Wire the stack/line toggle buttons; onChange fires after the mode flips. */
+function activateChartMode(mode) {
+  chartMode = mode;
+  document.querySelectorAll('.chart-mode-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === chartMode);
+  });
+}
+
+export function selectTimelineTarget(target) {
+  selectedTimelineTarget = target;
+  activateChartMode('compare');
+  chartModeChanged?.();
+}
+
+/** Wire the composition/compare toggle buttons; onChange fires after a change. */
 export function initChartModeButtons(onChange) {
+  chartModeChanged = onChange;
   document.querySelectorAll('.chart-mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      chartMode = btn.dataset.mode;
-      document.querySelectorAll('.chart-mode-btn').forEach(b => b.classList.toggle('active', b === btn));
+      activateChartMode(btn.dataset.mode);
       onChange();
     });
   });
@@ -175,8 +191,6 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
   const ih = h - margin.top - margin.bottom;
   const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
-  // Centre time of each bucket
-  const times = d3.range(buckets).map(i => fromT + bw * (i + 0.5));
   const xScale = d3.scaleTime().domain([fromT, toT]).range([0, iw]);
 
   const labels = [...topOrgs, '__other__'];
@@ -189,94 +203,90 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
     ? '#6b7280'
     : STATS_COLORS[labels.indexOf(label) % STATS_COLORS.length];
 
-  // Few enough windows that a curve between them would be mostly invention.
-  // A fifteen-minute period is three five-minute windows: drawn as an area,
-  // d3 runs a monotone curve through three points and fills it, and the result
-  // is a smooth slope that reads as a trend. There is no trend in three
-  // numbers, and nothing was measured between them.
-  const sparse = buckets <= 8;
-  const columnWidth = Math.max(2, (xScale(fromT + bw) - xScale(fromT)) - 2);
-
-  if (chartMode === 'stack') {
-    // ─── Stacked area chart ──────────────────────────
-    // Reshape data into [{time, label1: v, label2: v, ...}] for d3.stack
-    const stackData = times.map((t, i) => {
-      const row = { time: t };
+  const columnWidth = Math.max(1, xScale(fromT + bw) - xScale(fromT) - 1);
+  const stackData = d3.range(buckets).map((_, i) => {
+      const row = { bucket: i };
       for (const l of visibleLabels) row[l] = series.get(l)[i];
       return row;
-    });
+  });
+  const totals = stackData.map(row => visibleLabels.reduce((sum, label) => sum + row[label], 0));
+  const maxY = Math.max(1, ...totals);
+  const yScale = d3.scaleLinear().domain([0, maxY]).nice().range([ih, 0]);
+
+  g.append('g').attr('class', 'stats-axis')
+    .attr('transform', `translate(0,${ih})`)
+    .call(d3.axisBottom(xScale).ticks(Math.min(8, Math.floor(iw / 80))).tickSizeOuter(0));
+  g.append('g').attr('class', 'stats-axis')
+    .call(d3.axisLeft(yScale).ticks(5).tickSizeOuter(0));
+
+  if (chartMode === 'composition') {
+    // Every rectangle is one recorded time window. Curves and filled areas
+    // imply values between observations, which this record does not contain.
     const stack = d3.stack().keys(visibleLabels);
     const layers = stack(stackData);
-    const maxY = d3.max(layers, layer => d3.max(layer, d => d[1])) || 1;
-    const yScale = d3.scaleLinear().domain([0, maxY]).nice().range([ih, 0]);
-
-    g.append('g').attr('class', 'stats-axis')
-      .attr('transform', `translate(0,${ih})`)
-      .call(d3.axisBottom(xScale).ticks(Math.min(8, Math.floor(iw / 80))).tickSizeOuter(0));
-    g.append('g').attr('class', 'stats-axis')
-      .call(d3.axisLeft(yScale).ticks(5).tickSizeOuter(0));
-
-    if (sparse) {
-      // One column per window, each as wide as the window it stands for.
-      for (const layer of layers) {
-        g.append('g').selectAll('rect').data(layer).join('rect')
-          .attr('x', (_, i) => xScale(times[i]) - columnWidth / 2)
-          .attr('y', d => yScale(d[1]))
-          .attr('width', columnWidth)
-          .attr('height', d => Math.max(0, yScale(d[0]) - yScale(d[1])))
-          .attr('fill', colorFor(layer.key))
-          .attr('fill-opacity', 0.85);
-      }
-    } else {
-      const area = d3.area()
-        .x((_, i) => xScale(times[i]))
-        .y0(d => yScale(d[0]))
-        .y1(d => yScale(d[1]))
-        .curve(d3.curveMonotoneX);
-      g.selectAll('path.stack-area').data(layers).join('path')
-        .attr('class', 'stack-area')
-        .attr('d', area)
-        .attr('fill', d => colorFor(d.key))
-        .attr('fill-opacity', 0.85)
-        .attr('stroke', d => colorFor(d.key))
-        .attr('stroke-width', 0.5);
+    for (const layer of layers) {
+      g.append('g').selectAll('rect').data(layer).join('rect')
+        .attr('x', (_, i) => xScale(fromT + i * bw) + 0.5)
+        .attr('y', d => yScale(d[1]))
+        .attr('width', columnWidth)
+        .attr('height', d => Math.max(0, yScale(d[0]) - yScale(d[1])))
+        .attr('fill', colorFor(layer.key))
+        .attr('fill-opacity', 0.85);
     }
   } else {
-    // ─── Line chart ──────────────────────────────────
-    const maxY = Math.max(1, ...visibleLabels.map(l => Math.max(...series.get(l))));
-    const yScale = d3.scaleLinear().domain([0, maxY]).nice().range([ih, 0]);
-
-    g.append('g').attr('class', 'stats-axis')
-      .attr('transform', `translate(0,${ih})`)
-      .call(d3.axisBottom(xScale).ticks(Math.min(8, Math.floor(iw / 80))).tickSizeOuter(0));
-    g.append('g').attr('class', 'stats-axis')
-      .call(d3.axisLeft(yScale).ticks(5).tickSizeOuter(0));
-
-    if (sparse) {
-      // Marks where the windows are, and nothing between them. A line through
-      // three points would draw a slope that was never measured.
-      for (const label of visibleLabels) {
-        g.append('g').selectAll('rect').data(series.get(label)).join('rect')
-          .attr('x', (_, i) => xScale(times[i]) - columnWidth / 2)
-          .attr('y', d => yScale(d) - 1)
-          .attr('width', columnWidth)
-          .attr('height', 2)
-          .attr('fill', colorFor(label));
-      }
-    } else {
-      const line = d3.line()
-        .x((_, i) => xScale(times[i]))
-        .y(d => yScale(d))
-        .curve(d3.curveMonotoneX);
-      for (const label of visibleLabels) {
-        g.append('path').datum(series.get(label))
-          .attr('class', 'stats-line')
-          .attr('fill', 'none')
-          .attr('stroke', colorFor(label))
-          .attr('d', line);
-      }
+    if (!visibleLabels.includes(selectedTimelineTarget)) {
+      selectedTimelineTarget = visibleLabels.find(label => label !== '__other__') || visibleLabels[0] || null;
     }
+    const selected = selectedTimelineTarget ? series.get(selectedTimelineTarget) : new Array(buckets).fill(0);
+    g.selectAll('rect.timeline-total').data(totals).join('rect')
+      .attr('class', 'timeline-total')
+      .attr('x', (_, i) => xScale(fromT + i * bw) + 0.5)
+      .attr('y', d => yScale(d))
+      .attr('width', columnWidth)
+      .attr('height', d => ih - yScale(d))
+      .attr('fill', '#64748b').attr('fill-opacity', 0.28);
+    g.selectAll('rect.timeline-selected').data(selected).join('rect')
+      .attr('class', 'timeline-selected')
+      .attr('x', (_, i) => xScale(fromT + i * bw) + columnWidth * 0.2)
+      .attr('y', d => yScale(d))
+      .attr('width', Math.max(1, columnWidth * 0.6))
+      .attr('height', d => ih - yScale(d))
+      .attr('fill', colorFor(selectedTimelineTarget));
   }
+
+  const formatTime = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+  const tipWidth = Math.min(260, Math.max(180, iw * 0.55));
+  const tip = g.append('g').attr('class', 'stats-timeline-tooltip').attr('visibility', 'hidden');
+  tip.append('rect').attr('width', tipWidth).attr('height', 48).attr('rx', 4);
+  const tipLine1 = tip.append('text').attr('x', 8).attr('y', 17);
+  const tipLine2 = tip.append('text').attr('x', 8).attr('y', 35);
+  const showTip = (index) => {
+    const start = fromT + index * bw;
+    const end = Math.min(toT, start + bw);
+    const x = Math.min(Math.max(0, xScale(start) + 5), Math.max(0, iw - tipWidth));
+    tip.attr('transform', `translate(${x},4)`).attr('visibility', 'visible');
+    tipLine1.text(`${t('stats.timeline.tooltip.interval')}: ${formatTime.format(start)}–${formatTime.format(end)}`);
+    const selectedValue = selectedTimelineTarget ? (series.get(selectedTimelineTarget)?.[index] || 0) : null;
+    tipLine2.text(chartMode === 'compare' && selectedTimelineTarget
+      ? `${t('stats.timeline.tooltip.selected')}: ${selectedTimelineTarget} ${selectedValue.toLocaleString()} / ${t('stats.timeline.tooltip.total')} ${totals[index].toLocaleString()}`
+      : `${t('stats.timeline.tooltip.total')}: ${totals[index].toLocaleString()}`);
+  };
+  const hideTip = () => tip.attr('visibility', 'hidden');
+  g.append('g').selectAll('rect').data(totals).join('rect')
+    .attr('class', 'timeline-hit-target')
+    .attr('x', (_, i) => xScale(fromT + i * bw))
+    .attr('y', 0).attr('width', Math.max(2, columnWidth + 1)).attr('height', ih)
+    .attr('fill', 'transparent').attr('tabindex', 0).attr('role', 'img')
+    .attr('aria-label', (_, i) => {
+      const values = visibleLabels.map(label => `${label === '__other__' ? t('stats.legend.other') : label}: ${series.get(label)[i]}`);
+      return `${formatTime.format(fromT + i * bw)}–${formatTime.format(Math.min(toT, fromT + (i + 1) * bw))}; ${t('stats.timeline.tooltip.total')}: ${totals[i]}; ${values.join('; ')}`;
+    })
+    .on('mouseenter', function() {
+      showTip([...this.parentNode.children].indexOf(this));
+    })
+    .on('mouseleave', hideTip)
+    .on('focus', function() { showTip([...this.parentNode.children].indexOf(this)); })
+    .on('blur', hideTip);
 
   // Legend
   const isMobile = window.matchMedia('(max-width: 768px)').matches;
@@ -285,8 +295,10 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
   const legend = document.createElement('div');
   legend.className = 'stats-legend';
   for (const label of visibleLabels) {
-    const item = document.createElement('div');
+    const item = document.createElement('button');
+    item.type = 'button';
     item.className = 'stats-legend-item';
+    item.classList.toggle('is-selected', chartMode === 'compare' && label === selectedTimelineTarget);
     const dot = document.createElement('div');
     dot.className = 'stats-legend-dot';
     dot.style.background = colorFor(label);
@@ -294,12 +306,13 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
     const labelText = label === '__other__' ? t('stats.legend.other') : truncateLabel(label, isMobile ? 18 : 40);
     item.appendChild(document.createTextNode(labelText));
     item.title = label === '__other__' ? t('stats.legend.other') : label;
+    item.addEventListener('click', () => selectTimelineTarget(label));
     legend.appendChild(item);
   }
   document.getElementById('stats-timeline').appendChild(legend);
 }
 
-export function drawBarChart(orgs /* [[name, count], ...] */) {
+export function drawBarChart(orgs /* [[name, count], ...] */, selectableTargets = []) {
   const svg = d3.select('#chart-bar');
   const node = svg.node();
   const w = node.clientWidth || 600;
@@ -320,6 +333,7 @@ export function drawBarChart(orgs /* [[name, count], ...] */) {
   const maxX = Math.max(1, ...orgs.map(d => d[1]));
   const xScale = d3.scaleLinear().domain([0, maxX]).range([0, iw]);
   const yScale = d3.scaleBand().domain(orgs.map(d => d[0])).range([0, ih]).padding(0.2);
+  const selectable = new Set(selectableTargets);
 
   // Labels (truncate long names; show full name via title)
   g.append('g').attr('class', 'stats-axis').call(
@@ -331,12 +345,23 @@ export function drawBarChart(orgs /* [[name, count], ...] */) {
   // Bars
   g.selectAll('rect').data(orgs).join('rect')
     .attr('class', 'stats-bar')
+    .classed('is-selected', d => chartMode === 'compare' && d[0] === selectedTimelineTarget)
     .attr('x', 0)
     .attr('y', d => yScale(d[0]))
     .attr('height', yScale.bandwidth())
     .attr('width', d => xScale(d[1]))
     .attr('fill', (_, i) => STATS_COLORS[i % STATS_COLORS.length])
-    .attr('rx', 2);
+    .attr('rx', 2)
+    .attr('tabindex', d => selectable.has(d[0]) ? 0 : null)
+    .attr('role', d => selectable.has(d[0]) ? 'button' : null)
+    .attr('aria-label', d => `${d[0]}: ${d[1]}`)
+    .on('click', (_, d) => { if (selectable.has(d[0])) selectTimelineTarget(d[0]); })
+    .on('keydown', (event, d) => {
+      if (selectable.has(d[0]) && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        selectTimelineTarget(d[0]);
+      }
+    });
 
   // Value labels
   g.selectAll('text.bar-value').data(orgs).join('text')

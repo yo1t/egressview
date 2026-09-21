@@ -789,6 +789,9 @@
   }
   .stats-chart-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
   .stats-chart-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; flex-shrink: 0; }
+  .stats-timeline-basis-badge { margin-left: 8px; padding: 2px 6px; border: 1px solid #d97706;
+    border-radius: 999px; color: #fbbf24; font-size: 9px; white-space: nowrap; }
+  .stats-timeline-basis-badge[hidden] { display: none; }
   .stats-chart svg { flex: 1; width: 100%; height: 100%; }
   /* Bar chart: scroll when content is large */
   #stats-bar { overflow-y: auto; }
@@ -807,6 +810,7 @@
   .stats-line { fill: none; stroke-width: 1.6; }
   .stats-bar { transition: opacity 0.15s; }
   .stats-bar:hover { opacity: 0.7; }
+  .stats-bar.is-selected { stroke: #f8fafc; stroke-width: 1.5px; }
   .stats-legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10px; color: var(--muted); margin-top: 4px; }
   /* Sits under the legend and reads like the legend: it is a footnote about the
      chart, not a message about the network. It had no rule at all before, so a
@@ -816,8 +820,13 @@
   .stats-chart-note[hidden] { display: none; }
   .stats-chart-note-link { font: inherit; color: var(--accent, #60a5fa); background: none; border: 0;
     padding: 0; cursor: pointer; text-decoration: underline; }
-  .stats-legend-item { display: flex; align-items: center; gap: 4px; }
+  .stats-legend-item { display: flex; align-items: center; gap: 4px; border: 0; padding: 1px 3px;
+    border-radius: 3px; color: inherit; background: transparent; font: inherit; cursor: pointer; }
+  .stats-legend-item:hover, .stats-legend-item:focus-visible { color: var(--text); outline: 1px solid var(--accent); }
+  .stats-legend-item.is-selected { color: var(--text); background: rgba(59,130,246,0.16); }
   .stats-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .stats-timeline-tooltip rect { fill: rgba(5,10,20,0.96); stroke: var(--border); }
+  .stats-timeline-tooltip text { fill: var(--text); font: 10px ui-monospace, monospace; }
   /* ── Stats maps (globe + flat) ──────────────────────── */
   .stats-maps {
     display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr) minmax(0, 1fr); gap: 8px;

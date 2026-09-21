@@ -17,7 +17,10 @@ function initStats() {
   initStats._done = true;
 
   window.addEventListener('resize', scheduleStatsMapResize);
-  initChartModeButtons(() => { if (statsMode) updateStats(); });
+  initChartModeButtons(() => {
+    statsRenderedSummary.mode = null;
+    if (statsMode) updateStats();
+  });
 }
 
 initStats();
@@ -107,6 +110,20 @@ function showTimelineGap(summary, fromT) {
   note.parentElement?.appendChild(note);
 }
 
+function showTimelineBasis(summary) {
+  const title = document.getElementById('stats-timeline-title');
+  const badge = document.getElementById('stats-timeline-basis-badge');
+  if (!title || !badge) return;
+  const lastSeen = summary?.timelineBasis === 'lastSeen';
+  title.textContent = t(lastSeen ? 'stats.title.timeline.lastSeen' : 'stats.title.timeline.observed');
+  badge.hidden = !lastSeen;
+  badge.textContent = lastSeen
+    ? t(summary?.timelineScopeFallback
+      ? 'stats.timeline.badge.scopeFallback'
+      : 'stats.timeline.badge.lastSeen')
+    : '';
+}
+
 function renderStatsSummary(summary, selIp) {
   const targetRows = statsTargetRows(summary);
   if (!targetRows.length && !(summary.total > 0)) {
@@ -115,12 +132,13 @@ function renderStatsSummary(summary, selIp) {
   }
   setStatsEmpty(false, selIp);
   updateMapCoverageNotice(summary.mapCoverage);
+  showTimelineBasis(summary);
 
   const isMobile = window.matchMedia('(max-width: 768px)').matches;
   const sortedTargets = targetRows.map(r => [r.key, r.count]);
-  const topN = isMobile ? 5 : 10;
+  const topN = 5;
   const topTargets = sortedTargets.slice(0, topN).map(([key]) => key);
-  drawBarChart(isMobile ? sortedTargets.slice(0, 15) : sortedTargets);
+  drawBarChart(isMobile ? sortedTargets.slice(0, 15) : sortedTargets, topTargets);
 
   const buckets = summary.buckets || 60;
   // The bars span what the record covers, which is not always the period that
@@ -160,6 +178,7 @@ function renderStatsFromLocalConnections(selIp) {
     return;
   }
   setStatsEmpty(false, selIp);
+  showTimelineBasis({ timelineBasis: 'lastSeen', timelineScopeFallback: false });
 
   // ── Total sessions per destination ──────────────────────
   const isMobile = window.matchMedia('(max-width: 768px)').matches;
@@ -169,10 +188,10 @@ function renderStatsFromLocalConnections(selIp) {
     orgCounts.set(key, (orgCounts.get(key) || 0) + 1);
   }
   const sortedOrgs = [...orgCounts.entries()].sort((a,b) => b[1] - a[1]);
-  const topN = isMobile ? 5 : 10;
+  const topN = 5;
   const topOrgs = sortedOrgs.slice(0, topN).map(e => e[0]);
 
-  drawBarChart(isMobile ? sortedOrgs.slice(0, 15) : sortedOrgs);
+  drawBarChart(isMobile ? sortedOrgs.slice(0, 15) : sortedOrgs, topOrgs);
 
   // ── Time-series buckets ──────────────────────────────
   const tr = getTimeRange();

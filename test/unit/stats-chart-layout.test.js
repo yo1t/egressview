@@ -30,4 +30,20 @@ describe('stats chart layout', () => {
 
     assert.equal(chartInnerWidth(600, { left: 180, right: 40 }), 380);
   });
+
+  it('draws discrete windows without interpolating unobserved values', () => {
+    const charts = fs.readFileSync(path.join(root, 'public/js/stats-charts.js'), 'utf8');
+
+    assert.doesNotMatch(charts, /curveMonotoneX|d3\.area\(|d3\.line\(/);
+    assert.match(charts, /chartMode = 'composition'/);
+    assert.match(charts, /timeline-total/);
+    assert.match(charts, /timeline-selected/);
+  });
+
+  it('keeps the timeline to five named destinations plus Other', () => {
+    const stats = fs.readFileSync(path.join(root, 'public/js/stats.js'), 'utf8');
+    const limits = [...stats.matchAll(/const topN = (\d+);/g)].map(match => Number(match[1]));
+
+    assert.deepEqual(limits, [5, 5]);
+  });
 });

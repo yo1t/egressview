@@ -34,6 +34,9 @@ function historyStub() {
       mapCoverage: { placed: 5, unplaced: 0 },
       appGroups: [{ app: 'curl', count: 5, attribution: 'agent' }],
       timeline: [{ key: 'Example Org', bucket: 0, count: 5 }],
+      timelineBasis: 'observed',
+      timelineBucketMs: 300_000,
+      timelineScopeFallback: false,
       total: 5,
       buckets: 60,
       from: 0,
@@ -70,6 +73,9 @@ describe('GET /api/connections/summary over HTTP', () => {
     assert.ok(Array.isArray(body.byDst), 'byDst should be an array');
     assert.ok(Array.isArray(body.byDevice), 'byDevice should be an array');
     assert.equal(typeof body.serverTime, 'number');
+    assert.equal(body.timelineBasis, 'observed');
+    assert.equal(body.timelineBucketMs, 300_000);
+    assert.equal(body.timelineScopeFallback, false);
   });
 
   // The reason the declaration was withheld: a contract nobody exercises is

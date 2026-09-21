@@ -1,6 +1,7 @@
 'use strict';
 
 const { Router } = require('express');
+const runtimeProfiler = require('../runtime-profiler');
 
 // Bumped only when the shape changes in a way an older agent cannot ignore.
 const AGENT_GEO_CACHE_SCHEMA_VERSION = 1;
@@ -673,10 +674,18 @@ module.exports = function agentRoutes({
     activeIngests += 1;
     ingestMetrics.maxInFlight = Math.max(ingestMetrics.maxInFlight, activeIngests);
     try {
-      const ack = await Promise.resolve(agentIngest.storeBatch(
-        req.agentIdentity.agentId,
-        parsed.data,
-        { receivedAt: startedAt }
+      // Measured because this is the largest thing the Hub does on its own
+      // event loop and, until now, the only large thing it did not report.
+      // Stack samples during the stalls of P3-156 put 700 to 1,011 ms inside
+      // this call, while the per-minute profile listed nothing at all for
+      // ingest -- so the biggest cost was the one an operator could not see.
+      const ack = await Promise.resolve(runtimeProfiler.measureSync(
+        'agentIngest.store',
+        () => agentIngest.storeBatch(
+          req.agentIdentity.agentId,
+          parsed.data,
+          { receivedAt: startedAt }
+        )
       ));
       if (ack.replayed) {
         ingestMetrics.duplicate += parsed.data.observations.length;
@@ -697,12 +706,12 @@ module.exports = function agentRoutes({
             : []
         ));
         if (acceptedIds.size > 0) {
-          recordAgentFlows({
+          runtimeProfiler.measureSync('agentIngest.recordFlows', () => recordAgentFlows({
             ...parsed.data,
             observations: parsed.data.observations.filter(observation => (
               acceptedIds.has(observation.observationId)
             )),
-          });
+          }));
         }
       }
       audit(req, 'agent_ingest', ack.rejected > 0 ? 'failure' : 'success', {

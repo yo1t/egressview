@@ -507,7 +507,13 @@ function createHistoryQueries({
       return result;
     };
     const db = getDb();
-    if (!db) return { byDst: [], byDevice: [] };
+    if (!db) return {
+      byDst: [],
+      byDevice: [],
+      timelineBasis: timelineSource === 'lastSeen' ? 'lastSeen' : 'observed',
+      timelineBucketMs: null,
+      timelineScopeFallback: false,
+    };
     const source = connectionSource(sourceScope, 'connections', { from, to });
     const conditions = [];
     const params = [];
@@ -822,6 +828,12 @@ function createHistoryQueries({
       timelineFullFrom,
       // What the bars actually span, which the chart draws its axis from.
       timelineRange: { from: timelineFrom, to: timelineTo },
+      // The browser must not infer semantics from the shape of the values.
+      // A scoped question cannot use the all-source folded record, so it
+      // intentionally falls back to the legacy last-seen projection.
+      timelineBasis: useBuckets ? 'observed' : 'lastSeen',
+      timelineBucketMs: bucketMs,
+      timelineScopeFallback: timelineSource !== 'lastSeen' && (sourceScope != null || src != null),
       timeline,
       total,
       buckets: bucketCount,

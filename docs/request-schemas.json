@@ -1098,6 +1098,13 @@
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
+        },
+        "timelineSource": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "lastSeen"
+          ]
         }
       },
       "additionalProperties": false
@@ -3883,6 +3890,15 @@
                 "key"
               ]
             }
+          },
+          "timelineBasis": {
+            "type": "string"
+          },
+          "timelineBucketMs": {
+            "type": "integer"
+          },
+          "timelineScopeFallback": {
+            "type": "boolean"
           },
           "buckets": {
             "type": "integer"

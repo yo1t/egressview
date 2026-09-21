@@ -612,6 +612,8 @@ describe('collection source scope', () => {
       const currentAgentSummary = history.summarizeByTimeRange(now - 1000, now + 1000, {
         sourceScope: agentScope,
       });
+      assert.equal(currentAgentSummary.timelineBasis, 'lastSeen');
+      assert.equal(currentAgentSummary.timelineScopeFallback, true);
       assert.deepEqual(
         new Set(currentAgentSummary.appGroups.map(group => `${group.app}:${group.attribution}:${group.count}`)),
         new Set(['Safari:agent:1', 'Slack Helper:agent:1', 'mDNSResponder:agent:1'])
@@ -880,6 +882,8 @@ describe('summarizeByTimeRange', () => {
     assert.equal(result.total, 1);
     assert.equal(result.byDevice.length, 1);
     assert.equal(result.byDevice[0].src, '192.168.1.10');
+    assert.equal(result.timelineBasis, 'lastSeen');
+    assert.equal(result.timelineScopeFallback, true);
   });
 });
 
