@@ -777,10 +777,7 @@ server.listen(PORT, HOST, () => {
           + 'the chart has no record of router traffic for them'
         );
       }
-      const agent = history.connectionBuckets.foldAgent();
-      if (agent.rows) {
-        logger.debug(`[connection-buckets] agent half: ${agent.folded} window(s), ${agent.rows} row(s)`);
-      }
+      history.connectionBuckets.queueRecentAgentWindows();
     } catch (error) {
       logger.warn('[connection-buckets] fold failed:', error.message);
     }
@@ -801,33 +798,30 @@ server.listen(PORT, HOST, () => {
   };
   scheduleFold();
 
-  // Walk the Agents' own history backwards, a stretch at a time, so a Hub that
-  // has been running for a week can answer for that week the moment it
-  // upgrades instead of starting from an empty chart. Spread out because it is
-  // catch-up work and nothing is waiting on it.
-  const BACKFILL_EVERY_MS = 30 * 1000;
-  let backfillTimer = null;
-  const backfillAgentBuckets = () => {
+  // Counting the agent half of one window takes about 54 ms on a Hub with a
+  // million and a half observations, so exactly one window is counted per
+  // tick. Counting twenty-four of them in one pass held the event loop for
+  // 1.3 seconds and put back the stalls P3-139 removed. Nothing waits on this
+  // work, so it can take the slow way round: a week of history is walked in
+  // about ten minutes and the loop stays free throughout.
+  const AGENT_FOLD_TICK_MS = 250;
+  let agentWorkDone = false;
+  setInterval(() => {
     try {
-      const result = history.connectionBuckets.backfillAgent();
-      if (result.rows) {
-        logger.info(
-          `[connection-buckets] filled in ${result.folded} past window(s) from agent observations, `
-          + `${result.rows} row(s)`
-        );
+      const drained = history.connectionBuckets.drainAgentQueue();
+      if (drained.folded) {
+        agentWorkDone = false;
+        return;
       }
-      if (result.done && backfillTimer) {
-        clearInterval(backfillTimer);
-        backfillTimer = null;
-        logger.info('[connection-buckets] the agent half of the chart has been filled in as far back as it goes');
+      const queued = history.connectionBuckets.queueNextPastAgentWindow();
+      if (queued == null && !agentWorkDone) {
+        agentWorkDone = true;
+        logger.info('[connection-buckets] the agent half of the chart is filled in as far back as it goes');
       }
     } catch (error) {
-      logger.warn('[connection-buckets] backfill failed:', error.message);
-      if (backfillTimer) { clearInterval(backfillTimer); backfillTimer = null; }
+      logger.warn('[connection-buckets] agent fold failed:', error.message);
     }
-  };
-  backfillTimer = setInterval(backfillAgentBuckets, BACKFILL_EVERY_MS);
-  backfillTimer.unref();
+  }, AGENT_FOLD_TICK_MS).unref();
 
   setInterval(() => {
     try {

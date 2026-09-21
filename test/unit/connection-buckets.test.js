@@ -65,6 +65,28 @@ beforeEach(() => {
 
 const at = (bucket, offsetMs = 1000) => bucket * BUCKET_MS + offsetMs;
 
+// The queue is drained one window per call on purpose -- counting a window
+// writes rows, and doing two dozen in one pass held the event loop for 1.3
+// seconds on a real Hub. Tests drain it to the end.
+function drainAll(limit = 500) {
+  let rows = 0;
+  for (let i = 0; i < limit; i += 1) {
+    const drained = buckets.drainAgentQueue();
+    rows += drained.rows;
+    if (!drained.pending && !drained.folded) break;
+  }
+  return rows;
+}
+
+function backfillAll(limit = 500) {
+  let rows = 0;
+  for (let i = 0; i < limit; i += 1) {
+    if (buckets.queueNextPastAgentWindow() == null) break;
+    rows += buckets.drainAgentQueue().rows;
+  }
+  return rows;
+}
+
 function seedAgentHour(bucket, rows) {
   const hourStart = Math.floor((bucket * BUCKET_MS) / 3600000) * 3600000;
   const insert = db.prepare(`INSERT INTO agent_app_hourly
@@ -177,6 +199,21 @@ describe('通信があった時刻を記録する（P3-155）', () => {
       '遅れて畳むと、止まったフローしか残らない');
   });
 
+  it('1ティックで畳むのは1窓だけ', () => {
+    // 54 ms a window, measured. Two dozen of them in one pass blocked the
+    // event loop for 1.3 seconds and put back the stalls P3-139 removed.
+    seedAgentHour(1, [
+      { remote: '203.0.113.7', local: '10.0.0.1', port: 443, from: at(1, 10_000), to: at(1, 60_000) },
+    ]);
+    clock = at(14, 0);
+    const queued = buckets.queueRecentAgentWindows();
+    assert.equal(queued > 1, true, '複数の窓が待ち行列に入る');
+
+    const first = buckets.drainAgentQueue();
+    assert.equal(first.folded, 1, '一度に1窓を超えて畳んではいけない');
+    assert.equal(first.pending, queued - 1, '残りは次のティックに回す');
+  });
+
   it('保持期間を過ぎた窓は捨てる', () => {
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(1) }]);
     clock = at(2, 30_000);
@@ -192,14 +229,16 @@ describe('通信があった時刻を記録する（P3-155）', () => {
     // flows where the Agent's own record says 1,081. Agent observations carry
     // their times, so counting that window again later is not a guess.
     clock = at(3, 30_000);
-    buckets.foldAgent();
+    buckets.queueRecentAgentWindows();
+    drainAll();
     assert.deepEqual(flowsIn(2), [], 'まだ何も届いていない');
 
     seedAgentHour(2, [
       { remote: '203.0.113.7', local: '10.0.0.1', port: 443, from: at(2, 10_000), to: at(2, 200_000) },
       { remote: '203.0.113.7', local: '10.0.0.2', port: 443, from: at(2, 20_000), to: at(2, 100_000) },
     ]);
-    buckets.foldAgent();
+    buckets.queueRecentAgentWindows();
+    drainAll();
 
     assert.deepEqual(flowsIn(2), [{ dst: '203.0.113.7', flows: 2 }],
       '遅れて届いた観測が窓に入らなければならない');
@@ -212,8 +251,8 @@ describe('通信があった時刻を記録する（P3-155）', () => {
       { remote: '203.0.113.7', local: '10.0.0.1', port: 443, from: at(1, 10_000), to: at(1, 60_000) },
     ]);
     clock = at(40, 0);               // long after the window closed
-    const result = buckets.backfillAgent({ windowsPerPass: 64 });
-    assert.equal(result.rows > 0, true);
+    const rows = backfillAll();
+    assert.equal(rows > 0, true);
     assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.7', flows: 1 }]);
   });
 
@@ -226,7 +265,8 @@ describe('通信があった時刻を記録する（P3-155）', () => {
     ]);
     clock = at(2, 30_000);
     buckets.foldRouter();
-    buckets.foldAgent();
+    buckets.queueRecentAgentWindows();
+    drainAll();
     assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.7', flows: 1 }],
       'Agentが見ているフローをルータ側でも数えてはいけない');
   });
@@ -236,7 +276,7 @@ describe('通信があった時刻を記録する（P3-155）', () => {
       { remote: '203.0.113.7', local: '10.0.0.1', port: 443, from: at(1, 10_000), to: at(1, 60_000) },
     ]);
     clock = at(8, 30_000);
-    buckets.backfillAgent({ windowsPerPass: 64 });
+    backfillAll();
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(7) }]);
     buckets.foldRouter();
 
