@@ -805,17 +805,17 @@ server.listen(PORT, HOST, () => {
   // work, so it can take the slow way round: a week of history is walked in
   // about ten minutes and the loop stays free throughout.
   const AGENT_FOLD_TICK_MS = 250;
-  let agentWorkDone = false;
+  // Said once, when the walk backwards reaches the end. The recent past is
+  // counted again every five minutes, which empties the queue again each time
+  // -- reporting "filled in" on every one of those would be a line every five
+  // minutes for the life of the process, saying nothing new.
+  let backfillReported = false;
   setInterval(() => {
     try {
-      const drained = history.connectionBuckets.drainAgentQueue();
-      if (drained.folded) {
-        agentWorkDone = false;
-        return;
-      }
-      const queued = history.connectionBuckets.queueNextPastAgentWindow();
-      if (queued == null && !agentWorkDone) {
-        agentWorkDone = true;
+      if (history.connectionBuckets.drainAgentQueue().folded) return;
+      if (history.connectionBuckets.queueNextPastAgentWindow() != null) return;
+      if (!backfillReported) {
+        backfillReported = true;
         logger.info('[connection-buckets] the agent half of the chart is filled in as far back as it goes');
       }
     } catch (error) {
