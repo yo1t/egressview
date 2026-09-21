@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 24;
+const SCHEMA_VERSION = 25;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -1043,6 +1043,43 @@ const MIGRATIONS = [
       db.exec(`
         CREATE INDEX IF NOT EXISTS idx_agent_observations_lastObservedAt
           ON agent_observations(lastObservedAt DESC);
+      `);
+    },
+  },
+  {
+    version: 25,
+    description: 'record when traffic happened, not only when a flow was last seen (P3-155)',
+    up(db) {
+      // The timeline chart bucketed `connections` by lastSeen. That table
+      // holds one row per flow and the row is updated every time the flow is
+      // seen again, so the chart was a histogram of *last sightings*: every
+      // still-active flow piles into the newest bucket and the curve can only
+      // slope upward. Measured on one Hub, a six-hour view rose from 156 to
+      // 1,115 with no change in actual traffic.
+      //
+      // Nothing stored could answer "how much traffic was there at 10am":
+      // connections keeps firstSeen and lastSeen and nothing in between,
+      // connection_observations has the same shape, and connection_events (the
+      // beacon detector's raw log) is empty. The Agent does not have this
+      // problem because it keeps every observation; the Hub folds them away.
+      //
+      // So the Hub folds a five-minute bucket of its own, the same way the
+      // Agent folds `chart_hourly`. Sized from a real Hub: 91 destinations per
+      // five-minute bucket on average, 463 at peak, which is about 365,000
+      // rows for fourteen days -- smaller than agent_app_hourly already is.
+      //
+      // The destination is stored, not the label. `org` and `dstHost` arrive
+      // later from enrichment, so a label frozen at fold time would say the
+      // raw address for most rows.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS connection_buckets (
+          bucketStart INTEGER NOT NULL,
+          dst         TEXT    NOT NULL,
+          flows       INTEGER NOT NULL,
+          PRIMARY KEY (bucketStart, dst)
+        );
+        CREATE INDEX IF NOT EXISTS idx_connection_buckets_start
+          ON connection_buckets(bucketStart);
       `);
     },
   },

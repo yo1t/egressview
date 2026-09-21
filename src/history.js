@@ -18,6 +18,7 @@ const { createAiNotificationStore } = require('./ai-notification-store');
 const { CONNECTIONS_SQL, OBSERVATIONS_SQL, EVENTS_SQL } = require('./history-schema');
 const { reportSchemaCompleteness } = require('./schema-completeness');
 const { applyWalPragmas } = require('./sqlite-wal');
+const { createConnectionBuckets } = require('./connection-buckets');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -123,6 +124,10 @@ const {
     ? timings => logger.info(`[history] summary timing ${JSON.stringify(timings)}`)
     : null,
 });
+
+// When traffic happened, folded once per closed five-minute window. See
+// connection-buckets.js for why `connections` cannot answer this itself.
+const connectionBuckets = createConnectionBuckets({ getDb: () => db, logger });
 
 const aiConversationStore = createAiConversationStore({ getDb: () => db });
 const aiUsageStore = createAiUsageStore({ getDb: () => db });
@@ -759,6 +764,7 @@ module.exports = {
   appendHistoryLog,
   appendHistoryLogs,
   snapshotHistory,
+  connectionBuckets,
   compactHistoryLog,
   pruneHistory,
   getConnectionHistory,

@@ -61,6 +61,33 @@ function updateMapCoverageNotice(coverage) {
   el.classList.add('is-visible');
 }
 
+/**
+ * Say when the chart has nothing to draw, instead of drawing a flat line.
+ *
+ * When traffic happened is folded into five-minute windows as each one closes,
+ * so a Hub has no record from before that began -- and a flat line through a
+ * period nobody measured reads as "there was no traffic", which is a different
+ * claim (P3-155).
+ */
+function showTimelineGap(summary, fromT) {
+  const note = document.getElementById('timeline-gap-note');
+  if (!note) return;
+  const earliest = summary?.timelineFrom;
+  if (earliest == null) {
+    const empty = !(summary?.timeline || []).length;
+    note.textContent = empty ? t('stats.timeline.none') : '';
+    note.hidden = !empty;
+    return;
+  }
+  if (earliest <= fromT) {
+    note.hidden = true;
+    note.textContent = '';
+    return;
+  }
+  note.textContent = tVars('stats.timeline.gap', { from: new Date(earliest).toLocaleString() });
+  note.hidden = false;
+}
+
 function renderStatsSummary(summary, selIp) {
   const targetRows = statsTargetRows(summary);
   if (!targetRows.length && !(summary.total > 0)) {
@@ -89,6 +116,7 @@ function renderStatsSummary(summary, selIp) {
     arr[bucket] += row.count || 0;
   }
   drawTimeline(series, fromT, toT, buckets, bw, topTargets);
+  showTimelineGap(summary, fromT);
   drawAppPieChart(null, appSlicesFromSummary(summary.appGroups, 8, {
     unknownLabel: t('stats.app.unknown'),
     otherLabel: t('stats.legend.other'),

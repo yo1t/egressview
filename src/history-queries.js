@@ -68,6 +68,29 @@ function sourceScopeCondition(scope, alias = 'connections') {
   throw new TypeError('Unsupported source scope');
 }
 
+// `connection_buckets` arrives with schema 25. A Hub that has not migrated yet
+// still has to draw something, so its absence is a fact to check rather than
+// an error to throw.
+//
+// Asked every time on purpose. The answer was cached in a module variable
+// first, which is wrong the moment the process opens a different database --
+// a restore from backup does exactly that, and so does every test after the
+// first. One lookup in sqlite_master beside the eight queries this summary
+// already runs is not the thing to save.
+function hasConnectionBuckets(db) {
+  return !!db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'connection_buckets'"
+  ).get();
+}
+
+function earliestConnectionBucket(db) {
+  try {
+    return db.prepare('SELECT MIN(bucketStart) AS oldest FROM connection_buckets').get()?.oldest ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function connectionSource(scope, alias = 'c', { from = null, to = null } = {}) {
   if (scope?.sourceKind !== 'agent') {
     return { cte: '', from: `connections ${alias}`, params: [] };
@@ -617,17 +640,54 @@ function createHistoryQueries({
         : [...source.params, ...params];
       return statement.all(...selectedParams, ...rollupParams);
     });
-    const timeline = timed('timeline', () => db.prepare(
-      `${source.cte} SELECT ${targetExpr} AS key,
-              CASE
-                WHEN lastSeen < ? THEN 0
-                WHEN lastSeen >= ? THEN ?
-                ELSE CAST((lastSeen - ?) / ? AS INTEGER)
-              END AS bucket,
-              COUNT(*) AS count
-       FROM ${source.from}${where}
-       GROUP BY key, bucket ORDER BY bucket ASC, count DESC`
-    ).all(...source.params, rangeFrom, rangeTo, bucketCount - 1, rangeFrom, bucketMs, ...params));
+    // What the chart used to do was bucket `connections` by lastSeen. That
+    // table keeps one row per flow and moves lastSeen every time the flow is
+    // seen again, so the answer was "when did each flow stop" -- everything
+    // still running piles into the newest bucket and the curve can only slope
+    // upward. Measured on one Hub, six hours rose from 156 to 1,115 with no
+    // change in traffic (P3-155).
+    //
+    // `connection_buckets` is folded once per closed five-minute window, when
+    // a window can still be counted correctly. The label is resolved here
+    // rather than at fold time because `org` and `dstHost` arrive later from
+    // enrichment.
+    //
+    // The scoped path is left on the old query on purpose: the fold is not
+    // per-source, so it cannot answer "this Agent only". A wrong answer to a
+    // narrower question is worse than the same answer as before.
+    const useBuckets = !sourceScope && src == null && hasConnectionBuckets(db);
+    const timeline = timed('timeline', () => (useBuckets
+      ? db.prepare(
+        `SELECT COALESCE(NULLIF(c.org, ''), NULLIF(c.dstHost, ''), b.dst) AS key,
+                MIN(?, MAX(0, CAST((b.bucketStart - ?) / ? AS INTEGER))) AS bucket,
+                SUM(b.flows) AS count
+         FROM connection_buckets b
+         LEFT JOIN (
+           SELECT dst, MAX(NULLIF(org, '')) AS org, MAX(NULLIF(dstHost, '')) AS dstHost
+           FROM connections GROUP BY dst
+         ) AS c ON c.dst = b.dst
+         -- Inclusive at the top: a bucket covers [start, start + width), and
+         -- rangeTo is often exactly the newest bucket's start (it defaults to
+         -- the newest lastSeen). Excluding it dropped the most recent window,
+         -- which is the one being looked at.
+         WHERE b.bucketStart >= ? AND b.bucketStart <= ?
+         GROUP BY key, bucket ORDER BY bucket ASC, count DESC`
+      ).all(bucketCount - 1, rangeFrom, bucketMs, rangeFrom, rangeTo)
+      : db.prepare(
+        `${source.cte} SELECT ${targetExpr} AS key,
+                CASE
+                  WHEN lastSeen < ? THEN 0
+                  WHEN lastSeen >= ? THEN ?
+                  ELSE CAST((lastSeen - ?) / ? AS INTEGER)
+                END AS bucket,
+                COUNT(*) AS count
+         FROM ${source.from}${where}
+         GROUP BY key, bucket ORDER BY bucket ASC, count DESC`
+      ).all(...source.params, rangeFrom, rangeTo, bucketCount - 1, rangeFrom, bucketMs, ...params)));
+
+    // Where the record begins. A range that starts before this has no record,
+    // and the screen has to say so rather than draw a line through nothing.
+    const timelineFrom = useBuckets ? earliestConnectionBucket(db) : null;
     const result = {
       byDst,
       byDevice,
@@ -644,6 +704,7 @@ function createHistoryQueries({
         capped: locationTotalGroups > byLocation.length,
       },
       appGroups: summarizeAppGroups(appRows),
+      timelineFrom,
       timeline,
       total,
       buckets: bucketCount,

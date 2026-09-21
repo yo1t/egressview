@@ -829,7 +829,13 @@ describe('summarizeByTimeRange', () => {
     assert.equal(result.appGroups.reduce((sum, r) => sum + r.count, 0), result.total);
     assert.ok(result.appGroups.some(r => r.app === 'AWS' && r.count === 1));
     assert.ok(result.appGroups.some(r => r.app === 'Google' && r.count === 1));
-    assert.equal(result.timeline.reduce((sum, r) => sum + r.count, 0), 2);
+    // P3-155: the timeline now comes from five-minute buckets folded when each
+    // window closed, and nothing has been folded here. There is no record to
+    // draw, and saying so is the point -- the old assertion passed only
+    // because the chart was counting last sightings, which is what made a
+    // six-hour view rise from 156 to 1,115 with no change in traffic.
+    assert.deepEqual(result.timeline, []);
+    assert.equal(result.timelineFrom, null);
   });
 
   it('reports map coverage when location groups are capped', () => {
