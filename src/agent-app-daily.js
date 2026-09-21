@@ -25,11 +25,17 @@
 // periods keep using the hourly table, where the same query costs 23 to 496 ms
 // and is exact.
 
+const runtimeProfiler = require('./runtime-profiler');
+
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 // One day per tick. A day is up to about 85,000 hourly rows, and folding one
 // was measured at roughly 260 ms of the 2,081 ms it took to build all eight --
 // too long to do several of at once on the loop that serves the UI (P3-139).
 const DAYS_PER_TICK = 1;
+// Today is kept current an hour at a time. An hour is about 3,500 rows against
+// a day's 85,000, and two of them cover a pass that was delayed.
+const HOURS_PER_TICK = 2;
 
 function dayStartFor(at) {
   return Math.floor(at / DAY_MS) * DAY_MS;
@@ -39,6 +45,10 @@ function dayStartFor(at) {
  * @param {{ getDb: () => object, logger?: object, now?: () => number }} deps
  */
 function createAgentAppDaily({ getDb, logger = console, now = () => Date.now() }) {
+  // The newest hour of today already folded. Kept in memory rather than derived:
+  // the day's rows carry no hour, and re-deriving it would mean scanning them.
+  let lastHourFolded = null;
+
   function hasTable(db, name) {
     return !!db.prepare(
       "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
@@ -86,14 +96,51 @@ function createAgentAppDaily({ getDb, logger = console, now = () => Date.now() }
   }
 
   /**
-   * Fold the days that have closed since the last pass, and today again.
+   * Add one hour of rows to the day it belongs to.
    *
-   * Today is folded again on every pass because it is still filling: the point
-   * of the table is that a long view is cheap, and a long view that stops at
-   * midnight would answer for everything except the part someone is most
-   * likely looking at.
+   * Today keeps filling, and rebuilding the whole of it on every pass was
+   * measured at nearly a second on the Hub -- a day is about 85,000 hourly rows
+   * by evening, and doing that every minute put a bigger pause on the loop than
+   * the one this table was built to remove. An hour is a fortieth of that, and
+   * the day's aggregates fold in one row at a time.
    */
-  function fold({ daysPerTick = DAYS_PER_TICK } = {}) {
+  function foldHour(hourStart) {
+    const db = getDb();
+    if (!ready(db)) return 0;
+    const dayStart = dayStartFor(hourStart);
+    let rows = 0;
+    db.transaction(() => {
+      rows = db.prepare(`
+        INSERT INTO agent_app_daily (
+          dayStart, agentId, appIdentity, processName,
+          localAddress, remoteAddress, remotePort, networkProtocol,
+          firstObservedAt, lastObservedAt
+        )
+        SELECT ?, agentId, appIdentity, MAX(processName),
+               localAddress, remoteAddress, remotePort, UPPER(networkProtocol),
+               MIN(firstObservedAt), MAX(lastObservedAt)
+        FROM agent_app_hourly
+        WHERE hourStart = ?
+        GROUP BY agentId, appIdentity, localAddress, remoteAddress, remotePort, UPPER(networkProtocol)
+        ON CONFLICT (dayStart, agentId, appIdentity, localAddress, remoteAddress, remotePort, networkProtocol)
+        DO UPDATE SET
+          processName = excluded.processName,
+          firstObservedAt = MIN(agent_app_daily.firstObservedAt, excluded.firstObservedAt),
+          lastObservedAt = MAX(agent_app_daily.lastObservedAt, excluded.lastObservedAt)
+      `).run(dayStart, hourStart).changes;
+    })();
+    return rows;
+  }
+
+  /**
+   * Fold what is outstanding: whole days that were never folded, then the hours
+   * of today that have arrived since the last pass.
+   *
+   * Today has to keep up -- a long view that stopped at midnight would answer
+   * for everything except the part someone is most likely looking at -- but it
+   * keeps up an hour at a time rather than by rebuilding the day.
+   */
+  function fold({ daysPerTick = DAYS_PER_TICK, hoursPerTick = HOURS_PER_TICK } = {}) {
     const db = getDb();
     if (!ready(db)) return { folded: 0, rows: 0, pending: 0 };
 
@@ -106,19 +153,37 @@ function createAgentAppDaily({ getDb, logger = console, now = () => Date.now() }
       db.prepare('SELECT dayStart FROM agent_app_daily GROUP BY dayStart').all().map(r => r.dayStart)
     );
 
-    const outstanding = [];
-    for (let day = from; day <= today; day += DAY_MS) {
-      // Today is never "done": more hours land in it until midnight.
-      if (day === today || !done.has(day)) outstanding.push(day);
+    const outstandingDays = [];
+    for (let day = from; day < today; day += DAY_MS) {
+      if (!done.has(day)) outstandingDays.push(day);
     }
 
     let folded = 0;
     let rows = 0;
-    for (const day of outstanding.slice(0, daysPerTick)) {
-      rows += foldDay(day);
+    for (const day of outstandingDays.slice(0, daysPerTick)) {
+      rows += runtimeProfiler.measureSync('agentAppDaily.foldDay', () => foldDay(day));
       folded += 1;
     }
-    return { folded, rows, pending: Math.max(0, outstanding.length - folded) };
+    const pendingDays = Math.max(0, outstandingDays.length - folded);
+    if (pendingDays > 0) return { folded, rows, pending: pendingDays };
+
+    // Today, hour by hour, from wherever the last pass got to.
+    const seen = lastHourFolded != null && lastHourFolded >= today
+      ? lastHourFolded
+      : today - HOUR_MS;
+    const currentHour = Math.floor(now() / HOUR_MS) * HOUR_MS;
+    let outstandingHours = 0;
+    for (let hourStart = seen + HOUR_MS; hourStart <= currentHour; hourStart += HOUR_MS) {
+      outstandingHours += 1;
+      if (outstandingHours > hoursPerTick) break;
+      rows += runtimeProfiler.measureSync('agentAppDaily.foldHour', () => foldHour(hourStart));
+      folded += 1;
+      lastHourFolded = hourStart;
+    }
+    // The hour in progress is folded again next pass, because more of it lands
+    // until it closes.
+    if (lastHourFolded === currentHour) lastHourFolded = currentHour - HOUR_MS;
+    return { folded, rows, pending: Math.max(0, outstandingHours - hoursPerTick) };
   }
 
   /** Drop days older than the hourly rows they were folded from. */
@@ -129,7 +194,7 @@ function createAgentAppDaily({ getDb, logger = console, now = () => Date.now() }
       .run(dayStartFor(now() - retentionMs)).changes;
   }
 
-  return { fold, foldDay, foldedThrough, prune, dayStartFor, DAY_MS, logger };
+  return { fold, foldDay, foldHour, foldedThrough, prune, dayStartFor, DAY_MS, logger };
 }
 
-module.exports = { createAgentAppDaily, dayStartFor, DAY_MS, DAYS_PER_TICK };
+module.exports = { createAgentAppDaily, dayStartFor, DAY_MS, DAYS_PER_TICK, HOURS_PER_TICK };

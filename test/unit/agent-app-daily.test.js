@@ -93,6 +93,30 @@ describe('アプリ帰属を日ごとに畳む（P3-150）', () => {
       'その日のうちに届いた分が入らなければならない');
   });
 
+  it('今日は1日まるごとではなく、1時間ずつ足す', () => {
+    // Rebuilding the whole of today on every pass was measured at nearly a
+    // second on the Hub -- 85,000 rows by evening, every minute -- which is a
+    // bigger pause than the one this table exists to remove.
+    seedHour(hour(6, 0), [{ app: 'Firefox', local: '10.0.0.1', remote: '203.0.113.1', port: 443 }]);
+    clock = hour(6, 1) + 60_000;
+    daily.fold({ daysPerTick: 10 });
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM agent_app_daily WHERE dayStart = ?').get(day(6)).n, 1);
+
+    seedHour(hour(6, 1), [{ app: 'Mail', local: '10.0.0.1', remote: '203.0.113.1', port: 443 }]);
+    clock = hour(6, 2) + 60_000;
+    daily.fold({ daysPerTick: 10 });
+    const rows = db.prepare('SELECT appIdentity FROM agent_app_daily WHERE dayStart = ? ORDER BY appIdentity').all(day(6));
+    assert.deepEqual(rows.map(r => r.appIdentity), ['Firefox', 'Mail'],
+      '後から届いた時間が、その日に足されなければならない');
+  });
+
+  it('同じ時間を二度足しても、重複しない', () => {
+    seedHour(hour(7, 0), [{ app: 'Firefox', local: '10.0.0.1', remote: '203.0.113.1', port: 443 }]);
+    daily.foldHour(hour(7, 0));
+    daily.foldHour(hour(7, 0));
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM agent_app_daily WHERE dayStart = ?').get(day(7)).n, 1);
+  });
+
   it('1ティックで畳むのは1日だけ', () => {
     // A day is about 85,000 hourly rows on a real Hub and takes a quarter of a
     // second. Several at once is the mistake P3-139 was fought over.
