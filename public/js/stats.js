@@ -112,8 +112,11 @@ function renderStatsSummary(summary, selIp) {
   drawBarChart(isMobile ? sortedTargets.slice(0, 15) : sortedTargets);
 
   const buckets = summary.buckets || 60;
-  const fromT = summary.from ?? Date.now();
-  const toT = summary.to ?? Date.now();
+  // The bars span what the record covers, which is not always the period that
+  // was asked for -- see `timelineRange` on the server. The axis has to follow
+  // them, or every bar is drawn at the wrong time.
+  const fromT = summary.timelineRange?.from ?? summary.from ?? Date.now();
+  const toT = summary.timelineRange?.to ?? summary.to ?? Date.now();
   const bw = Math.max(1, (Math.max(toT, fromT + 1) - fromT) / buckets);
   const series = new Map();
   for (const key of topTargets) series.set(key, new Array(buckets).fill(0));
@@ -124,7 +127,7 @@ function renderStatsSummary(summary, selIp) {
     arr[bucket] += row.count || 0;
   }
   drawTimeline(series, fromT, toT, buckets, bw, topTargets);
-  showTimelineGap(summary, fromT);
+  showTimelineGap(summary, summary.from ?? fromT);
   drawAppPieChart(null, appSlicesFromSummary(summary.appGroups, 8, {
     unknownLabel: t('stats.app.unknown'),
     otherLabel: t('stats.legend.other'),

@@ -505,16 +505,29 @@ function createHistoryQueries({
     const useBuckets = timelineSource !== 'lastSeen'
       && !sourceScope && src == null && hasConnectionBuckets(db);
 
-    // The window in progress has not been counted and cannot be: it is still
-    // collecting. Drawn anyway it is a bar at nearly zero on the right-hand
-    // edge of every chart, which reads as traffic having just stopped. So the
-    // chart ends at the last window that closed.
-    const timelineTo = useBuckets
-      ? Math.min(rangeTo, Math.floor(Date.now() / FOLDED_WINDOW_MS) * FOLDED_WINDOW_MS - FOLDED_WINDOW_MS)
-      : rangeTo;
+    // The chart covers what the record covers, which is not always what was
+    // asked for.
+    //
+    // It ends at the last window that closed: the one in progress is still
+    // collecting, and drawn anyway it is a bar at nearly nothing on the
+    // right-hand edge of every chart, which reads as traffic having just
+    // stopped. A five-minute view asks for a period shorter than one window,
+    // so it is widened to that window rather than left empty.
+    //
+    // It starts where the record starts. Asked for fourteen days with seven
+    // days recorded, drawing the whole period put 29 empty bars of 60 on the
+    // left -- a flat line at zero for half the chart, which says there was no
+    // traffic rather than that nobody was looking. The screen says what is
+    // missing in words instead, and the bars show the part that was measured.
+    const lastClosedWindow = Math.floor(Date.now() / FOLDED_WINDOW_MS) * FOLDED_WINDOW_MS - FOLDED_WINDOW_MS;
+    const oldestRecorded = useBuckets ? connectionBucketCoverage(db).from : null;
+    const timelineTo = useBuckets ? Math.min(rangeTo, lastClosedWindow) : rangeTo;
+    const timelineFrom = useBuckets
+      ? Math.min(Math.max(rangeFrom, oldestRecorded ?? rangeFrom), timelineTo)
+      : rangeFrom;
 
     let bucketCount = Math.max(1, Math.min(240, Number(buckets) || 60));
-    let bucketMs = Math.max(1, (Math.max(timelineTo, rangeFrom + 1) - rangeFrom) / bucketCount);
+    let bucketMs = Math.max(1, (Math.max(timelineTo, timelineFrom + 1) - timelineFrom) / bucketCount);
 
     // Never finer than the record. Traffic is folded into five-minute windows,
     // so asking for a two-and-a-half-minute bar means every second bar has
@@ -532,7 +545,7 @@ function createHistoryQueries({
       // One bar per window, inclusive of the newest: `rangeTo` is a window's
       // start, and that window occupies a whole bar of its own.
       bucketCount = Math.max(1,
-        Math.floor((Math.max(timelineTo, rangeFrom) - rangeFrom) / bucketMs) + 1);
+        Math.floor((Math.max(timelineTo, timelineFrom) - timelineFrom) / bucketMs) + 1);
     }
 
     const byDst = timed('destinations', () => db.prepare(
@@ -722,7 +735,7 @@ function createHistoryQueries({
          -- which is the one being looked at.
          WHERE b.bucketStart >= ? AND b.bucketStart <= ?
          GROUP BY key, bucket ORDER BY bucket ASC, count DESC`
-      ).all(bucketCount - 1, rangeFrom, bucketMs, rangeFrom, timelineTo)
+      ).all(bucketCount - 1, timelineFrom, bucketMs, timelineFrom, timelineTo)
       : db.prepare(
         `${source.cte} SELECT ${targetExpr} AS key,
                 CASE
@@ -739,7 +752,7 @@ function createHistoryQueries({
     // range reaching past either has to say so rather than let the reader take
     // a partial record for a complete one.
     const coverage = useBuckets ? connectionBucketCoverage(db) : { from: null, routerFrom: null };
-    const timelineFrom = coverage.from;
+    const recordedFrom = coverage.from;
     const timelineFullFrom = coverage.routerFrom;
     const result = {
       byDst,
@@ -757,8 +770,10 @@ function createHistoryQueries({
         capped: locationTotalGroups > byLocation.length,
       },
       appGroups: summarizeAppGroups(appRows),
-      timelineFrom,
+      timelineFrom: recordedFrom,
       timelineFullFrom,
+      // What the bars actually span, which the chart draws its axis from.
+      timelineRange: { from: timelineFrom, to: timelineTo },
       timeline,
       total,
       buckets: bucketCount,

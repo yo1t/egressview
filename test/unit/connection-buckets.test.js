@@ -384,6 +384,42 @@ describe('要約の時系列が、畳んだ窓を読む（P3-155）', () => {
       '最後の棒まで値があること（空の棒で終わってはいけない）');
   });
 
+  it('記録より短い期間でも、空のグラフにはしない', () => {
+    // "live" asks for five minutes, which is shorter than one window. Drawing
+    // the requested period exactly leaves nothing on screen at all.
+    const now = Date.now();
+    const b = (n) => Math.floor(now / BUCKET_MS) * BUCKET_MS - n * BUCKET_MS;
+    db.prepare(`INSERT INTO connections (src, dst, dport, proto, firstSeen, lastSeen)
+      VALUES ('10.0.0.1', '203.0.113.1', 443, 'TCP', ?, ?)`).run(b(1), b(1));
+    clock = b(1) + BUCKET_MS + 1000;
+    buckets.foldRouter();
+
+    const summary = queriesOn(db).summarizeByTimeRange(now - 5 * 60_000, null, { buckets: 60 });
+    assert.equal(summary.timeline.length > 0, true, '直近の閉じた窓を描かなければならない');
+    assert.equal(summary.timelineRange.from <= b(1), true, '軸もその窓まで広げる');
+  });
+
+  it('記録の無い期間は、ゼロの棒で埋めない', () => {
+    // Fourteen days asked for with one window recorded: drawing the whole
+    // period is a flat line at zero for almost all of it, which says there was
+    // no traffic rather than that nobody was looking.
+    const now = Date.now();
+    const b = (n) => Math.floor(now / BUCKET_MS) * BUCKET_MS - n * BUCKET_MS;
+    db.prepare(`INSERT INTO connections (src, dst, dport, proto, firstSeen, lastSeen)
+      VALUES ('10.0.0.1', '203.0.113.1', 443, 'TCP', ?, ?)`).run(b(2), b(2));
+    clock = b(2) + BUCKET_MS + 1000;
+    buckets.foldRouter();
+
+    const summary = queriesOn(db).summarizeByTimeRange(now - 14 * 24 * 3600e3, null, { buckets: 60 });
+    assert.equal(summary.timelineRange.from >= b(3), true,
+      '記録の始まりより前まで軸を伸ばしてはいけない');
+    assert.equal(summary.timelineFrom <= b(2), true,
+      '記録がいつ始まったかは、注記のために返し続ける');
+    const filled = new Set(summary.timeline.map(r => r.bucket)).size;
+    assert.equal(summary.buckets - filled <= 1, true,
+      `空の棒が${summary.buckets - filled}本もあってはいけない`);
+  });
+
   it('宛先の名前は、いまの enrichment で解決する', () => {
     const now = Date.now();
     const at = Math.floor(now / BUCKET_MS) * BUCKET_MS - BUCKET_MS;
