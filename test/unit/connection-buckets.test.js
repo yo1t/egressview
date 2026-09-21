@@ -32,8 +32,8 @@ beforeEach(() => {
       PRIMARY KEY (src, dst, dport, proto)
     );
     CREATE TABLE connection_buckets (
-      bucketStart INTEGER NOT NULL, dst TEXT NOT NULL, flows INTEGER NOT NULL,
-      PRIMARY KEY (bucketStart, dst)
+      bucketStart INTEGER NOT NULL, dst TEXT NOT NULL, source TEXT NOT NULL, flows INTEGER NOT NULL,
+      PRIMARY KEY (bucketStart, dst, source)
     );
     CREATE TABLE connection_observations (
       src TEXT, dst TEXT, dport INTEGER, proto TEXT, routerId TEXT,
@@ -64,14 +64,27 @@ beforeEach(() => {
 });
 
 const at = (bucket, offsetMs = 1000) => bucket * BUCKET_MS + offsetMs;
-const flowsIn = (bucket) => db.prepare('SELECT dst, flows FROM connection_buckets WHERE bucketStart = ? ORDER BY dst')
+
+function seedAgentHour(bucket, rows) {
+  const hourStart = Math.floor((bucket * BUCKET_MS) / 3600000) * 3600000;
+  const insert = db.prepare(`INSERT INTO agent_app_hourly
+    (hourStart, agentId, appIdentity, processName, localAddress, remoteAddress, remotePort,
+     networkProtocol, firstObservedAt, lastObservedAt)
+    VALUES (?, 'agent-1', ?, ?, ?, ?, ?, 'TCP', ?, ?)
+    ON CONFLICT DO UPDATE SET lastObservedAt = excluded.lastObservedAt`);
+  for (const r of rows) {
+    insert.run(hourStart, r.local, r.local, r.local, r.remote, r.port, r.from, r.to);
+  }
+}
+const flowsIn = (bucket) => db.prepare(
+  'SELECT dst, SUM(flows) AS flows FROM connection_buckets WHERE bucketStart = ? GROUP BY dst ORDER BY dst')
   .all(bucket * BUCKET_MS);
 
 describe('通信があった時刻を記録する（P3-155）', () => {
   it('閉じた窓だけを畳む。いまの窓はまだ動くので触らない', () => {
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(1) }]);
     clock = at(2, 30_000);           // bucket 2 is open, bucket 1 has closed
-    const result = buckets.fold();
+    const result = buckets.foldRouter();
     assert.equal(result.folded >= 1, true);
     assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.1', flows: 1 }]);
     assert.deepEqual(flowsIn(2), [], 'まだ動いている窓を数えてはいけない');
@@ -82,10 +95,10 @@ describe('通信があった時刻を記録する（P3-155）', () => {
     // would only ever appear in the newest one -- that is the whole defect.
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(1) }]);
     clock = at(2, 30_000);
-    buckets.fold();
+    buckets.foldRouter();
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(2) }]);
     clock = at(3, 30_000);
-    buckets.fold();
+    buckets.foldRouter();
     assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.1', flows: 1 }]);
     assert.deepEqual(flowsIn(2), [{ dst: '203.0.113.1', flows: 1 }],
       '続いているフローが古い窓から消えてはいけない');
@@ -98,7 +111,7 @@ describe('通信があった時刻を記録する（P3-155）', () => {
       { src: '10.0.0.1', dst: '203.0.113.9', dport: 443, lastSeen: at(1) },
     ]);
     clock = at(2, 30_000);
-    buckets.fold();
+    buckets.foldRouter();
     assert.deepEqual(flowsIn(1), [
       { dst: '203.0.113.1', flows: 2 },
       { dst: '203.0.113.9', flows: 1 },
@@ -108,9 +121,9 @@ describe('通信があった時刻を記録する（P3-155）', () => {
   it('二度畳んでも二重に数えない', () => {
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(1) }]);
     clock = at(2, 30_000);
-    buckets.fold();
+    buckets.foldRouter();
     buckets._resetForTest();
-    buckets.fold();
+    buckets.foldRouter();
     assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.1', flows: 1 }]);
   });
 
@@ -121,10 +134,10 @@ describe('通信があった時刻を記録する（P3-155）', () => {
     // put the original defect back into the table one window at a time.
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(1) }]);
     clock = at(2, 30_000);
-    buckets.fold();
+    buckets.foldRouter();
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(500) }]);
     clock = at(501, 30_000);         // back after nearly two days off
-    const result = buckets.fold();
+    const result = buckets.foldRouter();
     assert.equal(result.skipped > 0, true, '飛ばした窓の数を言わなければならない');
     assert.deepEqual(flowsIn(250), [], '見ていなかった窓に数字を作ってはいけない');
     assert.deepEqual(flowsIn(500), [{ dst: '203.0.113.1', flows: 1 }],
@@ -139,7 +152,7 @@ describe('通信があった時刻を記録する（P3-155）', () => {
       { src: '10.0.0.2', dst: '203.0.113.9', dport: 443, firstSeen: at(1), lastSeen: at(19) },
     ]);
     clock = at(20, 30_000);
-    buckets.fold();
+    buckets.foldRouter();
     assert.deepEqual(flowsIn(1), [], '過去の窓を lastSeen で数え直してはいけない');
     assert.equal(buckets.earliestBucket() >= at(18, 0), true, '記録はいま始まる');
   });
@@ -158,7 +171,7 @@ describe('通信があった時刻を記録する（P3-155）', () => {
     // The flow that is still running is seen again early in the next window.
     seed([{ ...stillRunning, lastSeen: at(2, 30_000) }]);
     clock = at(2, 240_000);          // and only now does a late fold run
-    buckets.fold();
+    buckets.foldRouter();
 
     assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.9', flows: 1 }],
       '遅れて畳むと、止まったフローしか残らない');
@@ -167,17 +180,77 @@ describe('通信があった時刻を記録する（P3-155）', () => {
   it('保持期間を過ぎた窓は捨てる', () => {
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(1) }]);
     clock = at(2, 30_000);
-    buckets.fold();
+    buckets.foldRouter();
     clock = at(1) + 15 * 24 * 3600e3;
     assert.equal(buckets.prune(), 1);
     assert.deepEqual(flowsIn(1), []);
+  });
+
+  it('Agentが見た通信は、あとから届いても窓に加わる', () => {
+    // An Agent uploads in batches. A window folded seconds after it closed
+    // holds nothing of what has not arrived yet -- measured on the Hub, 22
+    // flows where the Agent's own record says 1,081. Agent observations carry
+    // their times, so counting that window again later is not a guess.
+    clock = at(3, 30_000);
+    buckets.foldAgent();
+    assert.deepEqual(flowsIn(2), [], 'まだ何も届いていない');
+
+    seedAgentHour(2, [
+      { remote: '203.0.113.7', local: '10.0.0.1', port: 443, from: at(2, 10_000), to: at(2, 200_000) },
+      { remote: '203.0.113.7', local: '10.0.0.2', port: 443, from: at(2, 20_000), to: at(2, 100_000) },
+    ]);
+    buckets.foldAgent();
+
+    assert.deepEqual(flowsIn(2), [{ dst: '203.0.113.7', flows: 2 }],
+      '遅れて届いた観測が窓に入らなければならない');
+  });
+
+  it('Agentの記録からは、過去の窓も埋められる', () => {
+    // Router-observed flows cannot be recovered for the past. Agent-observed
+    // ones can, because the Agent wrote down when it saw them.
+    seedAgentHour(1, [
+      { remote: '203.0.113.7', local: '10.0.0.1', port: 443, from: at(1, 10_000), to: at(1, 60_000) },
+    ]);
+    clock = at(40, 0);               // long after the window closed
+    const result = buckets.backfillAgent({ windowsPerPass: 64 });
+    assert.equal(result.rows > 0, true);
+    assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.7', flows: 1 }]);
+  });
+
+  it('同じフローをルータとAgentの両方から数えない', () => {
+    seed([{ src: '10.0.0.1', dst: '203.0.113.7', dport: 443, lastSeen: at(1) }]);
+    db.prepare(`INSERT INTO connection_agent_observations (src, dst, dport, proto, agentId, observationId)
+      VALUES ('10.0.0.1', '203.0.113.7', 443, 'TCP', 'agent-1', 'obs-1')`).run();
+    seedAgentHour(1, [
+      { remote: '203.0.113.7', local: '10.0.0.1', port: 443, from: at(1, 10_000), to: at(1, 60_000) },
+    ]);
+    clock = at(2, 30_000);
+    buckets.foldRouter();
+    buckets.foldAgent();
+    assert.deepEqual(flowsIn(1), [{ dst: '203.0.113.7', flows: 1 }],
+      'Agentが見ているフローをルータ側でも数えてはいけない');
+  });
+
+  it('どこから全体を答えられるかを言える', () => {
+    seedAgentHour(1, [
+      { remote: '203.0.113.7', local: '10.0.0.1', port: 443, from: at(1, 10_000), to: at(1, 60_000) },
+    ]);
+    clock = at(8, 30_000);
+    buckets.backfillAgent({ windowsPerPass: 64 });
+    seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(7) }]);
+    buckets.foldRouter();
+
+    const coverage = buckets.coverage();
+    assert.equal(coverage.from <= at(1), true, '記録の始まりはAgent分まで遡る');
+    assert.equal(coverage.routerFrom >= at(6), true,
+      'ルータ分が始まる時点を別に言わなければならない');
   });
 
   it('記録の始まりを言える。無い期間を描いてはいけないので', () => {
     assert.equal(buckets.earliestBucket(), null, '何も畳んでいなければ null');
     seed([{ src: '10.0.0.1', dst: '203.0.113.1', dport: 443, lastSeen: at(7) }]);
     clock = at(8, 30_000);
-    buckets.fold();
+    buckets.foldRouter();
     assert.equal(buckets.earliestBucket() <= at(7), true);
   });
 });
@@ -210,7 +283,7 @@ describe('要約の時系列が、畳んだ窓を読む（P3-155）', () => {
         VALUES ('10.0.0.1', '203.0.113.1', 443, 'TCP', ?, ?)
         ON CONFLICT(src, dst, dport, proto) DO UPDATE SET lastSeen = excluded.lastSeen`).run(b(3), at);
       clock = at + BUCKET_MS + 1000;
-      buckets.fold();
+      buckets.foldRouter();
     }
 
     const summary = queriesOn(db).summarizeByTimeRange(b(4), null, { buckets: 60 });
@@ -227,7 +300,7 @@ describe('要約の時系列が、畳んだ窓を読む（P3-155）', () => {
     db.prepare(`INSERT INTO connections (src, dst, dport, proto, firstSeen, lastSeen)
       VALUES ('10.0.0.1', '203.0.113.1', 443, 'TCP', ?, ?)`).run(at, at);
     clock = at + BUCKET_MS + 1000;
-    buckets.fold();
+    buckets.foldRouter();
     // The name arrives after the fold, which is why the label is not frozen.
     db.prepare("UPDATE connections SET org = 'Example Network' WHERE dst = '203.0.113.1'").run();
 

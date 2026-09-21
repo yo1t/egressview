@@ -761,21 +761,25 @@ server.listen(PORT, HOST, () => {
   // one window held 30 flows where the minute-by-minute count says 1,000 to
   // 2,000 passed through it.
   //
-  // Nothing is folded for the past. A window can only be counted while its
-  // flows still have their lastSeen inside it, so a Hub upgrading to this has
-  // no history to recover -- and the screen says so rather than drawing a line
-  // through nothing.
+  // Nothing router-observed is folded for the past: those flows carry no
+  // record of when they were seen beyond a lastSeen that keeps moving. The
+  // agent half is different -- the Agents keep their own observation times --
+  // so it is filled in for the past and counted again as late uploads land.
   const foldConnectionBuckets = () => {
     try {
-      const result = history.connectionBuckets.fold();
-      if (result.folded) {
-        logger.debug(`[connection-buckets] folded ${result.folded} window(s), ${result.rows} row(s)`);
+      const router = history.connectionBuckets.foldRouter();
+      if (router.folded) {
+        logger.debug(`[connection-buckets] folded ${router.folded} window(s), ${router.rows} row(s)`);
       }
-      if (result.skipped) {
+      if (router.skipped) {
         logger.info(
-          `[connection-buckets] ${result.skipped} window(s) closed while this was not running; `
-          + 'the chart has no record for them'
+          `[connection-buckets] ${router.skipped} window(s) closed while this was not running; `
+          + 'the chart has no record of router traffic for them'
         );
+      }
+      const agent = history.connectionBuckets.foldAgent();
+      if (agent.rows) {
+        logger.debug(`[connection-buckets] agent half: ${agent.folded} window(s), ${agent.rows} row(s)`);
       }
     } catch (error) {
       logger.warn('[connection-buckets] fold failed:', error.message);
@@ -796,6 +800,35 @@ server.listen(PORT, HOST, () => {
     }, wait).unref();
   };
   scheduleFold();
+
+  // Walk the Agents' own history backwards, a stretch at a time, so a Hub that
+  // has been running for a week can answer for that week the moment it
+  // upgrades instead of starting from an empty chart. Spread out because it is
+  // catch-up work and nothing is waiting on it.
+  const BACKFILL_EVERY_MS = 30 * 1000;
+  let backfillTimer = null;
+  const backfillAgentBuckets = () => {
+    try {
+      const result = history.connectionBuckets.backfillAgent();
+      if (result.rows) {
+        logger.info(
+          `[connection-buckets] filled in ${result.folded} past window(s) from agent observations, `
+          + `${result.rows} row(s)`
+        );
+      }
+      if (result.done && backfillTimer) {
+        clearInterval(backfillTimer);
+        backfillTimer = null;
+        logger.info('[connection-buckets] the agent half of the chart has been filled in as far back as it goes');
+      }
+    } catch (error) {
+      logger.warn('[connection-buckets] backfill failed:', error.message);
+      if (backfillTimer) { clearInterval(backfillTimer); backfillTimer = null; }
+    }
+  };
+  backfillTimer = setInterval(backfillAgentBuckets, BACKFILL_EVERY_MS);
+  backfillTimer.unref();
+
   setInterval(() => {
     try {
       const dropped = history.connectionBuckets.prune();

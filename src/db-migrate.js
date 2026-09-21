@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 26;
+const SCHEMA_VERSION = 27;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -1102,6 +1102,40 @@ const MIGRATIONS = [
         .get('connection_buckets');
       if (!hasTable) return;
       db.exec('DELETE FROM connection_buckets;');
+    },
+  },
+  {
+    version: 27,
+    description: 'count each window from the evidence that records its time (P3-155)',
+    up(db) {
+      // A window has two halves that behave differently. Router-observed flows
+      // leave no record of when, so their half can only be counted in the
+      // seconds after the window closes and never again. Agent-observed flows
+      // carry their own observation times in `agent_app_hourly`, so their half
+      // can be counted for the past and counted again when a late upload adds
+      // to it -- which is why a window folded promptly held 22 flows where the
+      // Agent's record says 1,081.
+      //
+      // Keeping them apart is what makes both possible: the agent half is
+      // rewritten whenever there is more of it, and the router half is written
+      // once and left alone. It also lets the chart say which part of a period
+      // it has, rather than showing agent-only history as if it covered the
+      // whole network.
+      const hasTable = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get('connection_buckets');
+      if (!hasTable) return;
+      db.exec(`
+        DROP TABLE connection_buckets;
+        CREATE TABLE connection_buckets (
+          bucketStart INTEGER NOT NULL,
+          dst         TEXT    NOT NULL,
+          source      TEXT    NOT NULL,
+          flows       INTEGER NOT NULL,
+          PRIMARY KEY (bucketStart, dst, source)
+        );
+        CREATE INDEX idx_connection_buckets_start ON connection_buckets(bucketStart);
+      `);
     },
   },
 ];
