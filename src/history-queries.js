@@ -105,6 +105,25 @@ function hasConnectionBuckets(db) {
 // one.
 const LABEL_LOOKUP_CHUNK = 900;
 
+// Where the app attribution switches from hourly rows to the daily rollup.
+//
+// The daily table cannot answer for part of a day exactly: a flow seen at 09:00
+// and again at 23:00 is one row spanning both, so a window inside that day
+// matches it where the hourly rows would not. Below two days the hourly query
+// costs 23 to 496 ms and is exact, so it keeps it. Above, the hourly query was
+// measured at 826 ms for two days and 1,609 ms for fourteen -- on the loop that
+// serves the UI -- against 179 and 343 ms from the rollup, for answers that
+// were identical at every range tried (P3-150).
+const DAILY_APPS_FROM_MS = 2 * 24 * 60 * 60 * 1000;
+
+function hasAgentAppDaily(db) {
+  try {
+    return !!db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_app_daily'"
+    ).get();
+  } catch { return false; }
+}
+
 function resolveDestinationLabels(db, destinations) {
   const labels = new Map();
   for (let i = 0; i < destinations.length; i += LABEL_LOOKUP_CHUNK) {
@@ -683,11 +702,22 @@ function createHistoryQueries({
         `).all(...source.params, ...params, rangeFrom, rangeTo);
       }
 
+      // Long periods read the daily rollup; short ones stay on the hourly rows,
+      // which are exact within the hour -- see DAILY_APPS_FROM_MS.
+      const useDaily = (rangeTo - rangeFrom) >= DAILY_APPS_FROM_MS && hasAgentAppDaily(db);
+      const rollupTable = useDaily ? 'agent_app_daily' : 'agent_app_hourly';
+      const bucketColumn = useDaily ? 'dayStart' : 'hourStart';
+      const bucketFrom = useDaily
+        ? Math.floor(rangeFrom / 86_400_000) * 86_400_000
+        : hourFrom;
+      const bucketTo = useDaily
+        ? Math.floor(rangeTo / 86_400_000) * 86_400_000
+        : hourTo;
       const rollupFilters = [
-        'h.hourStart >= ?', 'h.hourStart <= ?',
+        `h.${bucketColumn} >= ?`, `h.${bucketColumn} <= ?`,
         'h.lastObservedAt >= ?', 'h.firstObservedAt <= ?',
       ];
-      const rollupParams = [hourFrom, hourTo, rangeFrom, rangeTo];
+      const rollupParams = [bucketFrom, bucketTo, rangeFrom, rangeTo];
       if (sourceScope?.sourceKind === 'agent') {
         rollupFilters.push('h.agentId = ?');
         rollupParams.push(sourceScope.sourceId);
@@ -716,7 +746,7 @@ function createHistoryQueries({
           SELECT h.localAddress AS src, h.remoteAddress AS dst,
             h.remotePort AS dport, UPPER(h.networkProtocol) AS proto,
             h.agentId, h.appIdentity, MAX(h.processName) AS app
-          FROM agent_app_hourly h
+          FROM ${rollupTable} h
           WHERE ${rollupFilters.join(' AND ')}
           GROUP BY h.localAddress, h.remoteAddress, h.remotePort,
             UPPER(h.networkProtocol), h.agentId, h.appIdentity

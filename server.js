@@ -825,10 +825,29 @@ server.listen(PORT, HOST, () => {
     }
   }, AGENT_FOLD_TICK_MS).unref();
 
+  // The app attribution, rolled up by day so a long view does not have to grind
+  // through every hourly row. One day per tick, off the poll loop, for the same
+  // reason the window fold is: a day is about 85,000 rows and folding it takes a
+  // quarter of a second (P3-150).
+  const APP_DAILY_TICK_MS = 60 * 1000;
+  setInterval(() => {
+    try {
+      const result = history.agentAppDaily.fold();
+      if (result.rows) {
+        logger.debug(`[agent-app-daily] folded ${result.folded} day(s), ${result.rows} row(s), `
+          + `${result.pending} left`);
+      }
+    } catch (error) {
+      logger.warn('[agent-app-daily] fold failed:', error.message);
+    }
+  }, APP_DAILY_TICK_MS).unref();
+
   setInterval(() => {
     try {
       const dropped = history.connectionBuckets.prune();
       if (dropped) logger.info(`[connection-buckets] pruned ${dropped} row(s) past retention`);
+      const days = history.agentAppDaily.prune({ retentionMs: AGENT_INGEST_DEFAULT_RETENTION_MS });
+      if (days) logger.info(`[agent-app-daily] pruned ${days} row(s) past retention`);
     } catch (error) {
       logger.warn('[connection-buckets] prune failed:', error.message);
     }
