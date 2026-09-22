@@ -64,6 +64,35 @@ final class AgentRunHistoryTests: XCTestCase {
         XCTAssertNil(history.runs.first?.silenceBeforeEnd)
     }
 
+    func test開始した時点でディスクに残る() throws {
+        // The reason this record can be written before the database is opened:
+        // it is a small file of its own, written whole on every change. If
+        // `beginRun` only changed memory, a process that died while opening a
+        // several-hundred-megabyte database would leave nothing -- which is
+        // exactly the run that most needs a trace (P3-133).
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("run-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let recorder = AgentRunRecorder(fileURL: url)
+        recorder.beginRun(at: base, build: "156")
+        // Nothing else happens: no heartbeat, no clean end. The process is
+        // about to die.
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: url.path),
+            "beginRunの時点でファイルが無い"
+        )
+        let reopened = try AgentRunRecorder.load(from: url)
+        XCTAssertEqual(reopened.runs.count, 1)
+        XCTAssertEqual(reopened.runs.first?.build, "156")
+
+        // And the next start reads it as a run that never said goodbye.
+        let next = AgentRunRecorder(fileURL: url)
+        next.beginRun(at: base.addingTimeInterval(60), build: "157")
+        XCTAssertEqual(next.snapshot().unexpectedEndings().first?.build, "156")
+    }
+
     func testTheHistoryIsBounded() {
         var history = AgentRunHistory()
         for i in 0..<(AgentRunHistory.limit + 5) {

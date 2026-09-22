@@ -136,10 +136,21 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     /// that was alive but had stopped recording and a run that was recording
     /// until it died are the same length and completely different faults.
     /// 2026-08-18 was the first kind and took thirteen hours to notice.
-    private func startRunHeartbeat() {
+    /// Opens this run in the history, and closes the previous one as
+    /// unexpected if it never said goodbye.
+    ///
+    /// Separate from the heartbeat because the two have to happen at different
+    /// moments: this before the database is opened, the heartbeat after, since
+    /// the heartbeat reports the newest observation and there is nothing to
+    /// report it from until the store exists.
+    private func beginRunRecord() {
         guard let runRecorder else { return }
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         runRecorder.beginRun(build: build ?? "unknown")
+    }
+
+    private func startRunHeartbeat() {
+        guard let runRecorder else { return }
         // A minute is fine-grained enough to bound the end of a run and cheap
         // enough to ignore: one small atomic write, off the main thread.
         runHeartbeatTimer.start(every: 60) { [weak self] in
@@ -185,6 +196,17 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Before the database is touched. Opening it is the most likely thing
+        // to kill this process -- it checks a file of a few hundred megabytes
+        // for integrity, and it is the first thing that runs -- and a run that
+        // dies there used to leave no trace at all: the history's next line was
+        // the run after it, so a crash looked like nothing having happened
+        // (P3-133).
+        //
+        // The history is a small file in the App Group container, not a table
+        // in the database it is describing, so it can be written when the
+        // database cannot be opened at all. It only had to be written first.
+        beginRunRecord()
         applyMenuBarIcon(for: .paused)
         _ = hubDelivery
         installApplicationMenu()
