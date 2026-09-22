@@ -122,7 +122,17 @@ public sealed class WindowsAgentUpdateClient : IDisposable
     public static string HostArch => RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
     /// The page a manual download comes from. The same origin the manifest was
     /// read from, so the two cannot point at different places.
-    public Uri DownloadPage => new(origin, "windows/");
+    ///
+    /// The origin itself, not the prefix the packages sit under. "windows/" is
+    /// where the .msi objects live in the bucket; asking a browser for it gets
+    /// an S3 directory listing, which is refused, so the reader who pressed
+    /// "open the download page" was shown AccessDenied. The page is served at
+    /// the root and works out the platform and architecture on its own.
+    ///
+    /// The fragment is the anchor of the Windows button on that page, so a
+    /// reader arriving from here lands on their own download rather than
+    /// having to find it.
+    public Uri DownloadPage => new(origin, "#download-windows");
 
     public static string UserAgent(string version, string osVersion) => $"EgressViewAgent/{version} (Windows {osVersion})";
 
