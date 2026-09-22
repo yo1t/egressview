@@ -43,6 +43,21 @@
 				<string>C617.1</string>
 			</array>
 		</dict>
+		<dict>
+			<!-- Free space is read for one purpose: before the store rewrites
+			     itself to give back the pages deleted history was holding, it
+			     checks that the volume can hold the copy that rewrite makes.
+			     The moment the file is about to shrink is the moment it needs
+			     the most room, and filling the user's disk to save space on
+			     it would be a poor trade. The value is used in that decision
+			     and nowhere else; it is never recorded and never sent. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>E174.1</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
