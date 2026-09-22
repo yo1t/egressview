@@ -229,8 +229,27 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            NetworkLastUpdated.Text = UnavailableText(LocalizationManager.Text("CannotConnect"));
-            LogStatus.Text = $"{UnavailableText(LocalizationManager.Text("CannotConnect"))}: {exception.Message}";
+            // First shown in the "last updated" line, which is twelve grey
+            // pixels with its live region switched off. The reader on the
+            // machine said the whole thing "felt instantaneous" -- the text
+            // was there for fifty seconds and they never saw it.
+            //
+            // The state chip is where a reader looks to know whether this is
+            // working, it is a live region, and while a migration ran it went
+            // on saying 監視 because the last successful poll said so. That is
+            // the same "Running is a lie" this was written to fix, reaching
+            // the window.
+            var migrating = MigrationText();
+            if (migrating is not null)
+            {
+                MonitoringStatus.Text = LocalizationManager.Text("MigrationState");
+                CoverageNote.Text = migrating;
+                NetworkLastUpdated.Text = LocalizationManager.Text("MigrationState");
+                LogStatus.Text = migrating;
+                return;
+            }
+            NetworkLastUpdated.Text = LocalizationManager.Text("CannotConnect");
+            LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}";
         }
     }
 
@@ -345,11 +364,14 @@ public partial class MainWindow : Window
     ///
     /// Read only on failure. While the Agent answers, what it says is better
     /// than a file beside its database.
-    public static string UnavailableText(string fallback)
+    public static string UnavailableText(string fallback) => MigrationText() ?? fallback;
+
+    /// The sentence, or null when nothing is being migrated.
+    public static string? MigrationText()
     {
         var progress = MigrationProgress.Read(
             MigrationProgress.ServiceDatabaseFrom(AppContext.BaseDirectory));
-        if (progress is null) return fallback;
+        if (progress is null) return null;
         return progress.Phase switch
         {
             MigrationProgress.BackingUp => string.Format(CultureInfo.CurrentCulture,
