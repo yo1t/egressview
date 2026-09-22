@@ -335,8 +335,15 @@ public partial class MainWindow : Window
         var unmeasuredNote = data.ConnectionsWithoutBytes > 0
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("UnmeasuredReason"), data.ConnectionsWithoutBytes)
             : string.Empty;
+        // Said, not silently subtracted. The tiles count where traffic went,
+        // and a flow to 127.0.0.1 did not go anywhere -- but leaving it out
+        // without saying so turns a smaller number into an unexplained one.
+        var localNote = data.LocalConnections > 0
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LocalTrafficExcluded"),
+                data.LocalConnections, data.LocalDestinations)
+            : string.Empty;
         CoverageNote.Text = string.Join(Environment.NewLine,
-            new[] { coverageNote, sleepNote, unmeasuredNote }.Where(value => value.Length > 0));
+            new[] { coverageNote, sleepNote, unmeasuredNote, localNote }.Where(value => value.Length > 0));
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
         Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods, data.BucketCount, data.MonitoringGaps);
