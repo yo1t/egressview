@@ -1126,6 +1126,40 @@ try
             $"and what stayed inside is counted, not dropped: {scoped.LocalConnections}/{scoped.LocalDestinations}");
         Assert(scoped.Links.All(link => link.Destination != "127.0.0.1"),
             "and the destination chart agrees with the number above it");
+
+        // How many destinations arrived with a name (P3-162). A reader turned
+        // the setting on, saw addresses in the chart, and concluded it had not
+        // worked -- Secure DNS and direct addresses leave nothing to read, and
+        // there was no way to tell that apart from a broken setting.
+        //
+        // Counted from the rows the chart is built from, so the card and the
+        // chart cannot be describing different populations. Not from DNS
+        // events: those answer a different question about a different set.
+        Assert(scoped.NamedDestinations == 0 && scoped.Destinations == 2,
+            $"with nothing resolved, none of the destinations are named: {scoped.NamedDestinations}/{scoped.Destinations}");
+
+        var namedAt = scopeAt.AddSeconds(1);
+        scopeStore.WriteBatch([
+            new NetworkObservation(namedAt, 12, "TCP", "10.1.1.1", 4010, "93.184.216.34", 443, 10, 10,
+                ObservationLayer.Logical, null, "etw", "outward", "example.com"),
+            // The address written out again is what the chart falls back to,
+            // and it must not be counted as a name. NormalizeDomain is where
+            // that is decided -- it returns null for anything that parses as
+            // an address -- so this row proves the invariant holds end to
+            // end rather than that a second check in SQL catches it.
+            new NetworkObservation(namedAt, 13, "TCP", "10.1.1.1", 4011, "198.51.100.7", 443, 10, 10,
+                ObservationLayer.Logical, null, "etw", "outward", "198.51.100.7"),
+        ]);
+        var withNames = scopeStore.ReadPeriodAnalysis(scopeAt.AddMinutes(-1), DateTimeOffset.UtcNow);
+        Assert(withNames.Destinations == 3 && withNames.NamedDestinations == 1,
+            $"only the destination that actually resolved is named: {withNames.NamedDestinations}/{withNames.Destinations}");
+        Assert(withNames.NamedDestinations <= withNames.Destinations,
+            "and the share can never exceed one");
+        // The chart's own population, counted independently: the card's
+        // denominator has to be the same addresses, or the two disagree on
+        // screen while both look right on their own.
+        Assert(withNames.Links.Select(link => link.Destination).Distinct().Count() == withNames.Destinations,
+            "the card counts the destinations the chart draws, not a different set");
         // And so does the chart under them. Before v28 the timeline read
         // chart_hourly, which folds by application and has no destination to
         // filter on, so the tiles said one thing and the picture below said
