@@ -352,6 +352,12 @@ public partial class MainWindow : Window
                 FormatDuration((DateTimeOffset.UtcNow - stuckSince).TotalSeconds), deliveryPending)
             : string.Empty;
 
+        // Hours folded before the Agent could tell outbound from local are
+        // still counted, and saying nothing about them would present a mixed
+        // figure as a clean one. They age out; the sentence goes with them.
+        var unseparatedNote = data.IncludesUnseparatedHours
+            ? LocalizationManager.Text("UnseparatedHours") : string.Empty;
+
         // Said, not silently subtracted. The tiles count where traffic went,
         // and a flow to 127.0.0.1 did not go anywhere -- but leaving it out
         // without saying so turns a smaller number into an unexplained one.
@@ -360,7 +366,8 @@ public partial class MainWindow : Window
                 data.LocalConnections, data.LocalDestinations)
             : string.Empty;
         CoverageNote.Text = string.Join(Environment.NewLine,
-            new[] { coverageNote, sleepNote, unmeasuredNote, localNote, deliveryNote }.Where(value => value.Length > 0));
+            new[] { coverageNote, sleepNote, unmeasuredNote, localNote, unseparatedNote, deliveryNote }
+                .Where(value => value.Length > 0));
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
         Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods, data.BucketCount, data.MonitoringGaps);

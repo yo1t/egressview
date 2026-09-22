@@ -1037,14 +1037,17 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 27, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 28, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
         var movingSteps = reported.Where(step => step.Phase == MigrationProgress.MovingRows).ToArray();
-        Assert(movingSteps.Length == 2,
+        Assert(movingSteps.Length == 3,
             $"each phase that takes time says so before it starts, not {movingSteps.Length} of them");
-        var moving = movingSteps[^1];
+        // The one that moves the observations. v28 rewrites the folded hours,
+        // of which this fixture has none, so taking "the last" asked the
+        // wrong migration how much work it had.
+        var moving = movingSteps.Single(step => step.ToVersion == 27);
         Assert(moving is not null, "the phase that takes the time says so before it starts");
         // Four, because the fixture has four. A report of zero reads as "this
         // will be quick" for a wait that is anything but, and a number nobody
@@ -1053,6 +1056,8 @@ try
             $"and says how many rows there are to move, not {moving.Rows}");
         Assert(moving.ToVersion == 27 && moving.FromVersion == 26,
             "and which version it is moving them to");
+        Assert(movingSteps.Any(step => step.ToVersion == 28),
+            "and the folded hours are rewritten too, however few of them there are");
         Assert(reported.Any(step => step.Phase == MigrationProgress.BackingUp),
             "the copy that happens first is reported first");
         Assert(MigrationProgress.Read(watched) is null,
@@ -1121,6 +1126,62 @@ try
             $"and what stayed inside is counted, not dropped: {scoped.LocalConnections}/{scoped.LocalDestinations}");
         Assert(scoped.Links.All(link => link.Destination != "127.0.0.1"),
             "and the destination chart agrees with the number above it");
+        // And so does the chart under them. Before v28 the timeline read
+        // chart_hourly, which folds by application and has no destination to
+        // filter on, so the tiles said one thing and the picture below said
+        // another.
+        Assert(scoped.Timeline.Sum(item => item.Connections) == 2,
+            $"the timeline counts what the tiles count, not {scoped.Timeline.Sum(item => item.Connections)}");
+
+        // Again through the fold, because the raw tail is not the path that
+        // was broken. chart_hourly folds by application and had no scope to
+        // filter on, so a period read from summaries counted the loopback
+        // flow while the tiles above it did not -- and a test that only
+        // covers the unfolded hours cannot see that.
+        var foldedHour = new DateTimeOffset(2026, 9, 1, 3, 0, 0, TimeSpan.Zero);
+        var foldedDatabase = Path.Combine(directory, "scope-folded.db");
+        using var foldedStore = new ObservationStore(foldedDatabase);
+        foldedStore.WriteBatch([
+            new NetworkObservation(foldedHour.AddMinutes(5), 20, "TCP", "10.1.1.1", 5000, "93.184.216.34", 443,
+                100, 100, ObservationLayer.Logical, null, "etw", "outward"),
+            new NetworkObservation(foldedHour.AddMinutes(6), 21, "TCP", "127.0.0.1", 5001, "127.0.0.1", 9000,
+                500, 500, ObservationLayer.Logical, null, "etw", "inward"),
+        ]);
+        var settled = foldedHour.AddHours(2).AddMinutes(10);
+        while (foldedStore.PendingChartFoldHours(settled) > 0) foldedStore.FoldCompletedHoursForCharts(settled);
+
+        // Five days, so a bucket is longer than an hour and the timeline reads
+        // the fold. Under an hour it reads everything raw (P3-149), which is
+        // the path the previous version of this test was accidentally taking
+        // -- it passed while the fold it claimed to cover was never touched.
+        var foldedFrom = foldedHour.AddDays(-2);
+        var foldedTo = foldedHour.AddDays(3);
+        var folded = foldedStore.ReadPeriodAnalysis(foldedFrom, foldedTo);
+        Assert(folded.Timeline.Sum(item => item.Connections) == 1,
+            $"a folded hour counts only what left this PC, not {folded.Timeline.Sum(item => item.Connections)}");
+        Assert(folded.Timeline.All(item => item.Application != "inward"),
+            "and the application that only talked to itself is not in the chart");
+        Assert(folded.BytesSent + folded.BytesReceived == 200,
+            $"and the bytes agree with it, not {folded.BytesSent + folded.BytesReceived}");
+        Assert(!folded.IncludesUnseparatedHours,
+            "an hour folded by this version has nothing it could not separate");
+
+        // An hour folded before v28, which the migration marks 'mixed'
+        // because that is what it is. It has to keep being counted -- dropping
+        // it would empty the chart rather than qualify it -- and the window
+        // has to say it is there.
+        foldedStore.SeedFoldedHourForTesting(foldedHour, "legacy", "mixed", 7, 900);
+        var withLegacy = foldedStore.ReadPeriodAnalysis(foldedFrom, foldedTo);
+        Assert(withLegacy.Timeline.Sum(item => item.Connections) == 8,
+            $"an hour that could not be separated is still counted, not {withLegacy.Timeline.Sum(item => item.Connections)}");
+        Assert(withLegacy.IncludesUnseparatedHours,
+            "and the window is told, so a mixed figure is not presented as a clean one");
+
+        // 'local' is the other half of the same fold and must not be counted.
+        foldedStore.SeedFoldedHourForTesting(foldedHour, "inward-only", "local", 99, 99_000);
+        var withLocal = foldedStore.ReadPeriodAnalysis(foldedFrom, foldedTo);
+        Assert(withLocal.Timeline.Sum(item => item.Connections) == 8,
+            $"and what the fold knew stayed here is left out, not {withLocal.Timeline.Sum(item => item.Connections)}");
     }
 
     // The grace the window and the notification both use. Two numbers here
@@ -1137,7 +1198,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 27, "v1 database migrates through v2-v27");
+        Assert(migrated.SchemaVersion == 28, "v1 database migrates through v2-v28");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -1180,10 +1241,10 @@ try
             $"and at the instant it was recorded, not only the fraction of it: {carried.Min(flow => flow.FirstSeen):O}");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v27.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v28.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 27, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 28, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -3427,7 +3488,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 27 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 28 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
