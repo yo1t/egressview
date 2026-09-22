@@ -32,8 +32,15 @@ public struct AgentDroppedObservationWatcher: Sendable, Equatable {
     /// Records a reading and answers whether it is higher than the one before.
     ///
     /// Returns false on the first reading whatever the counters say.
-    public mutating func observe(queueOverflowCount: Int, contractRejectedCount: Int) -> Bool {
-        let total = queueOverflowCount + contractRejectedCount
+    ///
+    /// - Parameter abandonedCount: observations the Hub refused down to one
+    ///   and that were then given up on (P3-148). They are a loss like the
+    ///   other two, and the only kind this agent cannot screen for in
+    ///   advance, so they belong in the same alarm.
+    public mutating func observe(
+        queueOverflowCount: Int, contractRejectedCount: Int, abandonedCount: Int = 0
+    ) -> Bool {
+        let total = queueOverflowCount + contractRejectedCount + abandonedCount
         defer { lastTotal = total }
         guard let lastTotal else { return false }
         return total > lastTotal
