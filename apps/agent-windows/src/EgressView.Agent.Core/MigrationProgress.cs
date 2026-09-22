@@ -28,6 +28,19 @@ public sealed record MigrationProgress(int FromVersion, int ToVersion, string Ph
     /// Rewriting the rows into their new shape.
     public const string MovingRows = "moving-rows";
 
+    /// It stopped, and not because it finished.
+    ///
+    /// Without this the file simply stays where it was, and a window reading
+    /// it goes on reporting the phase it never got past -- an Agent that has
+    /// given up, described as one still working. Waiting is the right thing
+    /// to do only while something is happening.
+    ///
+    /// No message. Whatever went wrong is in startup-error.txt and in the
+    /// diagnostics bundle; a file the window reads is not the place to put
+    /// text nobody has looked at, which in this product is how a path or a
+    /// host ends up on screen.
+    public const string Failed = "failed";
+
     /// Where it sits for a database at a given path.
     public static string PathFor(string databasePath) => databasePath + ".migrating";
 
