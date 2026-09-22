@@ -1083,6 +1083,46 @@ try
         Assert(left.ToVersion == 26, "and which version it was trying to reach");
     }
 
+    // The window is headed "outbound traffic from this PC" and its
+    // destination list carried 127.0.0.1 -- 41,680 rows in a day on the
+    // machine this was found on, the longest-lived flow there was.
+    {
+        foreach (var inside in new[] { "127.0.0.1", "127.53.1.9", "::1", "0:0:0:0:0:0:0:1" })
+            Assert(DestinationScope.IsLoopback(inside), $"{inside} never left this PC");
+        // The line is the network card, not the router. These do leave.
+        foreach (var outside in new[] { "192.168.1.1", "10.0.0.5", "224.0.0.251", "ff02::fb", "169.254.1.1", "93.184.216.34" })
+            Assert(!DestinationScope.IsLoopback(outside), $"{outside} left this PC, however far it got");
+        Assert(!DestinationScope.IsLoopback(null) && !DestinationScope.IsLoopback("")
+               && !DestinationScope.IsLoopback("not-an-address"),
+            "and nothing that is not an address is claimed to be loopback");
+        // The two answers have to agree: an address SQL calls loopback and
+        // C# calls outbound would be counted in both halves.
+        Assert(DestinationScope.LoopbackSql().Contains("127.%", StringComparison.Ordinal)
+               && DestinationScope.LoopbackSql("f").Contains("f.remote_address", StringComparison.Ordinal),
+            "and the SQL asks the same question, of whichever table it is given");
+
+        // And the counts actually use it. A classifier nothing calls is a
+        // classifier, not a fix.
+        var scopeDatabase = Path.Combine(directory, "scope.db");
+        using var scopeStore = new ObservationStore(scopeDatabase);
+        var scopeAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        scopeStore.WriteBatch([
+            new NetworkObservation(scopeAt, 10, "TCP", "10.1.1.1", 4000, "93.184.216.34", 443, 100, 100,
+                ObservationLayer.Logical, null, "etw", "outward"),
+            new NetworkObservation(scopeAt, 10, "TCP", "10.1.1.1", 4001, "192.168.1.9", 445, 100, 100,
+                ObservationLayer.Logical, null, "etw", "outward"),
+            new NetworkObservation(scopeAt, 11, "TCP", "127.0.0.1", 4002, "127.0.0.1", 9000, 100, 100,
+                ObservationLayer.Logical, null, "etw", "inward"),
+        ]);
+        var scoped = scopeStore.ReadPeriodAnalysis(scopeAt.AddMinutes(-1), DateTimeOffset.UtcNow);
+        Assert(scoped.Connections == 2 && scoped.Destinations == 2,
+            $"the headline counts only what left this PC, not {scoped.Connections}/{scoped.Destinations}");
+        Assert(scoped.LocalConnections == 1 && scoped.LocalDestinations == 1,
+            $"and what stayed inside is counted, not dropped: {scoped.LocalConnections}/{scoped.LocalDestinations}");
+        Assert(scoped.Links.All(link => link.Destination != "127.0.0.1"),
+            "and the destination chart agrees with the number above it");
+    }
+
     var liveSnapshot = StartupSnapshot.Capture();
     Assert(liveSnapshot.Where(flow => flow.Protocol == "TCP").All(flow => flow.RemotePort > 0),
         "TCP startup snapshot excludes listeners");

@@ -144,6 +144,15 @@ public sealed record PeriodAnalysis(
     /// Sleep is already drawn and already explained, so it is taken out here
     /// rather than reported twice under two names. What is left is the part
     /// nobody asked for: a crash, a stopped service, a collector that died.
+    /// Connections and destinations that never left this PC.
+    ///
+    /// Counted, not hidden. The headline numbers are what the window promises
+    /// -- traffic that went somewhere -- and these are the rest, said in the
+    /// same card so that leaving them out of the total is a disclosure rather
+    /// than a quiet subtraction.
+    public long LocalConnections { get; init; }
+    public int LocalDestinations { get; init; }
+
     public IReadOnlyList<MonitoringGap> MonitoringGaps { get; init; } = [];
     public double MonitoringGapSeconds => MonitoringGaps.Sum(gap => Math.Max(0, (gap.End - gap.Start).TotalSeconds));
 }

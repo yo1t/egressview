@@ -2668,7 +2668,10 @@ public sealed partial class ObservationStore : IDisposable
             // How many connections, applications and destinations the period
             // touched: properties of the flows themselves, so counted from
             // flows. A flow that outlived the period still touched it.
-            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows WHERE {where}";
+            // Loopback is counted apart rather than counted in. "How many
+            // destinations" is a question about where things went, and a flow
+            // to 127.0.0.1 did not go anywhere.
+            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows WHERE {where} AND NOT {DestinationScope.LoopbackSql()}";
             CheckOperation(WinSqlite.Prepare(db, totalsSql, -1, out var totalsStatement, 0));
             long connections; int applications; int destinations; long bytes; long unknown; long sent; long received;
             try
@@ -2680,6 +2683,18 @@ public sealed partial class ObservationStore : IDisposable
                 unknown = WinSqlite.ColumnInt64(totalsStatement, 3);
             }
             finally { WinSqlite.Finalize(totalsStatement); }
+
+            long localConnections = 0; var localDestinations = 0;
+            CheckOperation(WinSqlite.Prepare(db,
+                $"SELECT COUNT(*),COUNT(DISTINCT remote_address) FROM flows WHERE {where} AND {DestinationScope.LoopbackSql()}",
+                -1, out var localStatement, 0));
+            try
+            {
+                CheckQueryRow(WinSqlite.Step(localStatement));
+                localConnections = WinSqlite.ColumnInt64(localStatement, 0);
+                localDestinations = (int)WinSqlite.ColumnInt64(localStatement, 1);
+            }
+            finally { WinSqlite.Finalize(localStatement); }
 
             // Bytes are not. A flow row carries its whole life's total, so
             // summing the flows that overlap a period charges the period for
@@ -2757,6 +2772,7 @@ public sealed partial class ObservationStore : IDisposable
                 FROM flows f
                 LEFT JOIN measured ON measured.application={qualifiedApp} AND measured.remote_address=f.remote_address
                 WHERE f.last_seen>='{fromText}' AND f.first_seen<'{toText}' AND f.layer='logical'
+                  AND NOT {DestinationScope.LoopbackSql("f")}
                 GROUP BY 1,2 ORDER BY 4 DESC,1,2 LIMIT 512
                 """;
             CheckOperation(WinSqlite.Prepare(db, linksSql, -1, out var linksStatement, 0));
@@ -2862,6 +2878,8 @@ public sealed partial class ObservationStore : IDisposable
                 monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline)
             {
                 BucketCount = bucketCount,
+                LocalConnections = localConnections,
+                LocalDestinations = localDestinations,
                 StorageBytes = ReadStorageBytes(),
                 BytesSent = sent,
                 BytesReceived = received,
