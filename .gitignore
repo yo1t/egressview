@@ -157,6 +157,10 @@ apps/agent-windows/.render-check*/
 # The tool also writes a dot-less directory when run from the solution root,
 # which the dotted pattern above does not cover.
 apps/agent-windows/render-check*/
+# And a net, because the rule above is written as a path and the images are
+# not: render-check now anchors its output to its own directory, so anything
+# by this name anywhere is a copy made before that or by something else.
+render-check/
 
 # A one-off harness: it names 25 specific empty windows from one machine and
 # refuses to run anywhere else.
