@@ -848,6 +848,8 @@ server.listen(PORT, HOST, () => {
       if (dropped) logger.info(`[connection-buckets] pruned ${dropped} row(s) past retention`);
       const days = history.agentAppDaily.prune({ retentionMs: AGENT_INGEST_DEFAULT_RETENTION_MS });
       if (days) logger.info(`[agent-app-daily] pruned ${days} row(s) past retention`);
+      const windows = history.prunePollWindows();
+      if (windows) logger.info(`[router-poll-windows] pruned ${windows} row(s) past retention`);
     } catch (error) {
       logger.warn('[connection-buckets] prune failed:', error.message);
     }
