@@ -11,7 +11,15 @@ public sealed record DeliveryNotificationState(DateTimeOffset? FailureStartedAt 
 
 public sealed class DeliveryNotificationTracker(DeliveryNotificationState? restored = null)
 {
-    private static readonly TimeSpan OutageGrace = TimeSpan.FromMinutes(5);
+    /// How long a backlog has to sit before this counts as delivery being
+    /// stuck rather than delivery being between attempts.
+    ///
+    /// Public because the window uses the same number. The Agent decided four
+    /// times in one soak that delivery had stopped, and said nothing each
+    /// time -- HubDelivery notifications are the one category that is off by
+    /// default -- so the screen shows it instead. A screen that draws its own
+    /// line would be a second opinion about the same fact.
+    public static readonly TimeSpan OutageGrace = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan RetryInterval = TimeSpan.FromHours(1);
     private DeliveryNotificationState state = restored ?? new();
 

@@ -40,6 +40,10 @@ function createRouterPollScheduler({
   maxBackoffMs   = DEFAULT_MAX_BACKOFF,
   staggerStepMs,
   onTimeout      = () => {},
+  // Told after every cycle whether the router answered. The timeline needs to
+  // know which five-minute windows had no answer at all, so that "not known"
+  // stops being drawn as "nothing was sent" (P3-157).
+  onCycle        = () => {},
   schedulePoll   = setTimeout,
   cancelPoll     = clearTimeout,
   now            = Date.now,
@@ -130,6 +134,10 @@ function createRouterPollScheduler({
         await cyclePromise.catch(() => {});
       }
     } finally {
+      // Reported here, not in the two branches above, so a cycle cannot end
+      // without being counted -- an uncounted cycle would read as a gap.
+      try { onCycle({ id: st.entry.id, kind: st.entry.kind, ok: !failed, at: now() }); }
+      catch (e) { logger.warn(`[poll:${st.entry.id}] could not record the poll window: ${e.message}`); }
       st.controller = null;
       releaseSlot();
       st.running = false;
