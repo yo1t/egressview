@@ -7,6 +7,15 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
     /// How many failed each rule, so a report can say which one.
     public let contractRejectionReasons: [String: Int]
     public let queueOverflowCount: Int
+    /// How many observations were given up on after the Hub refused a batch
+    /// down to one. Separate from the rejections caught before sending: these
+    /// passed this agent's own checks and the Hub still would not take them,
+    /// which is the only way to find out that the two disagree.
+    public let abandonedCount: Int
+    /// How many times a refused batch was halved. Not a loss -- it is how the
+    /// one observation the Hub objects to is found without discarding the 199
+    /// travelling with it.
+    public let splitCount: Int
     public let legacyUnclassifiedCount: Int
     public let oldestPendingAt: Date?
     public let lastAcknowledgedAt: Date?
@@ -20,6 +29,8 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
         contractRejectedCount: Int,
         contractRejectionReasons: [String: Int] = [:],
         queueOverflowCount: Int,
+        abandonedCount: Int = 0,
+        splitCount: Int = 0,
         legacyUnclassifiedCount: Int,
         oldestPendingAt: Date?,
         lastAcknowledgedAt: Date?,
@@ -29,6 +40,8 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
         self.contractRejectedCount = contractRejectedCount
         self.contractRejectionReasons = contractRejectionReasons
         self.queueOverflowCount = queueOverflowCount
+        self.abandonedCount = abandonedCount
+        self.splitCount = splitCount
         self.legacyUnclassifiedCount = legacyUnclassifiedCount
         self.oldestPendingAt = oldestPendingAt
         self.lastAcknowledgedAt = lastAcknowledgedAt
@@ -36,7 +49,7 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
     }
 
     public var droppedCount: Int {
-        contractRejectedCount + queueOverflowCount + legacyUnclassifiedCount
+        contractRejectedCount + queueOverflowCount + abandonedCount + legacyUnclassifiedCount
     }
 }
 
@@ -63,6 +76,8 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         // counter existed. Missing data means "not classified", not corrupt.
         var contractRejectionReasons: [String: Int]?
         var queueOverflowCount: Int?
+        var abandonedCount: Int?
+        var splitCount: Int?
         var lastAcknowledgedAt: Date?
     }
 
@@ -229,6 +244,60 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         }
     }
 
+    /// What happened to a batch the Hub would not take.
+    public enum RejectionOutcome: Equatable, Sendable {
+        /// The batch was halved; the next attempt sends this many.
+        case split(remaining: Int)
+        /// One observation was left and the Hub still refused it, so it was
+        /// given up on. Everything that travelled with it has been delivered.
+        case abandoned(observationID: UUID)
+        /// The rejection named a batch that is not the one in flight, so
+        /// nothing was changed. A late reply to a batch already acknowledged
+        /// must not cut the batch that replaced it.
+        case ignored
+    }
+
+    /// Halve a batch the Hub refused, and give up only on the one observation
+    /// that survives to the end.
+    ///
+    /// On Windows this exact situation stopped delivery for three hours and
+    /// threw away 42,545 observations: one record in roughly 300 broke the
+    /// Hub's contract, and every batch carrying one was refused whole while
+    /// the unacknowledged batch was re-sent forever (P3-148). Eight halvings
+    /// take 200 observations down to one, so at most one is lost instead of
+    /// the 199 travelling with it.
+    ///
+    /// This agent screens observations before they are queued, so the poison
+    /// it knows about never reaches here. This is for the kind it does not
+    /// know about -- a Hub whose schema has grown stricter than the agent's
+    /// copy of it, which is precisely the case nobody can screen for in
+    /// advance.
+    public func recordRejection(batchID: UUID) throws -> RejectionOutcome {
+        try lock.withLock {
+            guard let active = state.activeBatch, active.batchID == batchID else {
+                return .ignored
+            }
+            guard active.observationIDs.count > 1 else {
+                let abandoned = active.observationIDs
+                state.pending.removeAll { abandoned.contains($0.observationID) }
+                state.activeBatch = nil
+                state.abandonedCount = (state.abandonedCount ?? 0) + abandoned.count
+                try persist()
+                // `first` is safe: the guard above is `count > 1`, and an
+                // empty batch cannot be prepared.
+                return .abandoned(observationID: abandoned[0])
+            }
+            let keep = Array(active.observationIDs.prefix(active.observationIDs.count / 2))
+            // A new id, because the half is a different batch. Reusing the id
+            // would let a late acknowledgement of the whole batch clear
+            // observations that were never sent.
+            state.activeBatch = ActiveBatch(batchID: UUID(), observationIDs: keep)
+            state.splitCount = (state.splitCount ?? 0) + 1
+            try persist()
+            return .split(remaining: keep.count)
+        }
+    }
+
     public func acknowledge(batchID: UUID, at date: Date = Date()) throws {
         try lock.withLock {
             guard let active = state.activeBatch, active.batchID == batchID else {
@@ -249,6 +318,8 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 contractRejectedCount: state.contractRejectedCount ?? 0,
                 contractRejectionReasons: state.contractRejectionReasons ?? [:],
                 queueOverflowCount: state.queueOverflowCount ?? 0,
+                abandonedCount: state.abandonedCount ?? 0,
+                splitCount: state.splitCount ?? 0,
                 legacyUnclassifiedCount: state.droppedCount,
                 oldestPendingAt: state.pending.map(\.queuedAt).min(),
                 lastAcknowledgedAt: state.lastAcknowledgedAt,

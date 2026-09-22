@@ -185,7 +185,54 @@ export function drawAppPieChart(conns, precomputedSlices) {
   });
 }
 
-export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
+// Stretches in which nothing could be recorded, drawn behind the bars.
+//
+// A bar of zero means "nothing was sent". A stretch the record knows nothing
+// about means "not known", and drawing the two the same way is what let a user
+// read steady traffic off a chart covering three minutes in which their
+// machine was down (P3-157).
+//
+// Hatching, not a flat wash: a flat fill reads as a small value, and the point
+// is that there is no value. Behind the bars, not below them, because the
+// whole of this defect is that nobody looks below the chart.
+const HATCH_SPACING = 6;
+
+function drawMonitoringGaps(g, gaps, xScale, fromT, toT, ih) {
+  if (!gaps.length) return false;
+  const defs = g.append('defs');
+  const pattern = defs.append('pattern')
+    .attr('id', 'timeline-gap-hatch')
+    .attr('patternUnits', 'userSpaceOnUse')
+    .attr('width', HATCH_SPACING).attr('height', HATCH_SPACING)
+    .attr('patternTransform', 'rotate(45)');
+  pattern.append('rect')
+    .attr('width', HATCH_SPACING).attr('height', HATCH_SPACING)
+    .attr('fill', '#94a3b8').attr('fill-opacity', 0.12);
+  pattern.append('line')
+    .attr('x1', 0).attr('y1', 0).attr('x2', 0).attr('y2', HATCH_SPACING)
+    .attr('stroke', '#94a3b8').attr('stroke-width', 1.5);
+
+  let drawn = false;
+  for (const gap of gaps) {
+    const from = Math.max(gap.from, fromT);
+    const to = Math.min(gap.to, toT);
+    if (!(to > from)) continue;
+    // At least one hatch line wide. A band thinner than the spacing carries no
+    // stripe, so it reads as a tick mark rather than as "no record" -- and a
+    // pixel comparison cannot tell the difference, which is how the same
+    // mistake passed its test on Windows.
+    const x = xScale(from);
+    const width = Math.max(HATCH_SPACING, xScale(to) - x);
+    g.append('rect').attr('class', 'timeline-gap')
+      .attr('x', x).attr('y', 0)
+      .attr('width', width).attr('height', ih)
+      .attr('fill', 'url(#timeline-gap-hatch)');
+    drawn = true;
+  }
+  return drawn;
+}
+
+export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs, { monitoringGaps = [] } = {}) {
   const svg = d3.select('#chart-timeline');
   const node = svg.node();
   const w = node.clientWidth || 600;
@@ -224,6 +271,8 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
     .call(d3.axisBottom(xScale).ticks(Math.min(8, Math.floor(iw / 80))).tickSizeOuter(0));
   g.append('g').attr('class', 'stats-axis')
     .call(d3.axisLeft(yScale).ticks(5).tickSizeOuter(0));
+
+  const drewGaps = drawMonitoringGaps(g, monitoringGaps, xScale, fromT, toT, ih);
 
   if (chartMode === 'composition') {
     // Every rectangle is one recorded time window. Curves and filled areas
@@ -327,6 +376,16 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
     item.appendChild(document.createTextNode(labelText));
     item.title = label === '__other__' ? t('stats.legend.other') : label;
     item.addEventListener('click', () => selectTimelineTarget(label));
+    legend.appendChild(item);
+  }
+  if (drewGaps) {
+    const item = document.createElement('span');
+    item.className = 'stats-legend-item is-static';
+    const swatch = document.createElement('div');
+    swatch.className = 'stats-legend-dot stats-legend-hatch';
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(t('stats.timeline.legend.noRecord')));
+    item.title = t('stats.timeline.legend.noRecordTitle');
     legend.appendChild(item);
   }
   document.getElementById('stats-timeline').appendChild(legend);

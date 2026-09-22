@@ -161,7 +161,8 @@ function renderStatsSummary(summary, selIp) {
     const arr = series.get(row.key) || series.get('__other__');
     arr[bucket] += row.count || 0;
   }
-  drawTimeline(series, fromT, toT, buckets, bw, topTargets);
+  drawTimeline(series, fromT, toT, buckets, bw, topTargets,
+    { monitoringGaps: summary.monitoringGaps || [] });
   showTimelineGap(summary, summary.from ?? fromT);
   drawAppPieChart(null, appSlicesFromSummary(summary.appGroups, 8, {
     unknownLabel: t('stats.app.unknown'),

@@ -138,6 +138,7 @@ function createRouterManager({
     runCycle,
     pollIntervalMs,
     onTimeout: entry => entry.adapter.reconnect(),
+    onCycle: cycle => history?.recordPollWindow?.(cycle),
   });
 
   function adapterFor(record) {

@@ -119,6 +119,57 @@ describe('router-poll-scheduler: cycle execution', () => {
   });
 });
 
+// The timeline hatches the five-minute windows no router answered in, and it
+// derives them from the absence of a reported success. A cycle that ends
+// without being reported is therefore read as an outage (P3-157).
+describe('router-poll-scheduler: reporting every cycle', () => {
+  it('reports a cycle that succeeded', async () => {
+    const timer = makeManualTimer();
+    const reported = [];
+    const sched = createRouterPollScheduler({
+      runCycle: async () => {},
+      onCycle: cycle => reported.push({ id: cycle.id, ok: cycle.ok }),
+      schedulePoll: timer.schedulePoll,
+      cancelPoll: timer.cancelPoll,
+    });
+    sched.start(entryOf('cisco-11111111'));
+    await timer.fireAllPending();
+    assert.deepEqual(reported, [{ id: 'cisco-11111111', ok: true }]);
+  });
+
+  it('reports a cycle that failed', async () => {
+    const timer = makeManualTimer();
+    const reported = [];
+    const sched = createRouterPollScheduler({
+      runCycle: async () => { throw new Error('link down'); },
+      onCycle: cycle => reported.push({ id: cycle.id, ok: cycle.ok }),
+      schedulePoll: timer.schedulePoll,
+      cancelPoll: timer.cancelPoll,
+    });
+    sched.start(entryOf('cisco-11111111'));
+    await timer.fireAllPending();
+    assert.deepEqual(reported, [{ id: 'cisco-11111111', ok: false }]);
+  });
+
+  // The record is a diagnostic; polling is the product. A database that will
+  // not take the row must not stop the next poll being scheduled.
+  it('keeps polling when the report itself throws', async () => {
+    const timer = makeManualTimer();
+    const sched = createRouterPollScheduler({
+      runCycle: async () => {},
+      onCycle: () => { throw new Error('database is locked'); },
+      pollIntervalMs: 60_000,
+      schedulePoll: timer.schedulePoll,
+      cancelPoll: timer.cancelPoll,
+    });
+    sched.start(entryOf('cisco-11111111'));
+    await timer.fireAllPending();
+    const next = timer.pending();
+    assert.equal(next.length, 1);
+    assert.equal(next[0].delay, 60_000);
+  });
+});
+
 describe('router-poll-scheduler: concurrency cap', () => {
   it('never runs more cycles than maxConcurrent', async () => {
     const timer = makeManualTimer();

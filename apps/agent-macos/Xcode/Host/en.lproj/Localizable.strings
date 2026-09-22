@@ -229,6 +229,7 @@
 "Hub unavailable; next low-frequency retry %@" = "Hub unavailable; next low-frequency retry %@";
 "Hub authorization expired or was revoked" = "Hub authorization expired or was revoked";
 "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld" = "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld";
+"given up on: %lld (after %lld split)" = "given up on: %lld (after %lld split)";
 "Oldest pending: %@" = "Oldest pending: %@";
 "Last acknowledged: %@" = "Last acknowledged: %@";
 "none" = "none";

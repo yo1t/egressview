@@ -3,6 +3,7 @@
 
 const { BUCKET_MS: FOLDED_WINDOW_MS } = require('./connection-buckets');
 const { createDestinationLabels } = require('./destination-labels');
+const { pollGaps } = require('./router-poll-windows');
 
 const SORT_COL_SQL = {
   lastSeen: 'lastSeen',
@@ -835,6 +836,14 @@ function createHistoryQueries({
       timelineFullFrom,
       // What the bars actually span, which the chart draws its axis from.
       timelineRange: { from: timelineFrom, to: timelineTo },
+      // Windows in which no router answered. A bar there would say "nothing
+      // was sent" about a stretch the record knows nothing about, which is
+      // what a user read off the chart of a machine that had been down
+      // (P3-157). Only reported for the folded chart: the last-seen
+      // projection is not a record of windows, so it has no windows to miss.
+      monitoringGaps: useBuckets
+        ? timed('monitoringGaps', () => pollGaps(db, { from: timelineFrom, to: timelineTo }))
+        : [],
       // The browser must not infer semantics from the shape of the values.
       // A scoped question cannot use the all-source folded record, so it
       // intentionally falls back to the legacy last-seen projection.
