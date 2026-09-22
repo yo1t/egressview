@@ -127,6 +127,112 @@ final class ChartRenderingTests: XCTestCase {
         (360, 96), (360, 70), (420, 64), (420, 56), (420, 48), (420, 40), (420, 34),
     ]
 
+    /// Ink in one column of a horizontal band, as a fraction of its pixels.
+    private func columnInk(_ bitmap: NSBitmapImageRep, x: Int, yRange: Range<Int>) -> Double {
+        guard x >= 0, x < bitmap.pixelsWide else { return 0 }
+        var inked = 0
+        var total = 0
+        for y in yRange where y >= 0 && y < bitmap.pixelsHigh {
+            total += 1
+            if let colour = bitmap.colorAt(x: x, y: y), colour.alphaComponent > 0.05 { inked += 1 }
+        }
+        return total == 0 ? 0 : Double(inked) / Double(total)
+    }
+
+    /// The columns that gained ink between two renders of the same chart.
+    ///
+    /// Comparing against the same chart without the band is what makes these
+    /// assertions about the band and not about the bars: measured in the blank
+    /// space above the tallest bar, anything that appears there is the band.
+    private func changedColumns(
+        _ before: NSBitmapImageRep, _ after: NSBitmapImageRep, yRange: Range<Int>
+    ) -> [Int] {
+        (0..<before.pixelsWide).filter { x in
+            columnInk(after, x: x, yRange: yRange) > columnInk(before, x: x, yRange: yRange) + 0.02
+        }
+    }
+
+    /// Where the plot starts inside the canvas: the y-axis labels' column.
+    /// Mirrors `AgentTimelinePlot.yAxisWidth`, which is private.
+    private static let plotLeftInset: CGFloat = 56
+
+    func test監視できなかった時間が描かれる() throws {
+        // A three-minute outage drawn exactly like three quiet minutes is the
+        // defect: for a product that says it records what left this Mac, "no
+        // record" and "no traffic" are opposite claims (P3-157).
+        let model = spikyTimeline(metric: .sessions)
+        let first = try XCTUnwrap(model.bucketStarts.first)
+        let span = model.bucketDuration * Double(model.bucketStarts.count)
+        let gapFrom = 0.4, gapTo = 0.6
+        let gap = DateInterval(
+            start: first.addingTimeInterval(span * gapFrom),
+            end: first.addingTimeInterval(span * gapTo)
+        )
+        let width: CGFloat = 700, height: CGFloat = 260, scale: CGFloat = 2
+        let without = try render(
+            AgentTimelinePlot(model: model, scale: .day, sleepPeriods: []),
+            width: width, height: height
+        )
+        let withGap = try render(
+            AgentTimelinePlot(model: model, scale: .day, sleepPeriods: [], monitoringGaps: [gap]),
+            width: width, height: height
+        )
+
+        // Above the bars, where the chart was blank.
+        let top = 0..<Int(height * scale * 0.25)
+        let changed = changedColumns(without, withGap, yRange: top)
+        XCTAssertFalse(changed.isEmpty, "監視できなかった区間に何も描かれていない")
+
+        let plotWidth = (width - Self.plotLeftInset) * scale
+        let plotLeft = Self.plotLeftInset * scale
+        let expectedLeft = plotLeft + plotWidth * gapFrom
+        let expectedRight = plotLeft + plotWidth * gapTo
+        let tolerance = 4.0 * Double(scale)
+        // Drawn where the gap was, and nowhere else. Ignoring the gap's start
+        // and painting from the left edge of the plot passes a test that only
+        // asks whether something appeared.
+        XCTAssertEqual(
+            Double(try XCTUnwrap(changed.first)), Double(expectedLeft), accuracy: tolerance,
+            "帯の左端が区間の開始と合っていない"
+        )
+        XCTAssertEqual(
+            Double(try XCTUnwrap(changed.last)), Double(expectedRight), accuracy: tolerance,
+            "帯の右端が区間の終わりと合っていない"
+        )
+    }
+
+    func test短い空白も目に見える幅で描かれる() throws {
+        // Thirty seconds in a day is far under a pixel drawn to scale. An
+        // outage that rounds away puts the chart back to showing no traffic
+        // for a stretch it knows nothing about -- so the band has a floor of
+        // one hatch stroke, which is what makes it read as hatching rather
+        // than as a tick.
+        let model = spikyTimeline(metric: .sessions)
+        let first = try XCTUnwrap(model.bucketStarts.first)
+        let span = model.bucketDuration * Double(model.bucketStarts.count)
+        let tiny = DateInterval(
+            start: first.addingTimeInterval(span * 0.5),
+            end: first.addingTimeInterval(span * 0.5 + 30)
+        )
+        let width: CGFloat = 700, height: CGFloat = 260, scale: CGFloat = 2
+        let without = try render(
+            AgentTimelinePlot(model: model, scale: .day, sleepPeriods: []),
+            width: width, height: height
+        )
+        let withGap = try render(
+            AgentTimelinePlot(model: model, scale: .day, sleepPeriods: [], monitoringGaps: [tiny]),
+            width: width, height: height
+        )
+        let top = 0..<Int(height * scale * 0.25)
+        let changed = changedColumns(without, withGap, yRange: top)
+        XCTAssertFalse(changed.isEmpty, "30秒の空白が消えている")
+        let drawnWidth = try XCTUnwrap(changed.last) - (try XCTUnwrap(changed.first)) + 1
+        XCTAssertGreaterThanOrEqual(
+            CGFloat(drawnWidth), AgentTimelinePlot.minimumGapWidth * scale - 1,
+            "帯が\(drawnWidth)pxしかない。実寸で描くと1px未満になり、斜線に見えない"
+        )
+    }
+
     func test縦軸のラベルが隣とぶつからない() throws {
         // Measured 2026-09-11 with the three fixed fractions still in place:
         // at 420x40 the gaps were 2px and 1px, and at 420x34 the three labels
