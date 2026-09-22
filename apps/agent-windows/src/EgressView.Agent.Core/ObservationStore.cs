@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 27;
+    private const int CurrentSchemaVersion = 28;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -161,6 +161,15 @@ public sealed partial class ObservationStore : IDisposable
     private const string ObservedHourStart =
         "strftime('%Y-%m-%dT%H:00:00.0000000+00:00'," + ObservedUnixSeconds + ",'unixepoch')";
 
+    /// Which side of the network card a row is, for the fold.
+    private static readonly string ObservedScope =
+        $"CASE WHEN {DestinationScope.LoopbackSql()} THEN 'local' ELSE 'outbound' END";
+
+    /// The folded hours a period may count: everything except what is known
+    /// to have stayed here. 'mixed' is included because excluding it would
+    /// drop every hour folded before v28 -- incomplete, not absent.
+    private const string CountableScopes = "scope IN ('outbound','mixed')";
+
     /// The flow a row of the old shape belonged to, expressed in SQL.
     ///
     /// The same key StartupSnapshot.FlowKey builds in C#. It exists for the
@@ -217,6 +226,40 @@ public sealed partial class ObservationStore : IDisposable
     ///
     /// UTC only, which is what the column already held: everything written
     /// here goes through ToUniversalTime first, so no offset is lost.
+    /// The folded hours learn which side of the network card they are on.
+    ///
+    /// #628 took loopback out of the counts and out of the destination chart,
+    /// and could not take it out of the timeline: chart_hourly folds by
+    /// application and layer and has no destination to filter on. So the
+    /// tiles said one thing and the chart under them said another, which is
+    /// the fault this repository has spent the day finding in other places.
+    ///
+    /// Summing the per-destination table instead does not work. Its flow_count
+    /// is per destination, and flow_key drops the remote end for UDP, so one
+    /// socket talking to several peers is counted once per peer: measured on
+    /// this machine, 1,712 of 10,044 hours exceeded chart_hourly's own count,
+    /// the worst by 8.75 times. It is also younger -- v25 -- so eight days of
+    /// history have no breakdown at all.
+    ///
+    /// Hours already folded are marked 'mixed', because that is what they are.
+    /// Calling them 'outbound' would be a claim about data that was averaged
+    /// away, and the timeline would be quietly wrong for thirty days instead
+    /// of honestly incomplete for thirty days.
+    private const string Version28Schema = """
+        CREATE TABLE chart_hourly_v28(
+          bucket_start TEXT NOT NULL,
+          application TEXT NOT NULL,
+          layer TEXT NOT NULL CHECK(layer IN ('logical','vpn_transport')),
+          scope TEXT NOT NULL CHECK(scope IN ('outbound','local','mixed')),
+          observation_count INTEGER NOT NULL,
+          flow_count INTEGER NOT NULL DEFAULT 0,
+          bytes_sent INTEGER NOT NULL,
+          bytes_received INTEGER NOT NULL,
+          bytes_unknown INTEGER NOT NULL,
+          PRIMARY KEY(bucket_start,application,layer,scope)
+        );
+        """;
+
     private const string Version27Schema = """
         CREATE TABLE observations_v27(
           id INTEGER PRIMARY KEY,
@@ -472,7 +515,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -510,7 +553,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 23) { MigrateVersion23To24(); version = 24; }
         if (version == 24) { MigrateVersion24To25(); version = 25; }
         if (version == 25) { MigrateVersion25To26(); version = 26; }
-        if (version == 26) MigrateVersion26To27();
+        if (version == 26) { MigrateVersion26To27(); version = 27; }
+        if (version == 27) MigrateVersion27To28();
         ValidateSchema();
         }
         catch { ReportMigrationFailed(startedAt); throw; }
@@ -831,6 +875,52 @@ public sealed partial class ObservationStore : IDisposable
     /// arithmetic. So the conversion is done in two halves that are both
     /// exact: whole seconds from strftime, and the fraction read out of the
     /// text it is already in.
+    /// Gives every folded hour a scope, and tells the truth about the old ones.
+    ///
+    /// Small: 11,732 rows on this machine against the 31 million v27 moved, so
+    /// this is seconds rather than minutes. The backup is taken all the same --
+    /// a cheap migration that goes wrong costs the same as an expensive one.
+    private void MigrateVersion27To28()
+    {
+        CreateMigrationBackup(28);
+        try
+        {
+            Execute("BEGIN IMMEDIATE");
+            Execute(Version28Schema);
+            ReportMigration(28, MigrationProgress.MovingRows,
+                ScalarInt64("SELECT COUNT(*) FROM chart_hourly"));
+            // 'mixed', and no test reaches this line. A database has to hold
+            // folded hours *and* be at v27 for it to matter, and the fixture
+            // path cannot make one: a store always migrates to the current
+            // version, and nothing folds during the chain. What the tests do
+            // cover is everything downstream -- that a mixed hour is counted,
+            // that a local one is not, and that the window says mixed hours
+            // are present -- because SeedFoldedHourForTesting can write the
+            // row this line would have written.
+            Execute("""
+                INSERT INTO chart_hourly_v28(bucket_start,application,layer,scope,
+                  observation_count,flow_count,bytes_sent,bytes_received,bytes_unknown)
+                SELECT bucket_start,application,layer,'mixed',
+                       observation_count,flow_count,bytes_sent,bytes_received,bytes_unknown
+                FROM chart_hourly;
+                """);
+            var before = ScalarInt64("SELECT COUNT(*) FROM chart_hourly");
+            var after = ScalarInt64("SELECT COUNT(*) FROM chart_hourly_v28");
+            if (before != after)
+                throw new ObservationStoreException(StoreFailureKind.SchemaInvalid,
+                    $"Scoping the folded hours would keep {after} of {before}.");
+            Execute("""
+                DROP TABLE chart_hourly;
+                ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly;
+                CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start);
+                UPDATE schema_version SET version=28 WHERE version=27;
+                COMMIT;
+                """);
+            PruneMigrationBackups(28);
+        }
+        catch { TryRollback(); throw; }
+    }
+
     private void MigrateVersion26To27()
     {
         CreateMigrationBackup(27);
@@ -1542,11 +1632,11 @@ public sealed partial class ObservationStore : IDisposable
                    SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
             FROM observations o JOIN flows f ON f.rowid=o.flow_id
             WHERE observed_at>={cutoff.UtcTicks} AND observed_at<{end.UtcTicks} GROUP BY f.protocol,layer;
-            INSERT INTO chart_hourly(bucket_start,application,layer,observation_count,bytes_sent,bytes_received,bytes_unknown)
-            SELECT '{boundary:O}',COALESCE(NULLIF(process_name,''),'Unknown'),layer,COUNT(*),
+            INSERT INTO chart_hourly(bucket_start,application,layer,scope,observation_count,bytes_sent,bytes_received,bytes_unknown)
+            SELECT '{boundary:O}',COALESCE(NULLIF(process_name,''),'Unknown'),layer,{ObservedScope},COUNT(*),
                    SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
                    SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
-            FROM observations WHERE observed_at>={cutoff.UtcTicks} AND observed_at<{end.UtcTicks} GROUP BY 2,layer;
+            FROM observations WHERE observed_at>={cutoff.UtcTicks} AND observed_at<{end.UtcTicks} GROUP BY 2,layer,4;
             """);
     }
 
@@ -2164,16 +2254,16 @@ public sealed partial class ObservationStore : IDisposable
             try
             {
                 Execute($"""
-                    INSERT INTO chart_hourly(bucket_start,application,layer,observation_count,flow_count,bytes_sent,bytes_received,bytes_unknown)
+                    INSERT INTO chart_hourly(bucket_start,application,layer,scope,observation_count,flow_count,bytes_sent,bytes_received,bytes_unknown)
                     SELECT {ObservedHourStart},
-                           COALESCE(NULLIF(process_name,''),'Unknown'),layer,COUNT(*),
+                           COALESCE(NULLIF(process_name,''),'Unknown'),layer,{ObservedScope},COUNT(*),
                            COUNT(DISTINCT {FlowIdentity}),
                            SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
                            SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                     FROM observations
                     WHERE observed_at>={watermark.UtcTicks} AND observed_at<{foldTo.UtcTicks}
-                    GROUP BY 1,2,layer
-                    ON CONFLICT(bucket_start,application,layer) DO UPDATE SET
+                    GROUP BY 1,2,layer,4
+                    ON CONFLICT(bucket_start,application,layer,scope) DO UPDATE SET
                       observation_count=observation_count+excluded.observation_count,
                       -- Added, not replaced, for the same reason the others
                       -- are: a bucket can be folded in more than one pass.
@@ -2684,6 +2774,10 @@ public sealed partial class ObservationStore : IDisposable
             }
             finally { WinSqlite.Finalize(totalsStatement); }
 
+            var unseparated = ScalarInt64(
+                $"SELECT COUNT(*) FROM chart_hourly WHERE bucket_start>='{aggregateStart:O}' "
+                + $"AND bucket_start<'{aggregateEnd:O}' AND scope='mixed'") > 0;
+
             long localConnections = 0; var localDestinations = 0;
             CheckOperation(WinSqlite.Prepare(db,
                 $"SELECT COUNT(*),COUNT(DISTINCT remote_address) FROM flows WHERE {where} AND {DestinationScope.LoopbackSql()}",
@@ -2711,6 +2805,7 @@ public sealed partial class ObservationStore : IDisposable
                 SELECT COALESCE(SUM(sent),0),COALESCE(SUM(received),0) FROM (
                   SELECT bytes_sent AS sent,bytes_received AS received FROM chart_hourly
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
+                    AND {CountableScopes}
                   UNION ALL
                   SELECT bytes_sent,bytes_received FROM hourly_summary h
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
@@ -2723,10 +2818,10 @@ public sealed partial class ObservationStore : IDisposable
                   -- find 27,000 rows among 34 million. As two ranges it is
                   -- 0.02, because each one is an index seek.
                   SELECT COALESCE(bytes_sent,0),COALESCE(bytes_received,0) FROM observations
-                  WHERE observed_at>={fromTicks} AND observed_at<{aggregateStart.UtcTicks} AND layer='logical'
+                  WHERE observed_at>={fromTicks} AND observed_at<{aggregateStart.UtcTicks} AND layer='logical' AND NOT {DestinationScope.LoopbackSql()}
                   UNION ALL
                   SELECT COALESCE(bytes_sent,0),COALESCE(bytes_received,0) FROM observations
-                  WHERE observed_at>={aggregateEnd.UtcTicks} AND observed_at<{toTicks} AND layer='logical'
+                  WHERE observed_at>={aggregateEnd.UtcTicks} AND observed_at<{toTicks} AND layer='logical' AND NOT {DestinationScope.LoopbackSql()}
                 )
                 """;
             CheckOperation(WinSqlite.Prepare(db, bytesSql, -1, out var bytesStatement, 0));
@@ -2758,11 +2853,11 @@ public sealed partial class ObservationStore : IDisposable
                   UNION ALL
                   SELECT {app},remote_address,COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)
                   FROM observations
-                  WHERE observed_at>={fromTicks} AND observed_at<{aggregateStart.UtcTicks} AND layer='logical'
+                  WHERE observed_at>={fromTicks} AND observed_at<{aggregateStart.UtcTicks} AND layer='logical' AND NOT {DestinationScope.LoopbackSql()}
                   UNION ALL
                   SELECT {app},remote_address,COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)
                   FROM observations
-                  WHERE observed_at>={aggregateEnd.UtcTicks} AND observed_at<{toTicks} AND layer='logical'
+                  WHERE observed_at>={aggregateEnd.UtcTicks} AND observed_at<{toTicks} AND layer='logical' AND NOT {DestinationScope.LoopbackSql()}
                 ), measured AS (
                   SELECT application,remote_address,SUM(bytes) AS bytes FROM parts GROUP BY 1,2
                 )
@@ -2821,6 +2916,7 @@ public sealed partial class ObservationStore : IDisposable
                          SUM(bytes_sent+bytes_received) AS bytes,SUM(bytes_unknown) AS unknown
                   FROM chart_hourly
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
+                    AND {CountableScopes}
                   GROUP BY bucket,application
                   UNION ALL
                   SELECT MIN({bucketCount - 1},MAX(0,CAST(({ObservedUnixSeconds}-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
@@ -2828,7 +2924,7 @@ public sealed partial class ObservationStore : IDisposable
                          SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
                          SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                   FROM observations
-                  WHERE observed_at>={fromTicks} AND observed_at<{aggregateStart.UtcTicks} AND layer='logical'
+                  WHERE observed_at>={fromTicks} AND observed_at<{aggregateStart.UtcTicks} AND layer='logical' AND NOT {DestinationScope.LoopbackSql()}
                   GROUP BY bucket,2
                   UNION ALL
                   SELECT MIN({bucketCount - 1},MAX(0,CAST(({ObservedUnixSeconds}-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
@@ -2836,7 +2932,7 @@ public sealed partial class ObservationStore : IDisposable
                          SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
                          SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                   FROM observations
-                  WHERE observed_at>={aggregateEnd.UtcTicks} AND observed_at<{toTicks} AND layer='logical'
+                  WHERE observed_at>={aggregateEnd.UtcTicks} AND observed_at<{toTicks} AND layer='logical' AND NOT {DestinationScope.LoopbackSql()}
                   GROUP BY bucket,2
                   UNION ALL
                   -- Hours the per-application fold never covered. There is no
@@ -2878,6 +2974,7 @@ public sealed partial class ObservationStore : IDisposable
                 monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline)
             {
                 BucketCount = bucketCount,
+                IncludesUnseparatedHours = unseparated,
                 LocalConnections = localConnections,
                 LocalDestinations = localDestinations,
                 StorageBytes = ReadStorageBytes(),
@@ -3233,6 +3330,25 @@ public sealed partial class ObservationStore : IDisposable
     /// honest way to cause one from outside: the report would otherwise be a
     /// path nothing executes.
     /// </param>
+    /// Writes a folded hour directly, including one the Agent could not
+    /// separate.
+    ///
+    /// 'mixed' rows are made by the v27-to-v28 migration and by nothing else,
+    /// so without this there is no way to reach the code that reads them: the
+    /// timeline has to keep counting them, and the window has to say they are
+    /// there. Both are behaviour a reader sees for thirty days after an
+    /// upgrade, and neither could be exercised.
+    internal void SeedFoldedHourForTesting(DateTimeOffset bucket, string application, string scope,
+        long connections, long bytes)
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            Execute($"INSERT INTO chart_hourly(bucket_start,application,layer,scope,observation_count,flow_count,bytes_sent,bytes_received,bytes_unknown) "
+                + $"VALUES('{bucket.ToUniversalTime():O}','{Sql(application)}','logical','{Sql(scope)}',{connections},{connections},{bytes},0,0)");
+        }
+    }
+
     internal static void CreateVersion1FixtureForTesting(string fixturePath, string? extraSql = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(fixturePath))!);

@@ -150,6 +150,16 @@ public sealed record PeriodAnalysis(
     /// -- traffic that went somewhere -- and these are the rest, said in the
     /// same card so that leaving them out of the total is a disclosure rather
     /// than a quiet subtraction.
+    /// Whether any hour in this period was folded before the Agent could
+    /// tell the two apart.
+    ///
+    /// Those hours are counted, because dropping them would empty the chart
+    /// rather than qualify it. They cannot be corrected: the split was
+    /// averaged away and the per-destination table cannot rebuild it. They
+    /// age out of the window on their own, and until they do the screen says
+    /// so rather than presenting a mixed figure as a clean one.
+    public bool IncludesUnseparatedHours { get; init; }
+
     public long LocalConnections { get; init; }
     public int LocalDestinations { get; init; }
 
