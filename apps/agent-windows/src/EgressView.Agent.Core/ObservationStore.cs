@@ -711,6 +711,71 @@ public sealed partial class ObservationStore : IDisposable
                 $"Migration backup needs {required} bytes free but only {available} bytes are available.");
     }
 
+    /// The default time a migration backup is kept once the migration it
+    /// protects has already succeeded.
+    ///
+    /// A day is not a guess about when corruption appears. It is how long the
+    /// Agent takes to exercise the new schema through everything it does:
+    /// collection, delivery, the hourly fold, and the retention pass itself.
+    /// A migration that broke any of those has shown it by then.
+    public static readonly TimeSpan MigrationBackupProvingPeriod = TimeSpan.FromHours(24);
+
+    /// Deletes migration backups whose migration has been proven.
+    ///
+    /// A backup exists so a broken migration can be undone, and nothing here
+    /// ever deleted it afterwards -- the prune during a migration keeps the
+    /// generation being written, so the file that survives is the one whose
+    /// migration succeeded. On this machine that file is 7.32 GiB beside a
+    /// 7.95 GiB database: the escape hatch costs as much as the thing it
+    /// protects, and it is reported to the user as disk the Agent is using.
+    ///
+    /// The backup's own last-write time is the clock. Recording a migration
+    /// time in the database would need a column, a column needs a schema
+    /// version, and a schema version would take another full-size backup --
+    /// the new state would cost more than the state it accounts for.
+    ///
+    /// There is no check here that the schema is current, because the store's
+    /// own existence is that check: the constructor either reaches the current
+    /// version or throws, so a failed migration leaves no object to call this
+    /// on and no maintenance loop to call it from. A version comparison here
+    /// would read like a safeguard while never being able to be false.
+    public long PruneProvenMigrationBackups(DateTimeOffset now, TimeSpan? provingPeriod = null)
+    {
+        var period = provingPeriod ?? MigrationBackupProvingPeriod;
+        if (period < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(provingPeriod));
+        lock (gate) ThrowIfDisposed();
+
+        var directory = Path.GetDirectoryName(path)!;
+        var prefix = Path.GetFileName(path) + ".pre-v";
+        long freed = 0;
+        IEnumerable<string> candidates;
+        try { candidates = Directory.EnumerateFiles(directory, prefix + "*.bak", SearchOption.TopDirectoryOnly).ToList(); }
+        catch (IOException) { return 0; }
+        catch (UnauthorizedAccessException) { return 0; }
+
+        foreach (var candidate in candidates)
+        {
+            var name = Path.GetFileName(candidate);
+            // Only the Agent's own naming. An operator's copy of the database
+            // in the same directory is not ours to delete.
+            if (!int.TryParse(name[prefix.Length..^4], out _)) continue;
+            try
+            {
+                var info = new FileInfo(candidate);
+                if (now - new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero) < period) continue;
+                var size = info.Length;
+                File.Delete(candidate);
+                freed = checked(freed + size);
+            }
+            // A backup that cannot be read or removed right now is left for
+            // the next pass. Failing to reclaim disk is not a reason to fail
+            // the maintenance that reclaims the rest of it.
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        return freed;
+    }
+
     private void PruneMigrationBackups(int keepTargetVersion)
     {
         var directory = Path.GetDirectoryName(path)!;
