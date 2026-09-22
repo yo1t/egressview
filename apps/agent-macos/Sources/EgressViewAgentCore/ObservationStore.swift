@@ -278,17 +278,26 @@ public final class ObservationStore: @unchecked Sendable {
         )
     }
 
-    public convenience init(
-        fileManager: FileManager = .default,
-        retention: ObservationRetention = ObservationRetention()
-    ) throws {
+    /// Where the records live, without opening them.
+    ///
+    /// Needed by anything that has to look beside the database before it is
+    /// opened -- the note a failed migration leaves, for instance, which is
+    /// cleared by the very open that would otherwise reveal it.
+    public static func defaultFileURL(fileManager: FileManager = .default) throws -> URL {
         guard let containerURL = fileManager.containerURL(
             forSecurityApplicationGroupIdentifier: ObservationJournal.appGroupIdentifier
         ) else {
             throw ObservationStoreError.open("The EgressView App Group container is unavailable")
         }
+        return containerURL.appendingPathComponent("observations.sqlite")
+    }
+
+    public convenience init(
+        fileManager: FileManager = .default,
+        retention: ObservationRetention = ObservationRetention()
+    ) throws {
         try self.init(
-            fileURL: containerURL.appendingPathComponent("observations.sqlite"),
+            fileURL: Self.defaultFileURL(fileManager: fileManager),
             retention: retention
         )
     }
@@ -301,8 +310,38 @@ public final class ObservationStore: @unchecked Sendable {
 
     // MARK: - Schema
 
+    /// The newest schema this build knows how to produce.
+    ///
+    /// Named rather than counted from the code so the backup and the progress
+    /// file can say where the migration is heading before it starts.
+    static let latestSchemaVersion = 15
+
     private func migrate() throws {
         let version = try scalar("PRAGMA user_version") ?? 0
+        // An upgrade, not a fresh database: make a copy first, and say what is
+        // happening while it runs.
+        //
+        // Both for the same reason. Opening the database is the first thing the
+        // agent does and, on a large one, the longest -- and until now it did
+        // it silently and without a way back. On Windows the equivalent took
+        // 145 seconds during which the agent looked broken, and a migration
+        // that failed halfway had nothing to restore from (P3-161).
+        //
+        // A fresh database skips both: there is nothing to lose and nothing to
+        // wait for.
+        let isUpgrade = version > 0 && version < Self.latestSchemaVersion
+        if isUpgrade {
+            reportMigration(.init(
+                stage: .backingUp, fromVersion: Int(version),
+                toVersion: Self.latestSchemaVersion
+            ))
+            backUpBeforeMigrating(fromVersion: Int(version))
+            reportMigration(.init(
+                stage: .migrating, fromVersion: Int(version),
+                toVersion: Self.latestSchemaVersion, currentVersion: Int(version)
+            ))
+        }
+        defer { if isUpgrade { MigrationProgressFile.clear(forDatabaseAt: fileURL) } }
         if version < 1 {
             try execute("""
             CREATE TABLE IF NOT EXISTS observations (
@@ -345,6 +384,7 @@ public final class ObservationStore: @unchecked Sendable {
                 "CREATE INDEX IF NOT EXISTS hourly_rollup_hour ON hourly_rollup(hour_start)"
             )
             try execute("PRAGMA user_version=1")
+            reportMigrationStep(1)
         }
         if version < 2 {
             try execute("""
@@ -356,12 +396,14 @@ public final class ObservationStore: @unchecked Sendable {
             )
             """)
             try execute("PRAGMA user_version=2")
+            reportMigrationStep(2)
         }
         if version < 3 {
             // Local only. The name the application asked for is not part of the
             // ingest contract, so it lives here and nowhere else.
             try execute("ALTER TABLE observations ADD COLUMN remote_hostname TEXT")
             try execute("PRAGMA user_version=3")
+            reportMigrationStep(3)
         }
         if version < 4 {
             // Locations for destinations. Received in bulk from the Hub, or
@@ -378,6 +420,7 @@ public final class ObservationStore: @unchecked Sendable {
             )
             """)
             try execute("PRAGMA user_version=4")
+            reportMigrationStep(4)
         }
         if version < 5 {
             // When monitoring was actually running. Without this, a period with
@@ -407,6 +450,7 @@ public final class ObservationStore: @unchecked Sendable {
             HAVING count(*) > 0
             """)
             try execute("PRAGMA user_version=5")
+            reportMigrationStep(5)
         }
         if version < 6 {
             // When the Mac was asleep. A sleep and a monitoring failure both
@@ -425,6 +469,7 @@ public final class ObservationStore: @unchecked Sendable {
                 "CREATE INDEX IF NOT EXISTS sleep_periods_started ON sleep_periods(started_at)"
             )
             try execute("PRAGMA user_version=6")
+            reportMigrationStep(6)
         }
         if version < 7 {
             // Threat indicators, received whole and matched locally. Kept here
@@ -440,6 +485,7 @@ public final class ObservationStore: @unchecked Sendable {
             )
             """)
             try execute("PRAGMA user_version=7")
+            reportMigrationStep(7)
         }
         if version < 8 {
             // Hourly totals for the charts.
@@ -477,6 +523,7 @@ public final class ObservationStore: @unchecked Sendable {
             )
             """)
             try execute("PRAGMA user_version=8")
+            reportMigrationStep(8)
         }
         if version < 9 {
             // A bounded, period-independent memory of countries reached. The
@@ -513,6 +560,7 @@ public final class ObservationStore: @unchecked Sendable {
             )
             """)
             try execute("PRAGMA user_version=9")
+            reportMigrationStep(9)
         }
         if version < 10 {
             // Network Extension reports the same flow when it opens and when
@@ -526,6 +574,7 @@ public final class ObservationStore: @unchecked Sendable {
                 + "ON observations(flow_id) WHERE flow_id IS NOT NULL"
             )
             try execute("PRAGMA user_version=10")
+            reportMigrationStep(10)
         }
         if version < 11 {
             // Confidence for stored indicators (P3-19). Existing rows become
@@ -538,6 +587,7 @@ public final class ObservationStore: @unchecked Sendable {
                 )
             }
             try execute("PRAGMA user_version=11")
+            reportMigrationStep(11)
         }
         if version < 12 {
             // Two reasons an address should stop being asked about.
@@ -569,6 +619,7 @@ public final class ObservationStore: @unchecked Sendable {
                 )
             }
             try execute("PRAGMA user_version=12")
+            reportMigrationStep(12)
         }
         if version < 13 {
             // A bounded baseline for outbound anomaly detection. One row per
@@ -587,6 +638,7 @@ public final class ObservationStore: @unchecked Sendable {
             )
             """)
             try execute("PRAGMA user_version=13")
+            reportMigrationStep(13)
         }
         if version < 14 {
             // One row per hour keeps directional overview cards independent
@@ -630,6 +682,7 @@ public final class ObservationStore: @unchecked Sendable {
                 try execute("ALTER TABLE outbound_traffic_windows ADD COLUMN anomaly_kind TEXT")
             }
             try execute("PRAGMA user_version=14")
+            reportMigrationStep(14)
         }
         if version < 15 {
             // Coordinates become optional. A country table kept on this Mac
@@ -655,6 +708,54 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("DROP TABLE geo_locations")
             try execute("ALTER TABLE geo_locations_v15 RENAME TO geo_locations")
             try execute("PRAGMA user_version=15")
+            reportMigrationStep(15)
+        }
+    }
+
+    /// Says where the migration has got to, for a window that cannot ask.
+    private func reportMigration(_ progress: MigrationProgress) {
+        MigrationProgressFile.write(progress, forDatabaseAt: fileURL)
+    }
+
+    /// Reports a completed step, so a long migration does not look stuck on
+    /// the one it started with.
+    private func reportMigrationStep(_ version: Int) {
+        guard let existing = MigrationProgressFile.read(forDatabaseAt: fileURL) else { return }
+        reportMigration(.init(
+            stage: .migrating, fromVersion: existing.fromVersion,
+            toVersion: existing.toVersion, currentVersion: version,
+            startedAt: existing.startedAt
+        ))
+    }
+
+    /// Copies the database before changing its shape, so a migration that fails
+    /// can be undone.
+    ///
+    /// `VACUUM INTO` rather than a file copy: it takes a consistent snapshot of
+    /// a database that is already open, and it leaves out the free pages, which
+    /// on a real Mac were thirty percent of the file. Measured there: 311.5 MB
+    /// became 177.2 MB in 459 ms.
+    ///
+    /// Failing to make the copy does not stop the upgrade. The copy is
+    /// insurance, and refusing to start the agent because the insurance could
+    /// not be written would turn a full disk into an outage. It is logged, and
+    /// the previous copy is kept rather than replaced by nothing.
+    private func backUpBeforeMigrating(fromVersion: Int) {
+        let backup = fileURL.deletingPathExtension()
+            .appendingPathExtension("pre-v\(fromVersion).sqlite")
+        let temporary = backup.appendingPathExtension("partial")
+        try? FileManager.default.removeItem(at: temporary)
+        do {
+            try execute("VACUUM INTO '\(temporary.path)'")
+            // Only now is the previous copy replaced: an interrupted vacuum
+            // must not be able to destroy a good backup from an earlier run.
+            try? FileManager.default.removeItem(at: backup)
+            try FileManager.default.moveItem(at: temporary, to: backup)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: backup.path
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: temporary)
         }
     }
 
@@ -1212,8 +1313,14 @@ public final class ObservationStore: @unchecked Sendable {
                 SELECT COALESCE(bytes_in, 0), COALESCE(bytes_out, 0),
                        CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END
                 FROM observations
-                WHERE last_observed_at >= ?1 AND last_observed_at < ?2
-                  AND (last_observed_at < ?3 OR last_observed_at >= ?4)
+                -- Two ranges, named. The same rows can be asked for as "the
+                -- period, minus the middle", and SQLite answers that by
+                -- seeking the whole period and filtering every row in it.
+                -- Naming both ends makes each one an index seek: measured on
+                -- this machine, thirty days went from 20 ms to 1 ms for the
+                -- same answer (P3-149).
+                WHERE (last_observed_at >= ?1 AND last_observed_at < ?3)
+                   OR (last_observed_at >= ?4 AND last_observed_at < ?2)
             )
             """)
             defer { sqlite3_finalize(statement) }
@@ -1349,8 +1456,14 @@ public final class ObservationStore: @unchecked Sendable {
                        COALESCE(SUM(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)), 0) AS total_bytes,
                        SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END) AS unknown
                 FROM observations
-                WHERE last_observed_at >= ?1 AND last_observed_at < ?2
-                  AND (last_observed_at < ?3 OR last_observed_at >= ?4)
+                -- Two ranges, named. The same rows can be asked for as "the
+                -- period, minus the middle", and SQLite answers that by
+                -- seeking the whole period and filtering every row in it.
+                -- Naming both ends makes each one an index seek: measured on
+                -- this machine, thirty days went from 20 ms to 1 ms for the
+                -- same answer (P3-149).
+                WHERE (last_observed_at >= ?1 AND last_observed_at < ?3)
+                   OR (last_observed_at >= ?4 AND last_observed_at < ?2)
                 GROUP BY process_name, destination
                 UNION ALL
                 SELECT process_name,
@@ -1914,8 +2027,10 @@ public final class ObservationStore: @unchecked Sendable {
                        COALESCE(SUM(COALESCE(o.bytes_in,0) + COALESCE(o.bytes_out,0)), 0) AS total
                 FROM observations o
                 JOIN geo_locations g ON g.ip = o.remote_address AND g.latitude IS NOT NULL
-                WHERE o.last_observed_at >= ?1 AND o.last_observed_at < ?2
-                  AND (o.last_observed_at < ?3 OR o.last_observed_at >= ?4)
+                -- Two named ranges rather than the period minus its
+                -- middle: each end is then an index seek (P3-149).
+                WHERE (o.last_observed_at >= ?1 AND o.last_observed_at < ?3)
+                   OR (o.last_observed_at >= ?4 AND o.last_observed_at < ?2)
                 GROUP BY g.latitude, g.longitude, g.country_code, g.city
                 UNION ALL
                 SELECT g.latitude, g.longitude, g.country_code, g.city,
@@ -1961,8 +2076,10 @@ public final class ObservationStore: @unchecked Sendable {
                 SELECT COUNT(*) AS sessions,
                        COALESCE(SUM(COALESCE(bytes_in,0) + COALESCE(bytes_out,0)), 0) AS total
                 FROM observations o
-                WHERE o.last_observed_at >= ?1 AND o.last_observed_at < ?2
-                  AND (o.last_observed_at < ?3 OR o.last_observed_at >= ?4)
+                -- Two named ranges rather than the period minus its
+                -- middle: each end is then an index seek (P3-149).
+                WHERE (o.last_observed_at >= ?1 AND o.last_observed_at < ?3)
+                   OR (o.last_observed_at >= ?4 AND o.last_observed_at < ?2)
                   AND NOT EXISTS (
                       SELECT 1 FROM geo_locations g
                       WHERE g.ip = o.remote_address AND g.latitude IS NOT NULL

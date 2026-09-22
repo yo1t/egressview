@@ -25,14 +25,17 @@ final class ChartAggregateTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
-    private func observe(at date: Date, process: String = "curl", address: String = "203.0.113.7") throws {
+    private func observe(
+        at date: Date, process: String = "curl", address: String = "203.0.113.7",
+        hostname: String = "one.example"
+    ) throws {
         try store.append([ConnectionObservation(
             networkProtocol: .tcp, localAddress: "192.0.2.5", localPort: 1,
             remoteAddress: address, remotePort: 443, processID: 1,
             processName: process, bundleID: nil,
             firstObservedAt: date, lastObservedAt: date,
             bytesIn: 10, bytesOut: 20, collector: .networkExtension,
-            confidence: .exact, remoteHostname: "one.example"
+            confidence: .exact, remoteHostname: hostname
         )])
     }
 
@@ -49,6 +52,42 @@ final class ChartAggregateTests: XCTestCase {
         try store.foldCompletedHoursForCharts(now: now)
 
         XCTAssertEqual(try sessions(from: hour, to: now), 5)
+    }
+
+    /// The raw rows outside the folded stretch are two ranges: the part-hour
+    /// the period opens with, and the tail past the fold watermark. Asked for
+    /// as "the period minus the middle", SQLite seeks the whole period and
+    /// filters every row in it -- 20 ms against 712,000 rows on a real Mac,
+    /// where naming both ranges is 1 ms (P3-149).
+    ///
+    /// The arithmetic must not change, and that is what this pins: a row in
+    /// each of the three stretches, counted once each.
+    func test_期間の前後と畳んだ真ん中をそれぞれ一度ずつ数える() throws {
+        // Half an hour before the first whole hour: outside the aggregate.
+        try observe(at: hour.addingTimeInterval(-1800), address: "203.0.113.1", hostname: "before.example")
+        // Inside the hour that gets folded.
+        try observe(at: hour.addingTimeInterval(600), address: "203.0.113.2", hostname: "folded.example")
+        // Past the watermark, still raw.
+        try observe(at: hour.addingTimeInterval(3600 + 600), address: "203.0.113.3", hostname: "after.example")
+
+        let now = hour.addingTimeInterval(3600 + 1200)
+        try store.foldCompletedHoursForCharts(now: now)
+
+        XCTAssertEqual(
+            try sessions(from: hour.addingTimeInterval(-1800), to: now), 3,
+            "3つの区間のどれかが落ちているか、二重に数えられている"
+        )
+        // Three separate rows, not one summed three times: each stretch is
+        // read once and they do not overlap.
+        let totals = try store.appDestinationTotals(
+            from: hour.addingTimeInterval(-1800), to: now
+        )
+        XCTAssertEqual(
+            Set(totals.map(\.destination)),
+            ["before.example", "folded.example", "after.example"],
+            "3つの区間のどれかが読まれていない"
+        )
+        XCTAssertEqual(totals.map(\.sessionCount), [1, 1, 1], "どこかが二重に数えられている")
     }
 
     func test_進行中の時間は生データから数える() throws {
