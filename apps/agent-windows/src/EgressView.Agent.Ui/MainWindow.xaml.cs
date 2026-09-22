@@ -218,7 +218,7 @@ public partial class MainWindow : Window
             if (DateTimeOffset.UtcNow - countryHistoryReadAt >= EnrichmentRefreshInterval)
                 await RefreshCountryHistoryAsync();
             GlobeCaption.Text = currentGlobePoints.Count == 0
-                ? allTimeCountryCount == 0 ? LocalizationManager.Text("GlobeUnavailable")
+                ? allTimeCountryCount == 0 ? GlobeUnavailableText()
                     : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeHistoryOnly"), allTimeCountryCount)
                 : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocationsWithHistory"), currentGlobePoints.Count, allTimeCountryCount);
             AutomationProperties.SetHelpText(Globe, GlobeCaption.Text);
@@ -1743,14 +1743,42 @@ public partial class MainWindow : Window
     /// worse than none, because it is the line a reader would rely on.
     private void RenderEnrichmentPrivacy(bool publicFeeds, bool countryTable, bool thirdPartyLookup = false)
     {
+        // Remembered because the globe's caption makes the same claim from
+        // the other side of the window, and the two disagreeing is the defect
+        // this pair of lines exists to stop.
+        enrichmentThirdParty = thirdPartyLookup;
+        enrichmentPublicFeeds = publicFeeds;
+        enrichmentCountryTable = countryTable;
         if (EnrichmentPrivacyNote is null) return;
-        var sources = new List<string>();
-        if (thirdPartyLookup) sources.Add(LocalizationManager.Text("SourceIpwho"));
-        if (publicFeeds) sources.Add(LocalizationManager.Text("SourcePublicFeeds"));
-        if (countryTable) sources.Add(LocalizationManager.Text("SourceMaxMind"));
-        EnrichmentPrivacyNote.Text = sources.Count == 0
-            ? LocalizationManager.Text("EnrichmentPrivacy")
-            : string.Format(LocalizationManager.Text("EnrichmentPrivacyDirect"), string.Join(" / ", sources));
+        var claim = EnrichmentDisclosure.Describe(thirdPartyLookup, publicFeeds, countryTable,
+            LocalizationManager.Text("SourceIpwho"), LocalizationManager.Text("SourcePublicFeeds"),
+            LocalizationManager.Text("SourceMaxMind"));
+        EnrichmentPrivacyNote.Text = claim.Sources.Count == 0
+            ? LocalizationManager.Text(claim.Key)
+            : string.Format(LocalizationManager.Text(claim.Key), string.Join(" / ", claim.Sources));
+    }
+
+    private bool enrichmentThirdParty;
+    private bool enrichmentPublicFeeds;
+    private bool enrichmentCountryTable;
+
+    /// What to say when the globe has nothing to show.
+    ///
+    /// It used to say "connect to a Hub" and "no external map or location
+    /// service is contacted by this app" -- the first when there are now two
+    /// ways to place an address without a Hub, and the second while the
+    /// settings screen was already qualifying the very same claim. The screen
+    /// that makes a promise and the screen that qualifies it have to be the
+    /// same screen.
+    private string GlobeUnavailableText()
+    {
+        var claim = EnrichmentDisclosure.Describe(enrichmentThirdParty, enrichmentPublicFeeds,
+            enrichmentCountryTable, LocalizationManager.Text("SourceIpwho"),
+            LocalizationManager.Text("SourcePublicFeeds"), LocalizationManager.Text("SourceMaxMind"));
+        return claim.Sources.Count == 0
+            ? LocalizationManager.Text("GlobeUnavailable")
+            : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeUnavailableDirect"),
+                string.Join(" / ", claim.Sources));
     }
 
     private static void RenderEnrichment(JsonElement item, TextBlock status, TextBlock failure)
