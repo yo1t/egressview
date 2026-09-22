@@ -2,6 +2,7 @@
 'use strict';
 
 const { BUCKET_MS: FOLDED_WINDOW_MS } = require('./connection-buckets');
+const { createDestinationLabels } = require('./destination-labels');
 
 const SORT_COL_SQL = {
   lastSeen: 'lastSeen',
@@ -91,20 +92,6 @@ function hasConnectionBuckets(db) {
 // their times, so they can be counted for the past, while router-observed
 // flows cannot. A line drawn there is the traffic the Agents saw, not
 // everything that left the network, and the screen has to say so.
-// Names for the destinations a chart is about to draw, and only those.
-//
-// The labels live in `connections`, where the same destination has a row per
-// flow -- five and a half of them on average. Asking SQLite to group the whole
-// table and join the result cost 1,107 ms against 486,236 rows, to name 3,056
-// destinations. Asked for by name instead it is 250 ms, and the answer is
-// identical.
-//
-// A covering index on (dst, org, dstHost) would make this an index-only read,
-// but `connections` is written on every poll and that is the loop P3-139 was
-// fought over. Not worth a write on the hot path to save a read on a cached
-// one.
-const LABEL_LOOKUP_CHUNK = 900;
-
 // Where the app attribution switches from hourly rows to the daily rollup.
 //
 // The daily table cannot answer for part of a day exactly: a flow seen at 09:00
@@ -122,19 +109,6 @@ function hasAgentAppDaily(db) {
       "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_app_daily'"
     ).get();
   } catch { return false; }
-}
-
-function resolveDestinationLabels(db, destinations) {
-  const labels = new Map();
-  for (let i = 0; i < destinations.length; i += LABEL_LOOKUP_CHUNK) {
-    const part = destinations.slice(i, i + LABEL_LOOKUP_CHUNK);
-    const rows = db.prepare(
-      `SELECT dst, MAX(NULLIF(org, '')) AS org, MAX(NULLIF(dstHost, '')) AS dstHost
-       FROM connections WHERE dst IN (${part.map(() => '?').join(',')}) GROUP BY dst`
-    ).all(...part);
-    for (const row of rows) labels.set(row.dst, row.org || row.dstHost || row.dst);
-  }
-  return labels;
 }
 
 function connectionBucketCoverage(db) {
@@ -273,6 +247,9 @@ function createHistoryQueries({
   compatibilitySource,
   summarizeAppGroups,
   onSummaryTiming = null,
+  // Names for the destinations a chart draws, kept between renders. One per
+  // set of queries, because it is about one database.
+  destinationLabels = createDestinationLabels(),
 }) {
   function queryByTimeRange(from, to, { sourceScope = null } = {}) {
     const db = getDb();
@@ -804,7 +781,7 @@ function createHistoryQueries({
            GROUP BY dst, bucket`
         ).all(bucketCount - 1, timelineFrom, bucketMs, timelineFrom, timelineTo);
 
-        const labels = resolveDestinationLabels(db, [...new Set(counted.map(r => r.dst))]);
+        const labels = destinationLabels.resolve(db, [...new Set(counted.map(r => r.dst))]);
         const folded = new Map();
         for (const row of counted) {
           const key = labels.get(row.dst) || row.dst;
