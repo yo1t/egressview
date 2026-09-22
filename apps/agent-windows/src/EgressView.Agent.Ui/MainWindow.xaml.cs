@@ -239,10 +239,11 @@ public partial class MainWindow : Window
             // on saying 監視 because the last successful poll said so. That is
             // the same "Running is a lie" this was written to fix, reaching
             // the window.
-            var migrating = MigrationText();
+            var migrating = MigrationDisplay.Text();
             if (migrating is not null)
             {
-                MonitoringStatus.Text = LocalizationManager.Text("MigrationState");
+                MonitoringStatus.Text = LocalizationManager.Text(
+                    MigrationDisplay.Failed() ? "MigrationFailedState" : "MigrationState");
                 CoverageNote.Text = migrating;
                 NetworkLastUpdated.Text = LocalizationManager.Text("MigrationState");
                 LogStatus.Text = migrating;
@@ -355,34 +356,6 @@ public partial class MainWindow : Window
     }
 
     /// Public because the render check asserts on it; it is a pure formatter.
-    /// What to put where "cannot read state" goes.
-    ///
-    /// The pipe not answering has two meanings and the window used to show
-    /// one of them. A service that is broken and a service that is two
-    /// minutes into a schema migration look identical from here, and only
-    /// one of them is worth doing something about.
-    ///
-    /// Read only on failure. While the Agent answers, what it says is better
-    /// than a file beside its database.
-    public static string UnavailableText(string fallback) => MigrationText() ?? fallback;
-
-    /// The sentence, or null when nothing is being migrated.
-    public static string? MigrationText()
-    {
-        var progress = MigrationProgress.Read(
-            MigrationProgress.ServiceDatabaseFrom(AppContext.BaseDirectory));
-        if (progress is null) return null;
-        return progress.Phase switch
-        {
-            MigrationProgress.BackingUp => string.Format(CultureInfo.CurrentCulture,
-                LocalizationManager.Text("MigrationBackingUp"), progress.ToVersion),
-            MigrationProgress.MovingRows => string.Format(CultureInfo.CurrentCulture,
-                LocalizationManager.Text("MigrationMovingRows"), progress.ToVersion, progress.Rows),
-            _ => string.Format(CultureInfo.CurrentCulture,
-                LocalizationManager.Text("MigrationInProgress"), progress.ToVersion),
-        };
-    }
-
     public static string FormatDuration(double seconds)
     {
         // Under a minute, say seconds.

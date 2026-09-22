@@ -157,19 +157,31 @@ internal static class Entry
             var db = MigrationProgress.ServiceDatabaseFrom(AppContext.BaseDirectory);
             Directory.CreateDirectory(Path.GetDirectoryName(db)!);
             MigrationProgress.Clear(db);
-            var broken = MainWindow.UnavailableText("cannot-read-state");
+            var broken = MigrationDisplay.Or("cannot-read-state");
             if (broken != "cannot-read-state")
                 throw new InvalidOperationException(
                     $"with no migration in progress the window keeps its own message, not \"{broken}\"");
 
             MigrationProgress.Write(db, new(25, 26, MigrationProgress.MovingRows, 31_387_127, DateTimeOffset.UtcNow));
-            var migrating = MainWindow.UnavailableText("cannot-read-state");
+            var migrating = MigrationDisplay.Or("cannot-read-state");
             MigrationProgress.Clear(db);
             if (migrating == "cannot-read-state")
                 throw new InvalidOperationException("a migration in progress still reads as a broken service");
             if (!migrating.Contains("31,387,127", StringComparison.Ordinal))
                 throw new InvalidOperationException($"and it does not say how much there is to move: \"{migrating}\"");
-            Console.WriteLine("unavailable text: a migration is not a broken service");
+            if (MigrationDisplay.Failed())
+                throw new InvalidOperationException("a migration in progress must not read as a failed one");
+
+            // A migration that stopped is a different state from one that is
+            // working, and the chip must not use the same word for both.
+            MigrationProgress.Write(db, new(25, 26, MigrationProgress.Failed, 31_387_127, DateTimeOffset.UtcNow));
+            var failed = MigrationDisplay.Or("cannot-read-state");
+            var flagged = MigrationDisplay.Failed();
+            MigrationProgress.Clear(db);
+            if (!flagged) throw new InvalidOperationException("a stopped migration does not read as stopped");
+            if (failed == migrating)
+                throw new InvalidOperationException("and it says the same thing as one still running");
+            Console.WriteLine("unavailable text: a migration is not a broken service, and a stopped one is not a running one");
         }
 
         var timelineStart = new DateTimeOffset(2026, 9, 6, 10, 0, 0, TimeSpan.FromHours(9));

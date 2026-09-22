@@ -1056,6 +1056,26 @@ try
             "and the file itself is gone");
     }
 
+    // A migration that stops has to say so. Left alone, the file keeps the
+    // phase it never got past, and the window goes on describing an Agent
+    // that has given up as one still working.
+    {
+        var doomed = Path.Combine(directory, "doomed-v1.db");
+        // v26 creates observations_v26 and this is already there, so the
+        // migration fails partway -- after the earlier versions have run.
+        ObservationStore.CreateVersion1FixtureForTesting(doomed, "CREATE TABLE observations_v26(x INTEGER);");
+        var threw = false;
+        try { using var _ = new ObservationStore(doomed); }
+        catch (ObservationStoreException) { threw = true; }
+        Assert(threw, "a migration that cannot finish does not pretend the database is open");
+
+        var left = MigrationProgress.Read(doomed);
+        Assert(left is not null, "and it leaves something for the window to read");
+        Assert(left!.Phase == MigrationProgress.Failed,
+            $"which says it stopped rather than the phase it never got past, not {left.Phase}");
+        Assert(left.ToVersion == 26, "and which version it was trying to reach");
+    }
+
     var liveSnapshot = StartupSnapshot.Capture();
     Assert(liveSnapshot.Where(flow => flow.Protocol == "TCP").All(flow => flow.RemotePort > 0),
         "TCP startup snapshot excludes listeners");

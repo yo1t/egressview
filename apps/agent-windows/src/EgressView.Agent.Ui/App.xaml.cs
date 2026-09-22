@@ -200,6 +200,15 @@ public partial class App : System.Windows.Application
             MonitoringPresentationKind.Monitoring => ja ? "状態: 監視中" : "Status: Monitoring",
             MonitoringPresentationKind.Stopped => ja ? "状態: 監視停止" : "Status: Monitoring stopped",
             MonitoringPresentationKind.NeedsAttention => ja ? "状態: 要確認" : "Status: Needs attention",
+            // The tray already knew not to claim the Agent was running when it
+            // could not be reached. What it did not know is why: a schema
+            // migration is two minutes of unreachable that nobody needs to do
+            // anything about, filed under the same words as a service that
+            // died.
+            MonitoringPresentationKind.Unavailable when MigrationDisplay.Text() is not null =>
+                MigrationDisplay.Failed()
+                    ? (ja ? "状態: 更新に失敗" : "Status: Update failed")
+                    : (ja ? "状態: 更新中" : "Status: Updating"),
             MonitoringPresentationKind.Unavailable => state.LastConfirmedAt is { } at
                 ? $"{(ja ? "状態取得不可" : "Status unavailable")} · {at.ToLocalTime():g}"
                 : (ja ? "状態取得不可" : "Status unavailable"),
@@ -209,6 +218,7 @@ public partial class App : System.Windows.Application
         {
             MonitoringPresentationKind.NeedsAttention when !string.IsNullOrWhiteSpace(state.IssueCode) =>
                 $"{state.IssueCode}{(string.IsNullOrWhiteSpace(state.IssueAction) ? string.Empty : $": {state.IssueAction}")}",
+            MonitoringPresentationKind.Unavailable when MigrationDisplay.Text() is { } migrating => migrating,
             MonitoringPresentationKind.Unavailable when state.LastConfirmedAt is { } at =>
                 $"{(ja ? "最終確認" : "Last confirmed")} {at.ToLocalTime():g}",
             _ => string.Empty,

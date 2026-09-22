@@ -439,6 +439,9 @@ public sealed partial class ObservationStore : IDisposable
             throw new ObservationStoreException(StoreFailureKind.SchemaTooNew, $"Database schema {version} is newer than supported schema {CurrentSchemaVersion}.");
         if (version < 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, $"Database schema version {version} is invalid.");
+        var startedAt = version;
+        try
+        {
         if (version == 1) { MigrateVersion1To2(); version = 2; }
         if (version == 2) { MigrateVersion2To3(); version = 3; }
         if (version == 3) { MigrateVersion3To4(); version = 4; }
@@ -465,6 +468,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 24) { MigrateVersion24To25(); version = 25; }
         if (version == 25) MigrateVersion25To26();
         ValidateSchema();
+        }
+        catch { ReportMigrationFailed(startedAt); throw; }
         MigrationProgress.Clear(path);
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -838,6 +843,20 @@ public sealed partial class ObservationStore : IDisposable
         ReportMigration(targetVersion, MigrationProgress.BackingUp, 0);
         Execute($"VACUUM INTO '{Sql(backup)}'");
         return backup;
+    }
+
+    /// Says the migration stopped, keeping what it was doing when it did.
+    ///
+    /// Read back rather than remembered, so the phase and the size in the
+    /// report are the ones that were actually written: what the reader was
+    /// last told is what they keep, with "failed" in front of it.
+    private void ReportMigrationFailed(long currentVersion)
+    {
+        var last = MigrationProgress.Read(path);
+        MigrationProgress.Write(path, new(
+            last?.FromVersion ?? (int)currentVersion,
+            last?.ToVersion ?? CurrentSchemaVersion,
+            MigrationProgress.Failed, last?.Rows ?? 0, DateTimeOffset.UtcNow));
     }
 
     /// Writes down what this migration is doing, for a window that cannot ask.
@@ -3047,7 +3066,13 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
-    internal static void CreateVersion1FixtureForTesting(string fixturePath)
+    /// <param name="extraSql">
+    /// Run after the v1 schema, to set up a migration that cannot succeed.
+    /// A failure has to be caused before it can be reported, and there is no
+    /// honest way to cause one from outside: the report would otherwise be a
+    /// path nothing executes.
+    /// </param>
+    internal static void CreateVersion1FixtureForTesting(string fixturePath, string? extraSql = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(fixturePath))!);
         Check(WinSqlite.Open(fixturePath, out var fixtureDb, WinSqlite.OpenReadWrite | WinSqlite.OpenCreate | WinSqlite.OpenFullMutex, 0));
@@ -3056,7 +3081,7 @@ public sealed partial class ObservationStore : IDisposable
             // With rows in it. An empty fixture migrates through every
             // version without touching a single row of data, which is the
             // half of a migration that cannot go wrong.
-            var code = WinSqlite.Exec(fixtureDb, $"""
+            var code = WinSqlite.Exec(fixtureDb, extraSql + $"""
                 PRAGMA journal_mode=WAL; {Version1Schema}
                 INSERT INTO observations(observed_at,process_id,protocol,local_address,local_port,
                   remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source)
