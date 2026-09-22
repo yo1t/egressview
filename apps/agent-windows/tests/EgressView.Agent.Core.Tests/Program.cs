@@ -967,15 +967,36 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 25, "v1 database migrates through v2-v25");
+        Assert(migrated.SchemaVersion == 26, "v1 database migrates through v2-v26");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
+
+        // The fixture carries four observations from before the flows table
+        // existed, which is the case v26 has to survive: rows with nothing to
+        // point at. Refusing would turn a database the Agent can still read
+        // into one it will not open.
+        var carried = migrated.ReadRecentObservations(50);
+        Assert(carried.Count == 4, $"every pre-flows observation survives the normalisation, not {carried.Count}");
+
+        // And arrives with the flow rebuilt around it. The two TCP rows are
+        // one connection; the two UDP rows are one socket that spoke to two
+        // peers, which is the case that stops the remote end being moved onto
+        // the flow.
+        var tcp = carried.Where(flow => flow.Protocol == "TCP").ToArray();
+        var udp = carried.Where(flow => flow.Protocol == "UDP").ToArray();
+        Assert(tcp.Length == 2 && tcp.All(flow => flow.LocalAddress == "10.1.1.1" && flow.LocalPort == 50000
+                                                  && flow.RemoteAddress == "93.184.216.34" && flow.ProcessId == 4242),
+            "a rebuilt TCP flow keeps the local end, the remote end and the process it belonged to");
+        Assert(udp.Length == 2 && udp.Select(flow => flow.RemoteAddress).Distinct().Count() == 2,
+            "and one UDP socket keeps both of the peers it spoke to, which only the observation rows know");
+        Assert(carried.All(flow => flow.InterfaceId == "iface-1"),
+            "the interface comes back through the flow it was moved to");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v25.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v26.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 25, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 26, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -3184,7 +3205,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 25 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 26 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
