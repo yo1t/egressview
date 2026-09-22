@@ -229,8 +229,8 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            NetworkLastUpdated.Text = LocalizationManager.Text("CannotConnect");
-            LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}";
+            NetworkLastUpdated.Text = UnavailableText(LocalizationManager.Text("CannotConnect"));
+            LogStatus.Text = $"{UnavailableText(LocalizationManager.Text("CannotConnect"))}: {exception.Message}";
         }
     }
 
@@ -336,6 +336,31 @@ public partial class MainWindow : Window
     }
 
     /// Public because the render check asserts on it; it is a pure formatter.
+    /// What to put where "cannot read state" goes.
+    ///
+    /// The pipe not answering has two meanings and the window used to show
+    /// one of them. A service that is broken and a service that is two
+    /// minutes into a schema migration look identical from here, and only
+    /// one of them is worth doing something about.
+    ///
+    /// Read only on failure. While the Agent answers, what it says is better
+    /// than a file beside its database.
+    public static string UnavailableText(string fallback)
+    {
+        var progress = MigrationProgress.Read(
+            MigrationProgress.ServiceDatabaseFrom(AppContext.BaseDirectory));
+        if (progress is null) return fallback;
+        return progress.Phase switch
+        {
+            MigrationProgress.BackingUp => string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("MigrationBackingUp"), progress.ToVersion),
+            MigrationProgress.MovingRows => string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("MigrationMovingRows"), progress.ToVersion, progress.Rows),
+            _ => string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("MigrationInProgress"), progress.ToVersion),
+        };
+    }
+
     public static string FormatDuration(double seconds)
     {
         // Under a minute, say seconds.
