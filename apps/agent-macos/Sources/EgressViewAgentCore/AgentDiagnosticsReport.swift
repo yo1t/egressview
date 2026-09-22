@@ -84,6 +84,14 @@ public struct AgentDiagnosticsReport: Sendable {
         /// 2026-08-24 it had read 4 for days, and finding out what it meant
         /// meant reading the source.
         public var contractRejections: [String: Int]
+        /// Observations the Hub refused even alone, after the batch carrying
+        /// them had been halved down to one, and which were then given up on
+        /// (P3-148). Unlike the rejections above, these passed this Mac's own
+        /// checks -- so a non-zero count means this agent and the Hub
+        /// disagree about the contract, which no screening here can find.
+        public var abandonedCount: Int
+        /// How many times a refused batch was halved. Not a loss.
+        public var splitCount: Int
         public var threatIntelSource: String
         /// What happened to the runs before this one. Empty on a Mac where the
         /// App Group container could not be opened, which the report says
@@ -103,6 +111,7 @@ public struct AgentDiagnosticsReport: Sendable {
             contractRejectedCount: Int = 0,
             oldestPendingAt: Date?, lastAcknowledgedAt: Date?, unreadableStateResetAt: Date?,
             threatIntelSource: String, contractRejections: [String: Int] = [:],
+            abandonedCount: Int = 0, splitCount: Int = 0,
             runHistory: AgentRunHistory = AgentRunHistory(),
             installLog: InstallLog
         ) {
@@ -126,6 +135,8 @@ public struct AgentDiagnosticsReport: Sendable {
             self.unreadableStateResetAt = unreadableStateResetAt
             self.threatIntelSource = threatIntelSource
             self.contractRejections = contractRejections
+            self.abandonedCount = abandonedCount
+            self.splitCount = splitCount
             self.runHistory = runHistory
             self.installLog = installLog
         }
@@ -282,6 +293,14 @@ public struct AgentDiagnosticsReport: Sendable {
             if unclassified > 0 {
                 lines.append("  unclassified (recorded by an earlier version): \(unclassified)")
             }
+        }
+        if inputs.abandonedCount > 0 || inputs.splitCount > 0 {
+            lines.append("")
+            lines.append("== Refused by the Hub")
+            lines.append("  These passed this Mac's own checks and the Hub still would not")
+            lines.append("  take them, so this agent and that Hub disagree about the contract.")
+            lines.append(row("given up on", "\(inputs.abandonedCount)"))
+            lines.append(row("batches split", "\(inputs.splitCount)"))
         }
         lines.append("")
         lines.append("== Previous runs")

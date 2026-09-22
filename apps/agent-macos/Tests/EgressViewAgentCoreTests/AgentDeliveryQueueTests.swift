@@ -162,6 +162,85 @@ final class AgentDeliveryQueueTests: XCTestCase {
         XCTAssertNil(restarted.status().unreadableStateResetAt)
     }
 
+    // P3-148. On Windows one record in roughly 300 broke the Hub's contract,
+    // every batch carrying one was refused whole, and the unacknowledged
+    // batch was re-sent forever: delivery stopped for three hours and 42,545
+    // observations were discarded. Halving finds the one the Hub objects to
+    // without throwing away the 199 travelling with it.
+    func testARefusedBatchIsHalvedRatherThanDiscarded() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        try queue.enqueue((1...8).map { observation(remotePort: UInt16($0)) })
+        let batch = try XCTUnwrap(queue.prepareBatch(limit: 8, sentAt: Date(), metadata: metadata()))
+        XCTAssertEqual(batch.observations.count, 8)
+
+        XCTAssertEqual(try queue.recordRejection(batchID: batch.batchId), .split(remaining: 4))
+        let half = try XCTUnwrap(queue.prepareBatch(limit: 8, sentAt: Date(), metadata: metadata()))
+        XCTAssertEqual(half.observations.count, 4)
+        XCTAssertNotEqual(half.batchId, batch.batchId, "the half is a different batch")
+        XCTAssertEqual(queue.status().pendingCount, 8, "nothing is lost by splitting")
+        XCTAssertEqual(queue.status().splitCount, 1)
+    }
+
+    func testTheOneObservationTheHubWillNotTakeIsTheOnlyOneGivenUpOn() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        try queue.enqueue((1...4).map { observation(remotePort: UInt16($0)) })
+
+        var batch = try XCTUnwrap(queue.prepareBatch(limit: 4, sentAt: Date(), metadata: metadata()))
+        while batch.observations.count > 1 {
+            _ = try queue.recordRejection(batchID: batch.batchId)
+            batch = try XCTUnwrap(queue.prepareBatch(limit: 4, sentAt: Date(), metadata: metadata()))
+        }
+        let outcome = try queue.recordRejection(batchID: batch.batchId)
+        guard case .abandoned = outcome else { return XCTFail("expected the last one to be abandoned") }
+
+        XCTAssertEqual(queue.status().abandonedCount, 1)
+        XCTAssertEqual(queue.status().pendingCount, 3, "the others are still waiting to be sent")
+        let next = try XCTUnwrap(queue.prepareBatch(limit: 4, sentAt: Date(), metadata: metadata()))
+        XCTAssertEqual(next.observations.count, 3)
+    }
+
+    // A reply about a batch that is no longer in flight -- a slow 400 arriving
+    // after the batch it names was acknowledged -- must not cut the batch that
+    // replaced it.
+    func testARejectionNamingAnotherBatchChangesNothing() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        try queue.enqueue((1...4).map { observation(remotePort: UInt16($0)) })
+        let batch = try XCTUnwrap(queue.prepareBatch(limit: 4, sentAt: Date(), metadata: metadata()))
+
+        XCTAssertEqual(try queue.recordRejection(batchID: UUID()), .ignored)
+        let again = try XCTUnwrap(queue.prepareBatch(limit: 4, sentAt: Date(), metadata: metadata()))
+        XCTAssertEqual(again.batchId, batch.batchId)
+        XCTAssertEqual(again.observations.count, 4)
+        XCTAssertEqual(queue.status().splitCount, 0)
+    }
+
+    func testASplitSurvivesARestart() throws {
+        let url = temporaryURL()
+        let queue = try AgentDeliveryQueue(fileURL: url)
+        try queue.enqueue((1...8).map { observation(remotePort: UInt16($0)) })
+        let batch = try XCTUnwrap(queue.prepareBatch(limit: 8, sentAt: Date(), metadata: metadata()))
+        _ = try queue.recordRejection(batchID: batch.batchId)
+
+        let restarted = try AgentDeliveryQueue(fileURL: url)
+        let replay = try XCTUnwrap(restarted.prepareBatch(limit: 8, sentAt: Date(), metadata: metadata()))
+        XCTAssertEqual(replay.observations.count, 4)
+        XCTAssertEqual(restarted.status().splitCount, 1)
+    }
+
+    // Only a refusal about the payload splits. A 404 is about the address,
+    // and halving on one would abandon observations eight batches at a time
+    // over a misconfigured URL.
+    func testOnlyAPayloadRefusalSplitsABatch() {
+        XCTAssertTrue(AgentIngestSender.refusesThePayload(400))
+        XCTAssertTrue(AgentIngestSender.refusesThePayload(422))
+        for status in [401, 403, 404, 405, 409, 429, 500, 503] {
+            XCTAssertFalse(
+                AgentIngestSender.refusesThePayload(status),
+                "HTTP \(status) says nothing about what was sent"
+            )
+        }
+    }
+
     private func temporaryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("egressview-agent-queue-\(UUID().uuidString).json")
