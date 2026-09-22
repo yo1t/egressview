@@ -25,6 +25,14 @@ public struct OpenFlowRegistry: Sendable {
     private struct Entry {
         var metadata: SocketFlowMetadata
         let startedAt: Date
+        /// How long the machine had been running when the flow started.
+        ///
+        /// The wall clock is not a measure of elapsed time: it can be set
+        /// backwards. Measured on a Mac on 2026-09-12, three flows registered
+        /// at 00:32:14 reported their close at 00:32:12 and 00:32:13, and the
+        /// Hub refused the batch carrying them because a flow cannot end
+        /// before it began. This is what tells the two apart (P3-148).
+        let startedAtUptime: ContinuousClock.Instant
         var hasReportedOpening = false
     }
 
@@ -46,12 +54,13 @@ public struct OpenFlowRegistry: Sendable {
     public mutating func register(
         flowID: UUID,
         metadata: SocketFlowMetadata,
-        startedAt: Date
+        startedAt: Date,
+        uptime: ContinuousClock.Instant = ContinuousClock.now
     ) {
         if entries[flowID] == nil {
             insertionOrder.append(flowID)
         }
-        entries[flowID] = Entry(metadata: metadata, startedAt: startedAt)
+        entries[flowID] = Entry(metadata: metadata, startedAt: startedAt, startedAtUptime: uptime)
         while insertionOrder.count > capacity {
             let oldest = insertionOrder.removeFirst()
             entries.removeValue(forKey: oldest)
@@ -78,7 +87,8 @@ public struct OpenFlowRegistry: Sendable {
     /// never close -- about one in ten -- lost the name for good (P3-114).
     @discardableResult
     public mutating func noteServerName(
-        _ name: String, flowID: UUID, observedAt: Date = Date()
+        _ name: String, flowID: UUID, observedAt: Date = Date(),
+        uptime: ContinuousClock.Instant = ContinuousClock.now
     ) -> ConnectionObservation? {
         guard var entry = entries[flowID] else { return nil }
         guard entry.metadata.remoteHostname?.isEmpty ?? true else { return nil }
@@ -102,7 +112,7 @@ public struct OpenFlowRegistry: Sendable {
             flowID: flowID,
             metadata: entry.metadata,
             firstObservedAt: entry.startedAt,
-            lastObservedAt: observedAt,
+            lastObservedAt: Self.endedAt(observedAt, entry: entry, uptime: uptime),
             bytesIn: nil,
             bytesOut: nil
         )
@@ -113,7 +123,8 @@ public struct OpenFlowRegistry: Sendable {
     /// carries the same flow ID and updates this row with final byte counts.
     public mutating func openingObservation(
         flowID: UUID,
-        observedAt: Date
+        observedAt: Date,
+        uptime: ContinuousClock.Instant = ContinuousClock.now
     ) -> ConnectionObservation? {
         guard var entry = entries[flowID], !entry.hasReportedOpening else { return nil }
         entry.hasReportedOpening = true
@@ -122,7 +133,7 @@ public struct OpenFlowRegistry: Sendable {
             flowID: flowID,
             metadata: entry.metadata,
             firstObservedAt: entry.startedAt,
-            lastObservedAt: observedAt,
+            lastObservedAt: Self.endedAt(observedAt, entry: entry, uptime: uptime),
             bytesIn: nil,
             bytesOut: nil
         )
@@ -142,7 +153,8 @@ public struct OpenFlowRegistry: Sendable {
         bytesIn: UInt64,
         bytesOut: UInt64,
         metadata: SocketFlowMetadata?,
-        reportedAt: Date
+        reportedAt: Date,
+        uptime: ContinuousClock.Instant = ContinuousClock.now
     ) -> ConnectionObservation? {
         guard kind == .flowClosed else { return nil }
 
@@ -158,10 +170,33 @@ public struct OpenFlowRegistry: Sendable {
             flowID: flowID,
             metadata: resolved,
             firstObservedAt: entry?.startedAt ?? reportedAt,
-            lastObservedAt: reportedAt,
+            lastObservedAt: entry.map { Self.endedAt(reportedAt, entry: $0, uptime: uptime) } ?? reportedAt,
             bytesIn: bytesIn,
             bytesOut: bytesOut
         )
+    }
+
+    /// When a flow ended, told by a clock that cannot go backwards.
+    ///
+    /// Normally this is simply the wall clock: `reported` is when the system
+    /// said the flow ended, and it is the honest answer. It is only wrong when
+    /// the wall clock moved between the flow starting and ending, and then it
+    /// is wrong in a way that says the flow ended before it began.
+    ///
+    /// In that case the elapsed time is taken from the monotonic clock and
+    /// added to the start. That is a duration that was actually measured --
+    /// unlike clamping the end up to the start, which would write a flow that
+    /// lasted no time at all and lose the fact that it lasted at all.
+    private static func endedAt(
+        _ reported: Date,
+        entry: Entry,
+        uptime: ContinuousClock.Instant
+    ) -> Date {
+        guard reported < entry.startedAt else { return reported }
+        let elapsed = entry.startedAtUptime.duration(to: uptime)
+        let seconds = Double(elapsed.components.seconds)
+            + Double(elapsed.components.attoseconds) / 1e18
+        return entry.startedAt.addingTimeInterval(max(0, seconds))
     }
 
     private func observation(
