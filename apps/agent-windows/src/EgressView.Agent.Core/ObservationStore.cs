@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 25;
+    private const int CurrentSchemaVersion = 26;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -139,19 +139,72 @@ public sealed partial class ObservationStore : IDisposable
         );
         INSERT OR IGNORE INTO threat_cache_state(id) VALUES(1);
         """;
-    /// What makes two observations the same connection.
+    /// What makes two observations the same connection: the column that
+    /// names it.
     ///
-    /// Not the flow_key the flows table uses -- that is built when a flow is
-    /// upserted and is not on an observation row. These are the columns a
-    /// reader would point at and say "that is one connection", and they are
-    /// the same ones the flows table keys on. UDP deliberately omits the
-    /// remote end: Windows' startup snapshot only identifies its local socket,
-    /// so including the remote end here would make the chart disagree with the
-    /// summary above it whenever one UDP socket talks to several peers.
-    private const string FlowIdentity =
-        "CASE WHEN protocol='UDP' " +
-        "THEN protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||process_id " +
-        "ELSE protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||remote_address||CHAR(31)||remote_port||CHAR(31)||process_id END";
+    /// This used to be an expression rebuilding the key out of five columns on
+    /// every row it touched, because the row carried the whole flow. The row
+    /// now carries the flow's id, which is the same question already answered.
+    /// It keeps UDP's rule without restating it -- the key the flows table is
+    /// built on already drops the remote end there, so that one socket talking
+    /// to several peers stays one connection.
+    private const string FlowIdentity = "flow_id";
+
+    /// The flow a row of the old shape belonged to, expressed in SQL.
+    ///
+    /// The same key StartupSnapshot.FlowKey builds in C#. It exists for the
+    /// v26 migration and for nothing else: after it, the id is on the row.
+    private const string LegacyFlowKey =
+        "CASE WHEN o.protocol='UDP' " +
+        "THEN 'UDP|'||o.local_address||'|'||o.local_port||'|'||o.process_id " +
+        "ELSE 'TCP|'||o.local_address||'|'||o.local_port||'|'||o.remote_address||'|'||o.remote_port||'|'||o.process_id END";
+
+    /// Observations stop carrying a copy of their own flow.
+    ///
+    /// A row is one flow for one second, and it was writing the flow out again
+    /// every second: the protocol, the local address, the local port, the
+    /// process id and the interface, as text, on every one of thirty-one
+    /// million rows. Measured on this machine, 67 of about 150 bytes a row --
+    /// interface_id alone was 37.9, a GUID string with nine distinct values in
+    /// the whole database.
+    ///
+    /// What moves is what was measured to be constant within a flow, under the
+    /// same key the flows table is built on, across a day of real traffic:
+    /// protocol, local_address, local_port, process_id and interface_id never
+    /// varied once.
+    ///
+    /// What stays is what did vary, and the reason matters more than the
+    /// saving:
+    ///
+    ///  - remote_address and remote_port. The key drops the remote end for
+    ///    UDP, and one UDP socket does talk to several peers: 8,416 flows and
+    ///    250,361 rows in a day, a quarter of everything. Moving them would
+    ///    lose which peer a datagram went to.
+    ///  - process_name and remote_hostname, which differ between non-null
+    ///    values on real rows -- a reused pid, an address answering to more
+    ///    than one name. Which name it was at that second exists only here.
+    ///  - layer, for a different reason: it is a filter in eight read paths
+    ///    and worth 7.5 bytes. Joining for it would spend the query work of
+    ///    P3-149 to save a ninth of what the rest saves.
+    ///
+    /// observed_at stays text. Epoch integers would save another 25 bytes a
+    /// row and touch fifty-four more places, and a migration that changes both
+    /// the shape and the meaning of time is two migrations wearing one coat.
+    private const string Version26Schema = """
+        CREATE TABLE observations_v26(
+          id INTEGER PRIMARY KEY,
+          observed_at TEXT NOT NULL,
+          flow_id INTEGER NOT NULL,
+          remote_address TEXT NOT NULL,
+          remote_port INTEGER NOT NULL,
+          bytes_sent INTEGER,
+          bytes_received INTEGER,
+          layer TEXT NOT NULL CHECK(layer IN ('logical','vpn_transport')),
+          source TEXT NOT NULL CHECK(source IN ('etw','snapshot')),
+          process_name TEXT,
+          remote_hostname TEXT
+        );
+        """;
 
     private const string Version25Schema = """
         CREATE TABLE IF NOT EXISTS chart_hourly_destination(
@@ -366,7 +419,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version26Schema} DROP TABLE observations; ALTER TABLE observations_v26 RENAME TO observations; CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -399,7 +452,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 21) { MigrateVersion21To22(); version = 22; }
         if (version == 22) { MigrateVersion22To23(); version = 23; }
         if (version == 23) { MigrateVersion23To24(); version = 24; }
-        if (version == 24) MigrateVersion24To25();
+        if (version == 24) { MigrateVersion24To25(); version = 25; }
+        if (version == 25) MigrateVersion25To26();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -685,6 +739,78 @@ public sealed partial class ObservationStore : IDisposable
     {
         CreateMigrationBackup(14);
         try { Execute($"BEGIN IMMEDIATE; {Version14Schema} UPDATE schema_version SET version=14 WHERE version=13; COMMIT;"); PruneMigrationBackups(14); }
+        catch { TryRollback(); throw; }
+    }
+
+    /// Moves the flow off every observation row.
+    ///
+    /// The copy is checked before the original is dropped. A join cannot
+    /// invent rows but it can drop them, and an observation whose flow had
+    /// already been deleted would vanish silently -- on this machine that was
+    /// none of 31,372,268, which is a fact about today and not a guarantee.
+    /// Losing a row here would be losing a record of traffic, so the missing
+    /// flows are rebuilt first and the count is compared afterwards.
+    ///
+    /// The comparison cannot be made to fire. Removing it breaks no test,
+    /// which was checked rather than assumed, and it stays anyway: the
+    /// rebuild above is what makes it unreachable, and if that ever stops
+    /// covering a case, the failure it would let through is a record of
+    /// traffic disappearing with the migration reporting success.
+    private void MigrateVersion25To26()
+    {
+        CreateMigrationBackup(26);
+        // Both tables exist at once in the middle of this, so the peak is the
+        // database again on top of the backup. Rehearsed on the real file: a
+        // 6.72 GiB database passed through 9.79 GiB of pages before the old
+        // table was dropped. EnsureFreeSpaceForCopy has already asked for one
+        // copy's worth for the backup; this asks for the other.
+        EnsureFreeSpaceForCopy();
+        try
+        {
+            Execute("BEGIN IMMEDIATE");
+            Execute(Version26Schema);
+            // Flows arrived in v2. An observation older than that has nothing
+            // to point at, and so does one whose flow retention removed first.
+            //
+            // Rebuilding it costs a grouped scan; refusing instead would turn
+            // a database the Agent can still read into one it will not open,
+            // which is a worse answer than a flow row reconstructed from the
+            // rows that made it.
+            Execute($"""
+                INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,
+                  process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,
+                  process_name,remote_hostname)
+                SELECT {LegacyFlowKey},o.protocol,o.local_address,o.local_port,
+                       MIN(o.remote_address),MIN(o.remote_port),o.process_id,
+                       MIN(o.observed_at),MAX(o.observed_at),'etw',
+                       SUM(o.bytes_sent),SUM(o.bytes_received),
+                       MIN(o.layer),MIN(o.interface_id),
+                       MIN(o.process_name),MIN(o.remote_hostname)
+                FROM observations o
+                WHERE NOT EXISTS(SELECT 1 FROM flows f WHERE f.flow_key={LegacyFlowKey})
+                GROUP BY {LegacyFlowKey},o.protocol,o.local_address,o.local_port,o.process_id;
+                """);
+            Execute($"""
+                INSERT INTO observations_v26(id,observed_at,flow_id,remote_address,remote_port,
+                  bytes_sent,bytes_received,layer,source,process_name,remote_hostname)
+                SELECT o.id,o.observed_at,f.rowid,o.remote_address,o.remote_port,
+                       o.bytes_sent,o.bytes_received,o.layer,o.source,o.process_name,o.remote_hostname
+                FROM observations o JOIN flows f ON f.flow_key={LegacyFlowKey};
+                """);
+            var before = ScalarInt64("SELECT COUNT(*) FROM observations");
+            var after = ScalarInt64("SELECT COUNT(*) FROM observations_v26");
+            if (before != after)
+                throw new ObservationStoreException(StoreFailureKind.SchemaInvalid,
+                    $"Normalising observations would keep {after} of {before} rows; {before - after} have no flow to belong to.");
+            Execute("""
+                DROP TABLE observations;
+                ALTER TABLE observations_v26 RENAME TO observations;
+                CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at);
+                UPDATE schema_version SET version=26 WHERE version=25;
+                COMMIT;
+                """);
+            PruneMigrationBackups(26);
+        }
         catch { TryRollback(); throw; }
     }
 
@@ -1012,9 +1138,9 @@ public sealed partial class ObservationStore : IDisposable
             try
             {
                 const string sql = """
-                    INSERT INTO observations(observed_at,process_id,protocol,local_address,local_port,
-                      remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source,process_name,remote_hostname)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    INSERT INTO observations(observed_at,flow_id,remote_address,remote_port,
+                      bytes_sent,bytes_received,layer,source,process_name,remote_hostname)
+                    VALUES(?,?,?,?,?,?,?,?,?,?)
                     """;
                 const string flowSql = """
                     INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,
@@ -1034,6 +1160,7 @@ public sealed partial class ObservationStore : IDisposable
                       interface_id=COALESCE(excluded.interface_id,flows.interface_id),
                       process_name=COALESCE(excluded.process_name,flows.process_name),
                       remote_hostname=COALESCE(excluded.remote_hostname,flows.remote_hostname)
+                    RETURNING rowid
                     """;
                 Check(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
                 Check(WinSqlite.Prepare(db, flowSql, -1, out var flowStatement, 0));
@@ -1042,23 +1169,8 @@ public sealed partial class ObservationStore : IDisposable
                 {
                     foreach (var item in observations)
                     {
-                        Bind(statement, 1, item.ObservedAt.ToUniversalTime().ToString("O"));
-                        Check(WinSqlite.BindInt64(statement, 2, item.ProcessId));
-                        Bind(statement, 3, item.Protocol);
-                        Bind(statement, 4, item.LocalAddress);
-                        Check(WinSqlite.BindInt64(statement, 5, item.LocalPort));
-                        Bind(statement, 6, item.RemoteAddress);
-                        Check(WinSqlite.BindInt64(statement, 7, item.RemotePort));
-                        BindNullable(statement, 8, item.BytesSent);
-                        BindNullable(statement, 9, item.BytesReceived);
-                        Bind(statement, 10, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport");
-                        BindNullable(statement, 11, item.InterfaceId);
-                        Bind(statement, 12, item.Source);
-                        BindNullable(statement, 13, item.ProcessName);
-                        BindNullable(statement, 14, NormalizeDomain(item.RemoteHostname));
-                        CheckDone(WinSqlite.Step(statement));
-                        Check(WinSqlite.Reset(statement));
-                        Check(WinSqlite.ClearBindings(statement));
+                        // The flow goes first now, because the observation
+                        // needs the id it hands back.
                         Bind(flowStatement, 1, StartupSnapshot.FlowKey(item.Protocol, item.LocalAddress, item.LocalPort, item.RemoteAddress, item.RemotePort, item.ProcessId));
                         Bind(flowStatement, 2, item.Protocol); Bind(flowStatement, 3, item.LocalAddress);
                         Check(WinSqlite.BindInt64(flowStatement, 4, item.LocalPort)); Bind(flowStatement, 5, item.RemoteAddress);
@@ -1068,7 +1180,23 @@ public sealed partial class ObservationStore : IDisposable
                         Bind(flowStatement, 12, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport"); BindNullable(flowStatement, 13, item.InterfaceId);
                         BindNullable(flowStatement, 14, item.ProcessName);
                         BindNullable(flowStatement, 15, NormalizeDomain(item.RemoteHostname));
-                        CheckDone(WinSqlite.Step(flowStatement)); Check(WinSqlite.Reset(flowStatement)); Check(WinSqlite.ClearBindings(flowStatement));
+                        CheckQueryRow(WinSqlite.Step(flowStatement));
+                        var flowId = WinSqlite.ColumnInt64(flowStatement, 0);
+                        CheckDone(WinSqlite.Step(flowStatement));
+                        Check(WinSqlite.Reset(flowStatement)); Check(WinSqlite.ClearBindings(flowStatement));
+                        Bind(statement, 1, item.ObservedAt.ToUniversalTime().ToString("O"));
+                        Check(WinSqlite.BindInt64(statement, 2, flowId));
+                        Bind(statement, 3, item.RemoteAddress);
+                        Check(WinSqlite.BindInt64(statement, 4, item.RemotePort));
+                        BindNullable(statement, 5, item.BytesSent);
+                        BindNullable(statement, 6, item.BytesReceived);
+                        Bind(statement, 7, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport");
+                        Bind(statement, 8, item.Source);
+                        BindNullable(statement, 9, item.ProcessName);
+                        BindNullable(statement, 10, NormalizeDomain(item.RemoteHostname));
+                        CheckDone(WinSqlite.Step(statement));
+                        Check(WinSqlite.Reset(statement));
+                        Check(WinSqlite.ClearBindings(statement));
                         var observed = item.ObservedAt.ToUniversalTime();
                         var bucket = new DateTimeOffset(observed.Year, observed.Month, observed.Day, observed.Hour, 0, 0, TimeSpan.Zero).ToString("O");
                         var layer = item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport";
@@ -1252,9 +1380,10 @@ public sealed partial class ObservationStore : IDisposable
         if (foldedThrough is null || DateTimeOffset.Parse(foldedThrough) <= boundary) return;
         Execute($"""
             INSERT INTO hourly_summary(bucket_start,protocol,layer,observation_count,bytes_sent,bytes_received,bytes_unknown)
-            SELECT '{boundary:O}',protocol,layer,COUNT(*),SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
+            SELECT '{boundary:O}',f.protocol,layer,COUNT(*),SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
                    SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
-            FROM observations WHERE observed_at>='{cutoff:O}' AND observed_at<'{end:O}' GROUP BY protocol,layer;
+            FROM observations o JOIN flows f ON f.rowid=o.flow_id
+            WHERE observed_at>='{cutoff:O}' AND observed_at<'{end:O}' GROUP BY f.protocol,layer;
             INSERT INTO chart_hourly(bucket_start,application,layer,observation_count,bytes_sent,bytes_received,bytes_unknown)
             SELECT '{boundary:O}',COALESCE(NULLIF(process_name,''),'Unknown'),layer,COUNT(*),
                    SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
@@ -1940,9 +2069,9 @@ public sealed partial class ObservationStore : IDisposable
             // observed_at twice: an event begins and ends at the same instant.
             // No hostname column here -- enrichment lands on the flow, not on
             // the event, so this reads as unresolved rather than as wrong.
-            const string columns = "o.observed_at,o.observed_at,o.protocol,o.local_address,o.local_port,o.remote_address," +
-                "o.remote_port,o.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,o.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code)";
-            var sql = $"SELECT {columns} FROM observations o LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
+            const string columns = "o.observed_at,o.observed_at,fl.protocol,fl.local_address,fl.local_port,o.remote_address," +
+                "o.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code)";
+            var sql = $"SELECT {columns} FROM observations o JOIN flows fl ON fl.rowid=o.flow_id LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"ORDER BY o.observed_at DESC,o.id DESC LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
         }
@@ -1976,9 +2105,9 @@ public sealed partial class ObservationStore : IDisposable
         if (limit is < 1 or > 2_000) throw new ArgumentOutOfRangeException(nameof(limit));
         lock (gate)
         {
-            const string columns = "o.observed_at,o.observed_at,o.protocol,o.local_address,o.local_port,o.remote_address," +
-                "o.remote_port,o.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,o.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code)";
-            var sql = $"SELECT {columns},o.id FROM observations o LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
+            const string columns = "o.observed_at,o.observed_at,fl.protocol,fl.local_address,fl.local_port,o.remote_address," +
+                "o.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code)";
+            var sql = $"SELECT {columns},o.id FROM observations o JOIN flows fl ON fl.rowid=o.flow_id LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"WHERE o.id>{afterId} ORDER BY o.id LIMIT {limit}";
             var rows = ReadRecentFlowQuery(sql, out var lastId);
             var newest = ScalarInt64("SELECT COALESCE(MAX(id),0) FROM observations");
@@ -2899,7 +3028,18 @@ public sealed partial class ObservationStore : IDisposable
         Check(WinSqlite.Open(fixturePath, out var fixtureDb, WinSqlite.OpenReadWrite | WinSqlite.OpenCreate | WinSqlite.OpenFullMutex, 0));
         try
         {
-            var code = WinSqlite.Exec(fixtureDb, $"PRAGMA journal_mode=WAL; {Version1Schema}", 0, 0, out var error);
+            // With rows in it. An empty fixture migrates through every
+            // version without touching a single row of data, which is the
+            // half of a migration that cannot go wrong.
+            var code = WinSqlite.Exec(fixtureDb, $"""
+                PRAGMA journal_mode=WAL; {Version1Schema}
+                INSERT INTO observations(observed_at,process_id,protocol,local_address,local_port,
+                  remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source)
+                VALUES('2020-01-01T00:00:00.0000000+00:00',4242,'TCP','10.1.1.1',50000,'93.184.216.34',443,1024,2048,'logical','iface-1','etw'),
+                      ('2020-01-01T00:00:01.0000000+00:00',4242,'TCP','10.1.1.1',50000,'93.184.216.34',443,512,256,'logical','iface-1','etw'),
+                      ('2020-01-01T00:00:02.0000000+00:00',77,'UDP','10.1.1.1',5353,'224.0.0.251',5353,64,0,'logical','iface-1','etw'),
+                      ('2020-01-01T00:00:03.0000000+00:00',77,'UDP','10.1.1.1',5353,'239.255.255.250',1900,32,0,'logical','iface-1','etw');
+                """, 0, 0, out var error);
             if (error != 0) WinSqlite.Free(error);
             Check(code);
         }
