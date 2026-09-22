@@ -2184,6 +2184,75 @@ public final class ObservationStore: @unchecked Sendable {
         }
     }
 
+    /// How much of the file has to be free before rewriting it is worth doing.
+    ///
+    /// Deleting rows does not make the file smaller: SQLite keeps the pages on
+    /// a free list and reuses them. On a real Mac that had reached 30% free --
+    /// 93 MB of a 311.5 MB file -- and it had been that way for weeks, because
+    /// nothing ever vacuumed. The user sees a file that does not shrink after
+    /// their data has been deleted, which is the same complaint the Windows
+    /// agent had at 13.3% (P3-158).
+    ///
+    /// Twenty percent, matching the Windows threshold, so the two behave the
+    /// same on the same product.
+    static let minimumFreeFractionToReclaim = 0.20
+
+    /// Rewrites the database if enough of it is empty, and reports what it
+    /// freed.
+    ///
+    /// Outside `compact`'s transaction, because `VACUUM` cannot run inside
+    /// one. It is a separate call rather than a tail of `compact` so the
+    /// caller decides when the file may be rewritten.
+    ///
+    /// Returns the bytes given back, or 0 when it decided not to run.
+    @discardableResult
+    public func reclaimFreeSpace() throws -> Int64 {
+        try lock.withLock {
+            let pageSize = try scalar("PRAGMA page_size") ?? 0
+            let pageCount = try scalar("PRAGMA page_count") ?? 0
+            let freeCount = try scalar("PRAGMA freelist_count") ?? 0
+            guard pageSize > 0, pageCount > 0 else { return 0 }
+            guard Double(freeCount) / Double(pageCount) >= Self.minimumFreeFractionToReclaim
+            else { return 0 }
+
+            // A vacuum writes a second copy of the database and swaps it in,
+            // so the moment the file is about to shrink is the moment it needs
+            // the most room. Refusing here leaves a file that is larger than
+            // it needs to be, which is much better than filling the disk of a
+            // Mac that is already short of space.
+            let inUse = Int64(pageCount - freeCount) * Int64(pageSize)
+            guard Self.hasRoomToRewrite(inUse, near: fileURL) else { return 0 }
+
+            // Checkpointed on both sides, because in WAL mode the pages a
+            // vacuum rewrites land in the -wal file and the database file is
+            // untouched until a checkpoint moves them. Without this the file
+            // is the same size afterwards and the work looks like it did
+            // nothing -- which is what the first version of this measured.
+            try? execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            let before = Self.fileSize(of: fileURL)
+            try execute("VACUUM")
+            try? execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            let after = Self.fileSize(of: fileURL)
+            return max(0, before - after)
+        }
+    }
+
+    private static func fileSize(of url: URL) -> Int64 {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    /// Whether the volume can hold the copy a vacuum makes, with room left
+    /// over. Unknown free space is treated as enough: the vacuum will fail on
+    /// its own if it is not, and refusing on a value we could not read would
+    /// stop this running at all on a volume that does not report it.
+    private static func hasRoomToRewrite(_ inUse: Int64, near url: URL) -> Bool {
+        guard let available = try? url.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        ).volumeAvailableCapacityForImportantUsage else { return true }
+        return available > inUse + inUse / 10
+    }
+
     /// Every table that carries observation history, in one place.
     ///
     /// `observations` and `hourly_rollup` used to be the whole list here, and
