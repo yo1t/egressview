@@ -907,6 +907,52 @@ try
     using (var migratedAgain = new ObservationStore(legacyDatabase))
         Assert(migratedAgain.SchemaVersion == 25, "migration is idempotent on restart");
 
+    // The backup that survives a migration is the one whose migration
+    // succeeded, and nothing used to delete it. It is the size of the
+    // database, so keeping it forever doubles what the Agent occupies.
+    using (var proving = new ObservationStore(legacyDatabase))
+    {
+        var backup = migrationBackups.Single();
+        var backupBytes = new FileInfo(backup).Length;
+        var takenAt = DateTimeOffset.UtcNow;
+        File.SetLastWriteTimeUtc(backup, takenAt.UtcDateTime);
+
+        Assert(proving.PruneProvenMigrationBackups(takenAt.AddHours(23)) == 0 && File.Exists(backup),
+            "a migration backup is kept while the migration it protects is still being proven");
+
+        // The window is the point: a backup deleted the moment the migration
+        // commits is not an escape hatch, it is a copy made and thrown away.
+        Assert(proving.PruneProvenMigrationBackups(takenAt.AddHours(24).AddSeconds(1)) == backupBytes,
+            "a proven migration backup is deleted and reports the disk it returned");
+        Assert(!File.Exists(backup), "the proven backup is gone from disk");
+        Assert(proving.PruneProvenMigrationBackups(takenAt.AddDays(7)) == 0,
+            "a second pass over an already-pruned directory frees nothing");
+
+        // The prune walks a directory the operator can also put files in.
+        var foreign = Path.Combine(directory, "legacy-v1.db.operator-copy.bak");
+        var notOurs = Path.Combine(directory, "legacy-v1.db.pre-vX.bak");
+        File.WriteAllBytes(foreign, new byte[11]);
+        File.WriteAllBytes(notOurs, new byte[13]);
+        File.SetLastWriteTimeUtc(foreign, takenAt.AddYears(-1).UtcDateTime);
+        File.SetLastWriteTimeUtc(notOurs, takenAt.AddYears(-1).UtcDateTime);
+        Assert(proving.PruneProvenMigrationBackups(takenAt.AddDays(7)) == 0
+               && File.Exists(foreign) && File.Exists(notOurs),
+            "only the Agent's own pre-v<number>.bak naming is deleted, however old the rest is");
+        File.Delete(foreign);
+        File.Delete(notOurs);
+
+        // Disk usage counts the backup, so the number the user reads must
+        // fall by exactly what was reclaimed.
+        var withBackup = Path.Combine(directory, "legacy-v1.db.pre-v24.bak");
+        File.WriteAllBytes(withBackup, new byte[4096]);
+        File.SetLastWriteTimeUtc(withBackup, takenAt.AddYears(-1).UtcDateTime);
+        var before = proving.ReadStorageBytes();
+        Assert(proving.PruneProvenMigrationBackups(takenAt) == 4096,
+            "an older generation left behind by a previous build is reclaimed too");
+        Assert(proving.ReadStorageBytes() == before - 4096,
+            "reported disk usage falls by what the prune returned");
+    }
+
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
     {

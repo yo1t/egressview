@@ -446,6 +446,14 @@ internal sealed class AgentWindowsService : ServiceBase
                     if (result.SleepPeriodsDeleted > 0) store.AddCounter("retention-sleep-periods-deleted", result.SleepPeriodsDeleted);
                     if (result.MayHaveMore(50_000)) await Task.Delay(100, cancellationToken);
                 } while (result.MayHaveMore(50_000) && !cancellationToken.IsCancellationRequested);
+                // Before compaction, because a backup that goes now is
+                // disk returned without rewriting eight gigabytes to get it.
+                var backupBytes = store.PruneProvenMigrationBackups(DateTimeOffset.UtcNow);
+                if (backupBytes > 0)
+                {
+                    store.AddCounter("migration-backups-deleted", 1);
+                    store.AddCounter("migration-backup-bytes-freed", backupBytes);
+                }
                 if (store.CompactIfBeneficial()) store.AddCounter("retention-compactions", 1);
                 store.MarkRetentionMaintenanceCompleted(DateTimeOffset.UtcNow);
             }
