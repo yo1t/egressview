@@ -1037,16 +1037,21 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 26, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 27, "the fixture migrated");
 
-        var moving = reported.SingleOrDefault(step => step.Phase == MigrationProgress.MovingRows);
+        // One per migration that rewrites the table: v26 moved the flow off
+        // the row and v27 the time, and each says so before it starts.
+        var movingSteps = reported.Where(step => step.Phase == MigrationProgress.MovingRows).ToArray();
+        Assert(movingSteps.Length == 2,
+            $"each phase that takes time says so before it starts, not {movingSteps.Length} of them");
+        var moving = movingSteps[^1];
         Assert(moving is not null, "the phase that takes the time says so before it starts");
         // Four, because the fixture has four. A report of zero reads as "this
         // will be quick" for a wait that is anything but, and a number nobody
         // checks is a number that drifts to zero.
         Assert(moving!.Rows == 4,
             $"and says how many rows there are to move, not {moving.Rows}");
-        Assert(moving.ToVersion == 26 && moving.FromVersion == 25,
+        Assert(moving.ToVersion == 27 && moving.FromVersion == 26,
             "and which version it is moving them to");
         Assert(reported.Any(step => step.Phase == MigrationProgress.BackingUp),
             "the copy that happens first is reported first");
@@ -1073,7 +1078,49 @@ try
         Assert(left is not null, "and it leaves something for the window to read");
         Assert(left!.Phase == MigrationProgress.Failed,
             $"which says it stopped rather than the phase it never got past, not {left.Phase}");
+        // Twenty-six, not the newest: the fixture is rigged to fail there,
+        // and what the report has to carry is the step that stopped.
         Assert(left.ToVersion == 26, "and which version it was trying to reach");
+    }
+
+    // The window is headed "outbound traffic from this PC" and its
+    // destination list carried 127.0.0.1 -- 41,680 rows in a day on the
+    // machine this was found on, the longest-lived flow there was.
+    {
+        foreach (var inside in new[] { "127.0.0.1", "127.53.1.9", "::1", "0:0:0:0:0:0:0:1" })
+            Assert(DestinationScope.IsLoopback(inside), $"{inside} never left this PC");
+        // The line is the network card, not the router. These do leave.
+        foreach (var outside in new[] { "192.168.1.1", "10.0.0.5", "224.0.0.251", "ff02::fb", "169.254.1.1", "93.184.216.34" })
+            Assert(!DestinationScope.IsLoopback(outside), $"{outside} left this PC, however far it got");
+        Assert(!DestinationScope.IsLoopback(null) && !DestinationScope.IsLoopback("")
+               && !DestinationScope.IsLoopback("not-an-address"),
+            "and nothing that is not an address is claimed to be loopback");
+        // The two answers have to agree: an address SQL calls loopback and
+        // C# calls outbound would be counted in both halves.
+        Assert(DestinationScope.LoopbackSql().Contains("127.%", StringComparison.Ordinal)
+               && DestinationScope.LoopbackSql("f").Contains("f.remote_address", StringComparison.Ordinal),
+            "and the SQL asks the same question, of whichever table it is given");
+
+        // And the counts actually use it. A classifier nothing calls is a
+        // classifier, not a fix.
+        var scopeDatabase = Path.Combine(directory, "scope.db");
+        using var scopeStore = new ObservationStore(scopeDatabase);
+        var scopeAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        scopeStore.WriteBatch([
+            new NetworkObservation(scopeAt, 10, "TCP", "10.1.1.1", 4000, "93.184.216.34", 443, 100, 100,
+                ObservationLayer.Logical, null, "etw", "outward"),
+            new NetworkObservation(scopeAt, 10, "TCP", "10.1.1.1", 4001, "192.168.1.9", 445, 100, 100,
+                ObservationLayer.Logical, null, "etw", "outward"),
+            new NetworkObservation(scopeAt, 11, "TCP", "127.0.0.1", 4002, "127.0.0.1", 9000, 100, 100,
+                ObservationLayer.Logical, null, "etw", "inward"),
+        ]);
+        var scoped = scopeStore.ReadPeriodAnalysis(scopeAt.AddMinutes(-1), DateTimeOffset.UtcNow);
+        Assert(scoped.Connections == 2 && scoped.Destinations == 2,
+            $"the headline counts only what left this PC, not {scoped.Connections}/{scoped.Destinations}");
+        Assert(scoped.LocalConnections == 1 && scoped.LocalDestinations == 1,
+            $"and what stayed inside is counted, not dropped: {scoped.LocalConnections}/{scoped.LocalDestinations}");
+        Assert(scoped.Links.All(link => link.Destination != "127.0.0.1"),
+            "and the destination chart agrees with the number above it");
     }
 
     var liveSnapshot = StartupSnapshot.Capture();
@@ -1084,7 +1131,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 26, "v1 database migrates through v2-v26");
+        Assert(migrated.SchemaVersion == 27, "v1 database migrates through v2-v27");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -1108,12 +1155,29 @@ try
             "and one UDP socket keeps both of the peers it spoke to, which only the observation rows know");
         Assert(carried.All(flow => flow.InterfaceId == "iface-1"),
             "the interface comes back through the flow it was moved to");
+
+        // The fraction of a second, which v27 rewrites as ticks. The fixture
+        // carries whole seconds, so a conversion that dropped the fraction
+        // entirely would still pass everything above -- and did: substr at 20
+        // takes the decimal point with it and casts to zero, and every row in
+        // a real database lost its hundred nanoseconds. Only a fixture with a
+        // fraction in it can say so.
+        Assert(carried.Any(flow => flow.FirstSeen.Ticks % TimeSpan.TicksPerSecond != 0),
+            "a time with a fraction of a second survives being rewritten as ticks");
+        var precise = carried.Select(flow => flow.FirstSeen.Ticks % TimeSpan.TicksPerSecond).ToArray();
+        Assert(precise.Contains(1234567L),
+            $"and survives exactly, to the hundred nanosecond: {string.Join(",", precise)}");
+        // The whole seconds as well. Checking only the fraction lets a
+        // conversion that mangles everything above the decimal point through:
+        // the rows would come back in the year 1 with their fractions intact.
+        Assert(carried.Any(flow => flow.FirstSeen == new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero).AddTicks(1234567)),
+            $"and at the instant it was recorded, not only the fraction of it: {carried.Min(flow => flow.FirstSeen):O}");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v26.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v27.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 26, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 27, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -3322,7 +3386,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 26 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 27 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }

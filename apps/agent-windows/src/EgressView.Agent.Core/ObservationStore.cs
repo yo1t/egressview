@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 26;
+    private const int CurrentSchemaVersion = 27;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -150,6 +150,17 @@ public sealed partial class ObservationStore : IDisposable
     /// to several peers stays one connection.
     private const string FlowIdentity = "flow_id";
 
+    /// Ticks to the unix seconds strftime wants, in SQL.
+    ///
+    /// Only where a calendar is genuinely needed -- the hour a row belongs to.
+    /// Comparisons and bucket arithmetic stay in ticks, where they are integer
+    /// comparisons on an indexed column rather than a date parsed per row.
+    private const string ObservedUnixSeconds = "(observed_at/10000000-62135596800)";
+
+    /// The hour a row belongs to, in the text form chart_hourly is keyed on.
+    private const string ObservedHourStart =
+        "strftime('%Y-%m-%dT%H:00:00.0000000+00:00'," + ObservedUnixSeconds + ",'unixepoch')";
+
     /// The flow a row of the old shape belonged to, expressed in SQL.
     ///
     /// The same key StartupSnapshot.FlowKey builds in C#. It exists for the
@@ -190,6 +201,38 @@ public sealed partial class ObservationStore : IDisposable
     /// observed_at stays text. Epoch integers would save another 25 bytes a
     /// row and touch fifty-four more places, and a migration that changes both
     /// the shape and the meaning of time is two migrations wearing one coat.
+    /// The time on a row stops being a sentence.
+    ///
+    /// "2026-09-22T00:00:00.0368299+00:00" is thirty-three bytes of text on
+    /// every row, and after v26 that is 38% of what a row costs -- the single
+    /// largest thing left on it. As ticks it is eight, and the comparisons
+    /// against it become integer comparisons rather than string ones.
+    ///
+    /// Ticks, not epoch seconds. Every row carries a fraction of a second and
+    /// today all 379,869 of them did: three rows inside one second, each with
+    /// its own hundred-nanosecond part. Seconds would have been twenty-five
+    /// bytes saved and a hundred nanoseconds of evidence discarded, and this
+    /// file has already had to be told three times this week that the thing
+    /// being moved was carrying something.
+    ///
+    /// UTC only, which is what the column already held: everything written
+    /// here goes through ToUniversalTime first, so no offset is lost.
+    private const string Version27Schema = """
+        CREATE TABLE observations_v27(
+          id INTEGER PRIMARY KEY,
+          observed_at INTEGER NOT NULL,
+          flow_id INTEGER NOT NULL,
+          remote_address TEXT NOT NULL,
+          remote_port INTEGER NOT NULL,
+          bytes_sent INTEGER,
+          bytes_received INTEGER,
+          layer TEXT NOT NULL CHECK(layer IN ('logical','vpn_transport')),
+          source TEXT NOT NULL CHECK(source IN ('etw','snapshot')),
+          process_name TEXT,
+          remote_hostname TEXT
+        );
+        """;
+
     private const string Version26Schema = """
         CREATE TABLE observations_v26(
           id INTEGER PRIMARY KEY,
@@ -429,7 +472,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version26Schema} DROP TABLE observations; ALTER TABLE observations_v26 RENAME TO observations; CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -466,7 +509,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 22) { MigrateVersion22To23(); version = 23; }
         if (version == 23) { MigrateVersion23To24(); version = 24; }
         if (version == 24) { MigrateVersion24To25(); version = 25; }
-        if (version == 25) MigrateVersion25To26();
+        if (version == 25) { MigrateVersion25To26(); version = 26; }
+        if (version == 26) MigrateVersion26To27();
         ValidateSchema();
         }
         catch { ReportMigrationFailed(startedAt); throw; }
@@ -558,6 +602,10 @@ public sealed partial class ObservationStore : IDisposable
             // watermark moves back with it, so the ordinary fold does the work
             // on its own schedule instead of this migration holding the
             // database while it recomputes.
+            // Read as text on purpose: this runs before v27, when the column
+            // still spells its times out. A helper that knows only the new
+            // shape is wrong here, and was -- the v1 fixture migrating through
+            // every version is what said so.
             var oldestRaw = NullableScalarText("SELECT MIN(observed_at) FROM observations");
             if (oldestRaw is not null)
             {
@@ -644,6 +692,10 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute("BEGIN IMMEDIATE");
             Execute(Version25Schema);
+            // Read as text on purpose: this runs before v27, when the column
+            // still spells its times out. A helper that knows only the new
+            // shape is wrong here, and was -- the v1 fixture migrating through
+            // every version is what said so.
             var oldestRaw = NullableScalarText("SELECT MIN(observed_at) FROM observations");
             if (oldestRaw is not null)
             {
@@ -772,6 +824,54 @@ public sealed partial class ObservationStore : IDisposable
     /// rebuild above is what makes it unreachable, and if that ever stops
     /// covering a case, the failure it would let through is a record of
     /// traffic disappearing with the migration reporting success.
+    /// Rewrites every observation's time as ticks.
+    ///
+    /// SQLite parses the stored text with julianday, which is a float and
+    /// loses the hundred-nanosecond part -- P3-149 was that bug in the bucket
+    /// arithmetic. So the conversion is done in two halves that are both
+    /// exact: whole seconds from strftime, and the fraction read out of the
+    /// text it is already in.
+    private void MigrateVersion26To27()
+    {
+        CreateMigrationBackup(27);
+        EnsureFreeSpaceForCopy();
+        try
+        {
+            Execute("BEGIN IMMEDIATE");
+            Execute(Version27Schema);
+            ReportMigration(27, MigrationProgress.MovingRows,
+                ScalarInt64("SELECT COUNT(*) FROM observations"));
+            Execute("""
+                INSERT INTO observations_v27(id,observed_at,flow_id,remote_address,remote_port,
+                  bytes_sent,bytes_received,layer,source,process_name,remote_hostname)
+                SELECT id,
+                       -- Position 21, not 20: 20 is the decimal point, and
+                       -- ".4643757" casts to zero. Every row's fraction went
+                       -- to nothing, which the round-trip check over all
+                       -- 31,478,342 rows is the only reason anyone knows.
+                       (CAST(strftime('%s',observed_at) AS INTEGER)+62135596800)*10000000
+                         + CAST(substr(observed_at,21,7) AS INTEGER),
+                       flow_id,remote_address,remote_port,
+                       bytes_sent,bytes_received,layer,source,process_name,remote_hostname
+                FROM observations;
+                """);
+            var before = ScalarInt64("SELECT COUNT(*) FROM observations");
+            var after = ScalarInt64("SELECT COUNT(*) FROM observations_v27");
+            if (before != after)
+                throw new ObservationStoreException(StoreFailureKind.SchemaInvalid,
+                    $"Converting observation times would keep {after} of {before} rows.");
+            Execute("""
+                DROP TABLE observations;
+                ALTER TABLE observations_v27 RENAME TO observations;
+                CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at);
+                UPDATE schema_version SET version=27 WHERE version=26;
+                COMMIT;
+                """);
+            PruneMigrationBackups(27);
+        }
+        catch { TryRollback(); throw; }
+    }
+
     private void MigrateVersion25To26()
     {
         CreateMigrationBackup(26);
@@ -1228,7 +1328,7 @@ public sealed partial class ObservationStore : IDisposable
                         var flowId = WinSqlite.ColumnInt64(flowStatement, 0);
                         CheckDone(WinSqlite.Step(flowStatement));
                         Check(WinSqlite.Reset(flowStatement)); Check(WinSqlite.ClearBindings(flowStatement));
-                        Bind(statement, 1, item.ObservedAt.ToUniversalTime().ToString("O"));
+                        Check(WinSqlite.BindInt64(statement, 1, item.ObservedAt.ToUniversalTime().UtcTicks));
                         Check(WinSqlite.BindInt64(statement, 2, flowId));
                         Bind(statement, 3, item.RemoteAddress);
                         Check(WinSqlite.BindInt64(statement, 4, item.RemotePort));
@@ -1273,11 +1373,12 @@ public sealed partial class ObservationStore : IDisposable
             var retentionDays = (int)ScalarInt64("SELECT retention_days FROM local_history_settings WHERE id=1");
             var rawDays = Math.Min(DefaultRawRetentionDays, retentionDays);
             var rawCutoff = now.ToUniversalTime().AddDays(-rawDays).ToString("O");
+            var rawCutoffTicks = now.ToUniversalTime().AddDays(-rawDays).UtcTicks;
             var aggregateCutoff = now.ToUniversalTime().AddDays(-retentionDays).ToString("O");
             Execute("BEGIN IMMEDIATE");
             try
             {
-                var observations = DeleteBatch("observations", "id", "observed_at", rawCutoff, batchSize);
+                var observations = DeleteBatchAt("observations", "id", "observed_at", rawCutoffTicks, batchSize);
                 var flows = DeleteBatch("flows", "flow_key", "last_seen", rawCutoff, batchSize);
                 var summaries = DeleteBatch("hourly_summary", "rowid", "bucket_start", aggregateCutoff, batchSize);
                 var chartSummaries = DeleteBatch("chart_hourly", "rowid", "bucket_start", aggregateCutoff, batchSize)
@@ -1302,7 +1403,20 @@ public sealed partial class ObservationStore : IDisposable
             ThrowIfDisposed();
             var retentionDays = (int)ScalarInt64("SELECT retention_days FROM local_history_settings WHERE id=1");
             var lastText = NullableScalarText("SELECT last_cleanup_at FROM local_history_settings WHERE id=1");
-            var oldestRawText = NullableScalarText("SELECT MIN(value) FROM (SELECT MIN(observed_at) value FROM observations UNION ALL SELECT MIN(last_seen) FROM flows)");
+            // Two tables, two representations: observations count in ticks and
+        // flows still in text. Asking each its own way is clearer than a
+        // union that has to agree on one.
+        var oldestObservation = OldestObservation();
+        var oldestFlowText = NullableScalarText("SELECT MIN(last_seen) FROM flows");
+        var oldestFlow = oldestFlowText is null ? (DateTimeOffset?)null : DateTimeOffset.Parse(oldestFlowText);
+        var oldestRaw2 = (oldestObservation, oldestFlow) switch
+        {
+            ({ } a, { } b) => a < b ? a : (DateTimeOffset?)b,
+            ({ } a, null) => a,
+            (null, { } b) => b,
+            _ => null,
+        };
+        var oldestRawText = oldestRaw2?.ToString("O");
             var oldestAggregateText = NullableScalarText("SELECT MIN(value) FROM (SELECT MIN(bucket_start) value FROM hourly_summary UNION ALL SELECT MIN(bucket_start) FROM chart_hourly)");
             DateTimeOffset? last = lastText is null ? null : DateTimeOffset.Parse(lastText);
             return new(retentionDays, Math.Min(DefaultRawRetentionDays, retentionDays), ReadStorageBytes(),
@@ -1369,7 +1483,7 @@ public sealed partial class ObservationStore : IDisposable
                 else
                 {
                     var value = Sql(cutoff.ToString("O"));
-                    observations = DeleteWhere("observations", $"observed_at<'{value}'");
+                    observations = DeleteWhere("observations", $"observed_at<{DateTimeOffset.Parse(value).UtcTicks}");
                     flows = DeleteWhere("flows", $"last_seen<'{value}'");
                     hourly = DeleteWhere("hourly_summary", $"bucket_start<'{value}'");
                     chart = DeleteWhere("chart_hourly", $"bucket_start<'{value}'")
@@ -1427,12 +1541,12 @@ public sealed partial class ObservationStore : IDisposable
             SELECT '{boundary:O}',f.protocol,layer,COUNT(*),SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
                    SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
             FROM observations o JOIN flows f ON f.rowid=o.flow_id
-            WHERE observed_at>='{cutoff:O}' AND observed_at<'{end:O}' GROUP BY f.protocol,layer;
+            WHERE observed_at>={cutoff.UtcTicks} AND observed_at<{end.UtcTicks} GROUP BY f.protocol,layer;
             INSERT INTO chart_hourly(bucket_start,application,layer,observation_count,bytes_sent,bytes_received,bytes_unknown)
             SELECT '{boundary:O}',COALESCE(NULLIF(process_name,''),'Unknown'),layer,COUNT(*),
                    SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
                    SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
-            FROM observations WHERE observed_at>='{cutoff:O}' AND observed_at<'{end:O}' GROUP BY 2,layer;
+            FROM observations WHERE observed_at>={cutoff.UtcTicks} AND observed_at<{end.UtcTicks} GROUP BY 2,layer;
             """);
     }
 
@@ -1450,6 +1564,22 @@ public sealed partial class ObservationStore : IDisposable
             Execute("VACUUM");
             return true;
         }
+    }
+
+    /// The oldest observation, or null when there are none.
+    private DateTimeOffset? OldestObservation()
+    {
+        var ticks = NullableScalarText("SELECT MIN(observed_at) FROM observations");
+        return ticks is null ? null : new DateTimeOffset(long.Parse(ticks, System.Globalization.CultureInfo.InvariantCulture), TimeSpan.Zero);
+    }
+
+    /// The same batched delete, for a column counting in ticks rather than
+    /// spelling a date. One template with a quoted literal cannot serve both,
+    /// and quoting a number is how an index stops being used.
+    private long DeleteBatchAt(string table, string key, string timeExpression, long cutoff, int batchSize)
+    {
+        Execute($"DELETE FROM {table} WHERE {key} IN (SELECT {key} FROM {table} WHERE {timeExpression}<{cutoff} ORDER BY {timeExpression} LIMIT {batchSize})");
+        return ScalarInt64("SELECT changes()");
     }
 
     private long DeleteBatch(string table, string key, string timeExpression, string cutoff, int batchSize)
@@ -1679,7 +1809,7 @@ public sealed partial class ObservationStore : IDisposable
     /// window nobody could measure must not read as a quiet one.
     private OutboundTrafficWindow ReadOutboundWindow(DateTimeOffset start, DateTimeOffset end)
     {
-        var range = $"WHERE observed_at >= '{start:O}' AND observed_at < '{end:O}'";
+        var range = $"WHERE observed_at >= {start.UtcTicks} AND observed_at < {end.UtcTicks}";
         ulong bytesOut = 0; var observations = 0; var withBytes = 0; var applications = 0; var destinations = 0;
         CheckOperation(WinSqlite.Prepare(db, "SELECT COALESCE(SUM(bytes_sent),0), COUNT(*), COUNT(bytes_sent), " +
             $"COUNT(DISTINCT COALESCE(process_name,'')), COUNT(DISTINCT remote_address) FROM observations {range}", -1, out var summary, 0));
@@ -1988,8 +2118,8 @@ public sealed partial class ObservationStore : IDisposable
             ThrowIfDisposed();
             var watermarkText = NullableScalarText("SELECT MAX(folded_through) FROM chart_hourly_state");
             var watermark = watermarkText is null
-                ? NullableScalarText("SELECT MIN(observed_at) FROM observations") is { } oldest
-                    ? DateTimeOffset.Parse(oldest).ToUniversalTime()
+                ? OldestObservation() is { } oldest
+                    ? oldest.ToUniversalTime()
                     : currentHour
                 : DateTimeOffset.Parse(watermarkText).ToUniversalTime();
             var hours = (currentHour - watermark).TotalHours;
@@ -2010,13 +2140,13 @@ public sealed partial class ObservationStore : IDisposable
             DateTimeOffset watermark;
             if (watermarkText is null)
             {
-                var oldestText = NullableScalarText("SELECT MIN(observed_at) FROM observations");
+                var oldestText = OldestObservation();
                 if (oldestText is null)
                 {
                     Execute($"INSERT INTO chart_hourly_state(id,folded_through) VALUES(1,'{currentHour:O}')");
                     return 0;
                 }
-                var oldest = DateTimeOffset.Parse(oldestText).ToUniversalTime();
+                var oldest = oldestText.Value.ToUniversalTime();
                 watermark = new DateTimeOffset(oldest.Year, oldest.Month, oldest.Day, oldest.Hour, 0, 0, TimeSpan.Zero);
             }
             else watermark = DateTimeOffset.Parse(watermarkText).ToUniversalTime();
@@ -2035,13 +2165,13 @@ public sealed partial class ObservationStore : IDisposable
             {
                 Execute($"""
                     INSERT INTO chart_hourly(bucket_start,application,layer,observation_count,flow_count,bytes_sent,bytes_received,bytes_unknown)
-                    SELECT substr(observed_at,1,13) || ':00:00.0000000+00:00',
+                    SELECT {ObservedHourStart},
                            COALESCE(NULLIF(process_name,''),'Unknown'),layer,COUNT(*),
                            COUNT(DISTINCT {FlowIdentity}),
                            SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
                            SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                     FROM observations
-                    WHERE observed_at>='{watermark:O}' AND observed_at<'{foldTo:O}'
+                    WHERE observed_at>={watermark.UtcTicks} AND observed_at<{foldTo.UtcTicks}
                     GROUP BY 1,2,layer
                     ON CONFLICT(bucket_start,application,layer) DO UPDATE SET
                       observation_count=observation_count+excluded.observation_count,
@@ -2055,14 +2185,14 @@ public sealed partial class ObservationStore : IDisposable
                       bytes_received=bytes_received+excluded.bytes_received,
                       bytes_unknown=bytes_unknown+excluded.bytes_unknown;
                     INSERT INTO chart_hourly_destination(bucket_start,application,remote_address,layer,remote_hostname,flow_count,observation_count,bytes_sent,bytes_received,bytes_unknown)
-                    SELECT substr(observed_at,1,13) || ':00:00.0000000+00:00',
+                    SELECT {ObservedHourStart},
                            COALESCE(NULLIF(process_name,''),'Unknown'),remote_address,layer,
                            MAX(NULLIF(remote_hostname,'')),
                            COUNT(DISTINCT {FlowIdentity}),COUNT(*),
                            SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
                            SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                     FROM observations
-                    WHERE observed_at>='{watermark:O}' AND observed_at<'{foldTo:O}'
+                    WHERE observed_at>={watermark.UtcTicks} AND observed_at<{foldTo.UtcTicks}
                     GROUP BY 1,2,remote_address,layer
                     ON CONFLICT(bucket_start,application,remote_address,layer) DO UPDATE SET
                       remote_hostname=COALESCE(chart_hourly_destination.remote_hostname,excluded.remote_hostname),
@@ -2161,6 +2291,17 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// A time from either table.
+    ///
+    /// observations count in ticks and flows still spell theirs out, and this
+    /// one reader serves queries over both. The column's own type says which
+    /// it is, which is a fact about the row rather than a guess about the
+    /// query that fetched it.
+    private static DateTimeOffset Moment(nint statement, int column) =>
+        WinSqlite.ColumnType(statement, column) == 1
+            ? new DateTimeOffset(WinSqlite.ColumnInt64(statement, column), TimeSpan.Zero)
+            : DateTimeOffset.Parse(Text(statement, column));
+
     private IReadOnlyList<RecentFlow> ReadRecentFlowQuery(string sql) => ReadRecentFlowQuery(sql, out _);
 
     private IReadOnlyList<RecentFlow> ReadRecentFlowQuery(string sql, out long lastId)
@@ -2176,7 +2317,7 @@ public sealed partial class ObservationStore : IDisposable
                 if (code == WinSqlite.Done) break;
                 CheckQueryRow(code);
                 result.Add(new RecentFlow(
-                    DateTimeOffset.Parse(Text(statement, 0)), DateTimeOffset.Parse(Text(statement, 1)),
+                    Moment(statement, 0), Moment(statement, 1),
                     Text(statement, 2), Text(statement, 3), (int)WinSqlite.ColumnInt64(statement, 4),
                     Text(statement, 5), (int)WinSqlite.ColumnInt64(statement, 6), (int)WinSqlite.ColumnInt64(statement, 7),
                     NullableTextValue(statement, 8), NullableInt64(statement, 9), NullableInt64(statement, 10),
@@ -2502,6 +2643,8 @@ public sealed partial class ObservationStore : IDisposable
         {
             var fromText = from.ToUniversalTime().ToString("O");
             var toText = to.ToUniversalTime().ToString("O");
+            var fromTicks = from.ToUniversalTime().UtcTicks;
+            var toTicks = to.ToUniversalTime().UtcTicks;
             // A PID is not an application. Keying nameless flows by their PID
             // made every unnamed process its own "application", so the count
             // reported thousands where the machine runs dozens. They all fold
@@ -2525,7 +2668,10 @@ public sealed partial class ObservationStore : IDisposable
             // How many connections, applications and destinations the period
             // touched: properties of the flows themselves, so counted from
             // flows. A flow that outlived the period still touched it.
-            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows WHERE {where}";
+            // Loopback is counted apart rather than counted in. "How many
+            // destinations" is a question about where things went, and a flow
+            // to 127.0.0.1 did not go anywhere.
+            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows WHERE {where} AND NOT {DestinationScope.LoopbackSql()}";
             CheckOperation(WinSqlite.Prepare(db, totalsSql, -1, out var totalsStatement, 0));
             long connections; int applications; int destinations; long bytes; long unknown; long sent; long received;
             try
@@ -2537,6 +2683,18 @@ public sealed partial class ObservationStore : IDisposable
                 unknown = WinSqlite.ColumnInt64(totalsStatement, 3);
             }
             finally { WinSqlite.Finalize(totalsStatement); }
+
+            long localConnections = 0; var localDestinations = 0;
+            CheckOperation(WinSqlite.Prepare(db,
+                $"SELECT COUNT(*),COUNT(DISTINCT remote_address) FROM flows WHERE {where} AND {DestinationScope.LoopbackSql()}",
+                -1, out var localStatement, 0));
+            try
+            {
+                CheckQueryRow(WinSqlite.Step(localStatement));
+                localConnections = WinSqlite.ColumnInt64(localStatement, 0);
+                localDestinations = (int)WinSqlite.ColumnInt64(localStatement, 1);
+            }
+            finally { WinSqlite.Finalize(localStatement); }
 
             // Bytes are not. A flow row carries its whole life's total, so
             // summing the flows that overlap a period charges the period for
@@ -2565,10 +2723,10 @@ public sealed partial class ObservationStore : IDisposable
                   -- find 27,000 rows among 34 million. As two ranges it is
                   -- 0.02, because each one is an index seek.
                   SELECT COALESCE(bytes_sent,0),COALESCE(bytes_received,0) FROM observations
-                  WHERE observed_at>='{fromText}' AND observed_at<'{aggregateStart:O}' AND layer='logical'
+                  WHERE observed_at>={fromTicks} AND observed_at<{aggregateStart.UtcTicks} AND layer='logical'
                   UNION ALL
                   SELECT COALESCE(bytes_sent,0),COALESCE(bytes_received,0) FROM observations
-                  WHERE observed_at>='{aggregateEnd:O}' AND observed_at<'{toText}' AND layer='logical'
+                  WHERE observed_at>={aggregateEnd.UtcTicks} AND observed_at<{toTicks} AND layer='logical'
                 )
                 """;
             CheckOperation(WinSqlite.Prepare(db, bytesSql, -1, out var bytesStatement, 0));
@@ -2600,11 +2758,11 @@ public sealed partial class ObservationStore : IDisposable
                   UNION ALL
                   SELECT {app},remote_address,COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)
                   FROM observations
-                  WHERE observed_at>='{fromText}' AND observed_at<'{aggregateStart:O}' AND layer='logical'
+                  WHERE observed_at>={fromTicks} AND observed_at<{aggregateStart.UtcTicks} AND layer='logical'
                   UNION ALL
                   SELECT {app},remote_address,COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)
                   FROM observations
-                  WHERE observed_at>='{aggregateEnd:O}' AND observed_at<'{toText}' AND layer='logical'
+                  WHERE observed_at>={aggregateEnd.UtcTicks} AND observed_at<{toTicks} AND layer='logical'
                 ), measured AS (
                   SELECT application,remote_address,SUM(bytes) AS bytes FROM parts GROUP BY 1,2
                 )
@@ -2614,6 +2772,7 @@ public sealed partial class ObservationStore : IDisposable
                 FROM flows f
                 LEFT JOIN measured ON measured.application={qualifiedApp} AND measured.remote_address=f.remote_address
                 WHERE f.last_seen>='{fromText}' AND f.first_seen<'{toText}' AND f.layer='logical'
+                  AND NOT {DestinationScope.LoopbackSql("f")}
                 GROUP BY 1,2 ORDER BY 4 DESC,1,2 LIMIT 512
                 """;
             CheckOperation(WinSqlite.Prepare(db, linksSql, -1, out var linksStatement, 0));
@@ -2664,20 +2823,20 @@ public sealed partial class ObservationStore : IDisposable
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
                   GROUP BY bucket,application
                   UNION ALL
-                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',observed_at) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST(({ObservedUnixSeconds}-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
                          {app},COUNT(DISTINCT {FlowIdentity}),
                          SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
                          SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                   FROM observations
-                  WHERE observed_at>='{fromText}' AND observed_at<'{aggregateStart:O}' AND layer='logical'
+                  WHERE observed_at>={fromTicks} AND observed_at<{aggregateStart.UtcTicks} AND layer='logical'
                   GROUP BY bucket,2
                   UNION ALL
-                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',observed_at) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST(({ObservedUnixSeconds}-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
                          {app},COUNT(DISTINCT {FlowIdentity}),
                          SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
                          SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                   FROM observations
-                  WHERE observed_at>='{aggregateEnd:O}' AND observed_at<'{toText}' AND layer='logical'
+                  WHERE observed_at>={aggregateEnd.UtcTicks} AND observed_at<{toTicks} AND layer='logical'
                   GROUP BY bucket,2
                   UNION ALL
                   -- Hours the per-application fold never covered. There is no
@@ -2719,6 +2878,8 @@ public sealed partial class ObservationStore : IDisposable
                 monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline)
             {
                 BucketCount = bucketCount,
+                LocalConnections = localConnections,
+                LocalDestinations = localDestinations,
                 StorageBytes = ReadStorageBytes(),
                 BytesSent = sent,
                 BytesReceived = received,
@@ -3085,7 +3246,7 @@ public sealed partial class ObservationStore : IDisposable
                 PRAGMA journal_mode=WAL; {Version1Schema}
                 INSERT INTO observations(observed_at,process_id,protocol,local_address,local_port,
                   remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source)
-                VALUES('2020-01-01T00:00:00.0000000+00:00',4242,'TCP','10.1.1.1',50000,'93.184.216.34',443,1024,2048,'logical','iface-1','etw'),
+                VALUES('2020-01-01T00:00:00.1234567+00:00',4242,'TCP','10.1.1.1',50000,'93.184.216.34',443,1024,2048,'logical','iface-1','etw'),
                       ('2020-01-01T00:00:01.0000000+00:00',4242,'TCP','10.1.1.1',50000,'93.184.216.34',443,512,256,'logical','iface-1','etw'),
                       ('2020-01-01T00:00:02.0000000+00:00',77,'UDP','10.1.1.1',5353,'224.0.0.251',5353,64,0,'logical','iface-1','etw'),
                       ('2020-01-01T00:00:03.0000000+00:00',77,'UDP','10.1.1.1',5353,'239.255.255.250',1900,32,0,'logical','iface-1','etw');
