@@ -150,6 +150,14 @@ public sealed record PeriodAnalysis(
     /// -- traffic that went somewhere -- and these are the rest, said in the
     /// same card so that leaving them out of the total is a disclosure rather
     /// than a quiet subtraction.
+    /// How many of the destinations arrived with a name.
+    ///
+    /// The denominator is Destinations, from the same query, so the card and
+    /// the chart under it count the same addresses. Not a count of DNS events:
+    /// those answer a different question about a different population, and a
+    /// reader comparing the card to the chart would find them disagreeing.
+    public int NamedDestinations { get; init; }
+
     /// Whether any hour in this period was folded before the Agent could
     /// tell the two apart.
     ///

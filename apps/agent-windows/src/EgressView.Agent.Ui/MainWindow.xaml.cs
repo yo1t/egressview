@@ -352,6 +352,8 @@ public partial class MainWindow : Window
                 FormatDuration((DateTimeOffset.UtcNow - stuckSince).TotalSeconds), deliveryPending)
             : string.Empty;
 
+        RenderDestinationNames(data);
+
         // Hours folded before the Agent could tell outbound from local are
         // still counted, and saying nothing about them would present a mixed
         // figure as a clean one. They age out; the sentence goes with them.
@@ -387,6 +389,41 @@ public partial class MainWindow : Window
     }
 
     /// Public because the render check asserts on it; it is a pure formatter.
+    /// How many destinations arrived with a name, and how many did not.
+    ///
+    /// Written because a reader turned the setting on, saw addresses in the
+    /// chart, and concluded it had not worked. Names come from DNS the PC
+    /// already made -- Secure DNS, an address typed in directly, or a
+    /// connection older than the monitoring all leave nothing to read, and
+    /// falling back to the address is correct. What was missing was any way
+    /// to tell that apart from a broken setting.
+    ///
+    /// So a low share is shown in the ordinary colour. It is a fact about the
+    /// traffic, not a fault, and colouring it as one would teach the reader
+    /// to ignore the colour.
+    private void RenderDestinationNames(PeriodAnalysis data)
+    {
+        if (DestinationNameShare is null || DestinationNameDetail is null) return;
+        if (!readsHostnames)
+        {
+            DestinationNameShare.Text = LocalizationManager.Text("DestinationNamesOff");
+            DestinationNameDetail.Text = LocalizationManager.Text("DestinationNamesOffDetail");
+            return;
+        }
+        if (data.Destinations == 0)
+        {
+            // An em dash, not 0%: nothing was asked of the resolver, so
+            // nothing failed. Zero over zero is not zero.
+            DestinationNameShare.Text = "—";
+            DestinationNameDetail.Text = string.Empty;
+            return;
+        }
+        DestinationNameShare.Text = ((double)data.NamedDestinations / data.Destinations)
+            .ToString("P0", CultureInfo.CurrentCulture);
+        DestinationNameDetail.Text = string.Format(CultureInfo.CurrentCulture,
+            LocalizationManager.Text("DestinationNamesDetail"), data.NamedDestinations, data.Destinations);
+    }
+
     public static string FormatDuration(double seconds)
     {
         // Under a minute, say seconds.

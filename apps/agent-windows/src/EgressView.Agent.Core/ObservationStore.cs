@@ -2761,9 +2761,23 @@ public sealed partial class ObservationStore : IDisposable
             // Loopback is counted apart rather than counted in. "How many
             // destinations" is a question about where things went, and a flow
             // to 127.0.0.1 did not go anywhere.
-            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows WHERE {where} AND NOT {DestinationScope.LoopbackSql()}";
+            // The named share comes from the same row set as the destination
+            // count, so the card and the chart below it cannot be counting
+            // different populations.
+            //
+            // Null is the whole test. NormalizeDomain is the only way a name
+            // reaches this column and it returns null for anything blank and
+            // for anything that parses as an address, so "not empty" and "not
+            // the address written out again" are already true of every row --
+            // measured: none of 650,325 flows has either. Restating them here
+            // would read as a safeguard while never being able to be false,
+            // and two of them survived a mutation run saying exactly that.
+            var named = "remote_hostname IS NOT NULL";
+            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),"
+                + $"COUNT(DISTINCT CASE WHEN {named} THEN remote_address END) FROM flows WHERE {where} AND NOT {DestinationScope.LoopbackSql()}";
             CheckOperation(WinSqlite.Prepare(db, totalsSql, -1, out var totalsStatement, 0));
             long connections; int applications; int destinations; long bytes; long unknown; long sent; long received;
+            var namedDestinations = 0;
             try
             {
                 CheckQueryRow(WinSqlite.Step(totalsStatement));
@@ -2771,6 +2785,7 @@ public sealed partial class ObservationStore : IDisposable
                 applications = (int)WinSqlite.ColumnInt64(totalsStatement, 1);
                 destinations = (int)WinSqlite.ColumnInt64(totalsStatement, 2);
                 unknown = WinSqlite.ColumnInt64(totalsStatement, 3);
+                namedDestinations = (int)WinSqlite.ColumnInt64(totalsStatement, 4);
             }
             finally { WinSqlite.Finalize(totalsStatement); }
 
@@ -2974,6 +2989,7 @@ public sealed partial class ObservationStore : IDisposable
                 monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline)
             {
                 BucketCount = bucketCount,
+                NamedDestinations = namedDestinations,
                 IncludesUnseparatedHours = unseparated,
                 LocalConnections = localConnections,
                 LocalDestinations = localDestinations,
