@@ -1123,6 +1123,12 @@ try
             "and the destination chart agrees with the number above it");
     }
 
+    // The grace the window and the notification both use. Two numbers here
+    // would be two opinions about whether delivery is stuck, and the screen
+    // would contradict the alert it is standing in for.
+    Assert(DeliveryNotificationTracker.OutageGrace == TimeSpan.FromMinutes(5),
+        "the screen and the outage notification share one definition of stuck");
+
     var liveSnapshot = StartupSnapshot.Capture();
     Assert(liveSnapshot.Where(flow => flow.Protocol == "TCP").All(flow => flow.RemotePort > 0),
         "TCP startup snapshot excludes listeners");
@@ -1260,6 +1266,41 @@ try
         while (retentionStore.PruneRetentionBatch(now, batchSize: 10).TotalDeleted > 0) { }
         Assert(pending == 1 && retentionStore.ReadDeliveryStatus().Pending == 1,
             "retention never deletes unsent delivery queue data");
+
+        // The loop that empties the backlog, and the flag that drives it.
+        //
+        // A batch is bounded so it cannot hold the write lock for long -- one
+        // of 50,000 measured at 65ms against a 4.6 GiB database, while the
+        // service yields 100ms between batches and the collector buffers a
+        // whole second. What makes that safe rather than merely slow is the
+        // loop running until there is nothing left.
+        //
+        // MayHaveMore is what ends it, and nothing tested it. Had it always
+        // said false, retention would delete one batch a day against nearly a
+        // million rows written, and the database would grow for ever while
+        // every assertion above still passed.
+        var backlog = new List<NetworkObservation>();
+        for (var index = 0; index < 25; index++)
+            backlog.Add(new NetworkObservation(now.AddDays(-20).AddSeconds(index), 5, "TCP", "10.0.0.1",
+                41000 + index, "203.0.113.9", 443, 1, 1, ObservationLayer.Logical, null, "etw", "Backlog"));
+        retentionStore.WriteBatch(backlog);
+        var dueBefore = retentionStore.Inspect().Count;
+
+        var passes = 0; var sawMore = false; RetentionMaintenanceResult batch;
+        do
+        {
+            batch = retentionStore.PruneRetentionBatch(now, batchSize: 10);
+            sawMore |= batch.MayHaveMore(10);
+            passes++;
+        }
+        while (batch.MayHaveMore(10) && passes < 50);
+
+        Assert(sawMore, "a backlog larger than one batch says there is more to do");
+        Assert(passes is > 1 and < 50, $"and the loop ends on its own, after {passes} passes");
+        Assert(retentionStore.Inspect().Count < dueBefore,
+            "having actually removed what was due, not just reported on it");
+        Assert(retentionStore.PruneRetentionBatch(now, batchSize: 10).ObservationsDeleted == 0,
+            "and a pass over a drained backlog finds nothing");
     }
 
     using (var historyStore = new ObservationStore(Path.Combine(directory, "history-controls.db")))
