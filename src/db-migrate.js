@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 30;
+const SCHEMA_VERSION = 31;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -1219,6 +1219,35 @@ const MIGRATIONS = [
           )
         ) WITHOUT ROWID;
         CREATE INDEX IF NOT EXISTS idx_agent_app_daily_day ON agent_app_daily(dayStart);
+      `);
+    },
+  },
+  {
+    version: 31,
+    description: 'record which five-minute windows the routers answered in (P3-157)',
+    up(db) {
+      // The timeline draws a bar per five-minute window. A window in which the
+      // router never answered -- it was rebooting, the link was down, the Hub
+      // itself was not running -- gets the same bar as a window in which
+      // nothing was sent, and those two mean opposite things: "not known" and
+      // "nothing left the network".
+      //
+      // The Agents already record this about themselves and draw it (P3-157 on
+      // Windows and macOS). The Hub logged poll failures and kept nothing, so
+      // it could not say afterwards which windows it had no answer for.
+      //
+      // One row per router per window, so the cost is one write a minute per
+      // router and the complement of the successful windows is the gap.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS router_poll_windows (
+          routerId    TEXT    NOT NULL,
+          bucketStart INTEGER NOT NULL,
+          polls       INTEGER NOT NULL DEFAULT 0,
+          failures    INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (routerId, bucketStart)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS idx_router_poll_windows_bucket
+          ON router_poll_windows(bucketStart);
       `);
     },
   },
