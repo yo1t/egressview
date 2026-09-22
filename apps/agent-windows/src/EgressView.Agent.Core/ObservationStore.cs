@@ -1362,7 +1362,11 @@ public sealed partial class ObservationStore : IDisposable
 
     public IReadOnlyList<SleepPeriod> ReadSleepPeriods(DateTimeOffset from, DateTimeOffset to)
     {
-        lock (gate)
+        lock (gate) return ReadSleepPeriodsLocked(from, to);
+    }
+
+    private IReadOnlyList<SleepPeriod> ReadSleepPeriodsLocked(DateTimeOffset from, DateTimeOffset to)
+    {
         {
             var result = new List<SleepPeriod>();
             var sql = $"SELECT started_at,COALESCE(ended_at,'{to.ToUniversalTime():O}') FROM sleep_periods WHERE started_at<'{to.ToUniversalTime():O}' AND COALESCE(ended_at,'{to.ToUniversalTime():O}')>'{from.ToUniversalTime():O}' ORDER BY started_at";
@@ -2547,12 +2551,75 @@ public sealed partial class ObservationStore : IDisposable
                 BytesReceived = received,
                 OutboundAnomalies = ReadOutboundAnomalyCountLocked(from, to),
                 OutboundBaselineReady = ReadUsableBaselineWindowsLocked() >= 96,
-                SleepPeriods = ReadSleepPeriods(from, to),
+                SleepPeriods = ReadSleepPeriodsLocked(from, to),
+                MonitoringGaps = ReadMonitoringGaps(from, to),
             };
         }
     }
 
     private double ReadCoverage(DateTimeOffset from, DateTimeOffset to)
+    {
+        var covered = ReadCoveredIntervals(from, to);
+        if (covered.Count == 0) return 0;
+        var total = covered.Sum(interval => (interval.End - interval.Start).TotalSeconds);
+        return Math.Clamp(total / (to - from).TotalSeconds, 0, 1);
+    }
+
+    /// What the period is missing, once sleep has been taken out of it.
+    ///
+    /// The ratio this used to be reduced to is true and easy to miss: a reader
+    /// has to find the number, then work out that the rest of the period is
+    /// not "no traffic" but "no record". The intervals were built either way,
+    /// so the complement is given to the chart instead of being thrown away.
+    ///
+    /// Sleep is removed because it is already drawn. Two bands over the same
+    /// minutes would make one outage look like two, and the one the user did
+    /// not ask for is the one worth seeing.
+    private IReadOnlyList<MonitoringGap> ReadMonitoringGaps(DateTimeOffset from, DateTimeOffset to)
+    {
+        if (to <= from) return [];
+        var gaps = Complement(from, to, ReadCoveredIntervals(from, to));
+        var sleeps = ReadSleepPeriodsLocked(from, to);
+        if (sleeps.Count == 0)
+            return gaps.Select(gap => new MonitoringGap(gap.Start, gap.End)).ToArray();
+
+        var result = new List<MonitoringGap>();
+        foreach (var gap in gaps)
+        {
+            var remaining = new List<(DateTimeOffset Start, DateTimeOffset End)> { gap };
+            foreach (var sleep in sleeps)
+            {
+                var next = new List<(DateTimeOffset Start, DateTimeOffset End)>();
+                foreach (var part in remaining)
+                {
+                    if (sleep.End <= part.Start || sleep.Start >= part.End) { next.Add(part); continue; }
+                    if (sleep.Start > part.Start) next.Add((part.Start, sleep.Start));
+                    if (sleep.End < part.End) next.Add((sleep.End, part.End));
+                }
+                remaining = next;
+            }
+            result.AddRange(remaining.Where(part => part.End > part.Start)
+                .Select(part => new MonitoringGap(part.Start, part.End)));
+        }
+        return result;
+    }
+
+    private static List<(DateTimeOffset Start, DateTimeOffset End)> Complement(
+        DateTimeOffset from, DateTimeOffset to, IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)> covered)
+    {
+        var gaps = new List<(DateTimeOffset Start, DateTimeOffset End)>();
+        var cursor = from;
+        foreach (var interval in covered)
+        {
+            if (interval.Start > cursor) gaps.Add((cursor, interval.Start));
+            if (interval.End > cursor) cursor = interval.End;
+        }
+        if (cursor < to) gaps.Add((cursor, to));
+        return gaps;
+    }
+
+    /// The covered stretches, merged, clipped to the period.
+    private List<(DateTimeOffset Start, DateTimeOffset End)> ReadCoveredIntervals(DateTimeOffset from, DateTimeOffset to)
     {
         var intervals = new List<(DateTimeOffset Start, DateTimeOffset End)>();
         var sql = $"SELECT started_at,ended_at,confirmed_at FROM coverage_sessions WHERE started_at<'{to.ToUniversalTime():O}' AND COALESCE(ended_at,confirmed_at,started_at)>'{from.ToUniversalTime():O}' ORDER BY started_at";
@@ -2572,17 +2639,17 @@ public sealed partial class ObservationStore : IDisposable
             }
         }
         finally { WinSqlite.Finalize(statement); }
-        if (intervals.Count == 0) return 0;
-        var covered = TimeSpan.Zero;
+        if (intervals.Count == 0) return [];
+        var merged = new List<(DateTimeOffset Start, DateTimeOffset End)>();
         var currentStart = intervals[0].Start;
         var currentEnd = intervals[0].End;
         foreach (var interval in intervals.Skip(1))
         {
             if (interval.Start <= currentEnd) { if (interval.End > currentEnd) currentEnd = interval.End; }
-            else { covered += currentEnd - currentStart; currentStart = interval.Start; currentEnd = interval.End; }
+            else { merged.Add((currentStart, currentEnd)); currentStart = interval.Start; currentEnd = interval.End; }
         }
-        covered += currentEnd - currentStart;
-        return Math.Clamp(covered.TotalSeconds / (to - from).TotalSeconds, 0, 1);
+        merged.Add((currentStart, currentEnd));
+        return merged;
     }
 
     public ThreatCacheState ReadThreatCacheState()

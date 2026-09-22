@@ -29,6 +29,20 @@ internal static class Entry
     private static int Main(string[] args)
     {
         var output = args.Length > 0 ? args[0] : "render-check";
+        // A leading dash is never a directory anybody meant.
+        //
+        // "dotnet run --project x -v q --nologo" hands --nologo straight to
+        // here, and this used to create a directory called "--nologo" beside
+        // the sources and write thirty-five images into it. .gitignore covers
+        // render-check*/ and not that, so the images were staged and
+        // committed. Refusing the argument costs a line; noticing the
+        // directory afterwards cost rather more.
+        if (output.StartsWith('-'))
+        {
+            Console.Error.WriteLine($"render-check: '{output}' is a flag, not an output directory. "
+                + "Pass the directory after '--', as in: dotnet run --project ... -- render-check");
+            return 2;
+        }
         Directory.CreateDirectory(output);
         var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.Resources.MergedDictionaries.Add(new ResourceDictionary
@@ -128,9 +142,71 @@ internal static class Entry
                 var chart = new TrafficTimelineControl();
                 VerifyAutomationPeer(chart, "Traffic timeline");
                 chart.SetItems(timeline, bytes, timelineStart, timelineStart.AddHours(6),
-                    [new SleepPeriod(timelineStart.AddHours(1.5), timelineStart.AddHours(2.25))]);
+                    [new SleepPeriod(timelineStart.AddHours(1.5), timelineStart.AddHours(2.25))],
+                    gaps: [new MonitoringGap(timelineStart.AddHours(3), timelineStart.AddHours(3.4))]);
                 Save(chart, w, h, Path.Combine(output, $"timeline-{label}-{w}x{h}.png"));
             }
+
+        // An outage far shorter than one bucket must still reach the screen.
+        //
+        // Six hours over sixty buckets is six minutes a bar, so half a minute
+        // is a twelfth of one bar: drawn to scale it is a fraction of a pixel
+        // and rounds to nothing. That is the whole defect -- a chart that
+        // draws only what it has shows an unmonitored half minute exactly
+        // like a quiet one. Rendering the same chart with and without the gap
+        // and requiring the pixels to differ is the only way to see it; no
+        // assertion about the data can, because the data was always right.
+        {
+            const int width = 663, height = 200;
+            var quiet = new TrafficTimelineControl();
+            quiet.SetItems(timeline, false, timelineStart, timelineStart.AddHours(6));
+            var baseline = RenderPixels(quiet, width, height);
+
+            List<int> GapColumns(double atHours)
+            {
+                var marked = new TrafficTimelineControl();
+                var at = timelineStart.AddHours(atHours);
+                marked.SetItems(timeline, false, timelineStart, timelineStart.AddHours(6),
+                    gaps: [new MonitoringGap(at, at.AddSeconds(30))]);
+                var pixels = RenderPixels(marked, width, height);
+                var columns = new List<int>();
+                for (var x = 0; x < width; x++)
+                    for (var y = 0; y < height; y++)
+                    {
+                        var i = y * width * 4 + x * 4;
+                        if (baseline[i] != pixels[i] || baseline[i + 1] != pixels[i + 1] || baseline[i + 2] != pixels[i + 2])
+                        {
+                            columns.Add(x);
+                            break;
+                        }
+                    }
+                return columns;
+            }
+
+            var early = GapColumns(1.5);
+            var late = GapColumns(4.5);
+            Console.WriteLine($"timeline-short-gap: {early.Count} columns at 25%, {late.Count} at 75%");
+            // Six, not one. Drawn to scale this gap is under a pixel, and its
+            // two edge lines alone would still change three columns -- enough
+            // for a pixel comparison to pass while a person sees a tick mark
+            // rather than the hatching that means "no record". The bar is one
+            // stroke's width, because that is where the band stops carrying
+            // the meaning the rest of the chart gives it.
+            if (early.Count < 6 || late.Count < 6)
+                throw new InvalidOperationException(
+                    $"a 30-second monitoring gap changed only {Math.Min(early.Count, late.Count)} columns: "
+                    + "an outage shorter than one bucket is drawn too narrow to read as missing time");
+
+            // And it has to be drawn where it happened. A band wide enough to
+            // see but fixed in place would be worse than nothing: it would
+            // accuse the wrong half hour. Half the period apart must move it
+            // half the plot, which says so without this file having to know
+            // the plot's own margins.
+            var moved = late.Min() - early.Min();
+            if (moved < width * 0.4)
+                throw new InvalidOperationException(
+                    $"gaps three hours apart were drawn {moved} columns apart ({early.Min()} and {late.Min()}): the band does not follow its own time");
+        }
 
         foreach (var selectedIndex in new[] { 0, 1 })
         {
@@ -389,6 +465,24 @@ internal static class Entry
         Console.WriteLine($"{name}: {width}x{height} overflow above={above} below={below} left={left} right={right}");
         if (above != 0 || below != 0 || left != 0 || right != 0)
             throw new InvalidOperationException($"{name} painted outside its {width}x{height} bounds");
+    }
+
+    /// Renders a control to raw pixels, with no host, frame or bleed.
+    ///
+    /// Save's image is deliberately framed and padded so overflow shows up.
+    /// Comparing two renders needs the opposite: only what the control drew.
+    private static byte[] RenderPixels(FrameworkElement element, int width, int height)
+    {
+        element.Width = width;
+        element.Height = height;
+        element.Measure(new Size(width, height));
+        element.Arrange(new Rect(0, 0, width, height));
+        element.UpdateLayout();
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(element);
+        var pixels = new byte[width * 4 * height];
+        bitmap.CopyPixels(pixels, width * 4, 0);
+        return pixels;
     }
 
     private static void Save(FrameworkElement element, int width, int height, string path)

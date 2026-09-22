@@ -95,6 +95,13 @@ public sealed record AppTimelineAggregate(
 
 public sealed record SleepPeriod(DateTimeOffset Start, DateTimeOffset End);
 
+/// A stretch of the period the Agent cannot account for.
+///
+/// Not "no traffic" -- no record. The two look identical on a chart that
+/// draws only what it has, and they mean opposite things: one says nothing
+/// left this PC, the other says nobody was watching.
+public sealed record MonitoringGap(DateTimeOffset Start, DateTimeOffset End);
+
 public sealed record PeriodAnalysis(
     DateTimeOffset From, DateTimeOffset To, long Connections, int Applications, int Destinations,
     long Bytes, long ConnectionsWithoutBytes, double CoverageRatio, DateTimeOffset? MonitoringStartedAt,
@@ -131,6 +138,14 @@ public sealed record PeriodAnalysis(
 
     public IReadOnlyList<SleepPeriod> SleepPeriods { get; init; } = [];
     public double SleepSeconds => SleepPeriods.Sum(period => Math.Max(0, (period.End - period.Start).TotalSeconds));
+
+    /// The stretches of this period with no coverage, excluding sleep.
+    ///
+    /// Sleep is already drawn and already explained, so it is taken out here
+    /// rather than reported twice under two names. What is left is the part
+    /// nobody asked for: a crash, a stopped service, a collector that died.
+    public IReadOnlyList<MonitoringGap> MonitoringGaps { get; init; } = [];
+    public double MonitoringGapSeconds => MonitoringGaps.Sum(gap => Math.Max(0, (gap.End - gap.Start).TotalSeconds));
 }
 
 public sealed record ThreatIndicator(string Kind, string Value, string? Source, string? Tag, string Confidence);

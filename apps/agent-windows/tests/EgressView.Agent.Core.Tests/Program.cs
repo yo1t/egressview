@@ -884,6 +884,42 @@ try
         Assert(suspendWindow.SleepPeriods.Count == 1 && suspendWindow.SleepPeriods[0] ==
             new SleepPeriod(started.AddSeconds(12), started.AddSeconds(20)) && suspendWindow.SleepSeconds == 8,
             "an SCM-confirmed sleep is disclosed over the same interval excluded from monitoring coverage");
+
+        // The ratio above is true and easy to miss. The same intervals say
+        // where the missing time is, and until now the chart drew those
+        // minutes exactly like minutes with no traffic.
+        Assert(crashWindow.MonitoringGaps.Count == 1
+               && crashWindow.MonitoringGaps[0] == new MonitoringGap(started.AddSeconds(5), started.AddSeconds(10))
+               && crashWindow.MonitoringGapSeconds == 5,
+            "the time an abrupt termination left unaccounted for is reported as a gap, not as quiet");
+
+        // Sleep is already drawn in its own colour. Reporting it again here
+        // would put two bands over the same minutes and make one stretch of
+        // unknown time look like two different things.
+        Assert(suspendWindow.MonitoringGaps.Count == 0 && suspendWindow.MonitoringGapSeconds == 0,
+            "a gap that is entirely sleep is left to the sleep disclosure rather than reported twice");
+
+        // A period from before the Agent ever ran is not a quiet period.
+        var beforeAnything = coverageStore.ReadPeriodAnalysis(started.AddSeconds(-100), started.AddSeconds(-50));
+        Assert(beforeAnything.CoverageRatio == 0
+               && beforeAnything.MonitoringGaps.Count == 1
+               && beforeAnything.MonitoringGapSeconds == 50,
+            "a period with no coverage at all is one gap, not an empty chart");
+
+        // One outage with a sleep inside it is two stretches of "nobody was
+        // watching" separated by one the user asked for.
+        var partial = coverageStore.BeginCoverage(snapshot, started.AddSeconds(30));
+        coverageStore.InterruptCoverage(partial, started.AddSeconds(32));
+        coverageStore.BeginSleepPeriod(started.AddSeconds(40));
+        coverageStore.EndSleepPeriod(started.AddSeconds(45));
+        var recovered = coverageStore.BeginCoverage(snapshot, started.AddSeconds(50));
+        coverageStore.EndCoverage(recovered, started.AddSeconds(52));
+        var splitWindow = coverageStore.ReadPeriodAnalysis(started.AddSeconds(30), started.AddSeconds(52));
+        Assert(splitWindow.MonitoringGaps.Count == 2
+               && splitWindow.MonitoringGaps[0] == new MonitoringGap(started.AddSeconds(32), started.AddSeconds(40))
+               && splitWindow.MonitoringGaps[1] == new MonitoringGap(started.AddSeconds(45), started.AddSeconds(50))
+               && splitWindow.MonitoringGapSeconds == 13,
+            "a sleep inside an outage splits it, leaving only the part nobody asked for");
         var clippedSleep = coverageStore.ReadSleepPeriods(started.AddSeconds(14), started.AddSeconds(18));
         Assert(clippedSleep.SequenceEqual([new SleepPeriod(started.AddSeconds(14), started.AddSeconds(18))]),
             "sleep disclosure is clipped to the selected chart period");
