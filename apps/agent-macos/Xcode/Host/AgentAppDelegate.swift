@@ -207,6 +207,13 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // in the database it is describing, so it can be written when the
         // database cannot be opened at all. It only had to be written first.
         beginRunRecord()
+        // A progress file that is here before anything opens the database was
+        // left by a run that died in the middle of a migration. The next open
+        // will try the same migration again, which is right -- but the user is
+        // owed the fact that it failed once, because the alternative is that
+        // an update quietly eats their records and nobody ever says so
+        // (P3-161).
+        reportInterruptedMigrationIfAny()
         applyMenuBarIcon(for: .paused)
         _ = hubDelivery
         installApplicationMenu()
@@ -374,6 +381,27 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         controller.updateQUICDiagnostics(currentQUICDiagnostics)
         settingsWindow = controller
         return controller
+    }
+
+    /// Says when the previous launch died while changing the database's shape.
+    ///
+    /// Read before the store is opened, because opening it clears the file. The
+    /// copy taken before that migration is named in the message: it is the
+    /// thing the user would need if this keeps happening, and it is no use to
+    /// them if they do not know it exists.
+    private func reportInterruptedMigrationIfAny() {
+        guard let databaseURL = try? ObservationStore.defaultFileURL(),
+              let progress = MigrationProgressFile.read(forDatabaseAt: databaseURL) else { return }
+        let backup = databaseURL.deletingPathExtension()
+            .appendingPathExtension("pre-v\(progress.fromVersion).sqlite")
+        let hasBackup = FileManager.default.fileExists(atPath: backup.path)
+        recordStorageError(hasBackup
+            ? L(
+                "The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@.",
+                backup.path
+            )
+            : L("The last update stopped while changing how records are stored. It will be tried again now.")
+        )
     }
 
     private func recordStorageError(_ message: String) {
