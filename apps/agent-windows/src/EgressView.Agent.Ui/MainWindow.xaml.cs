@@ -335,6 +335,23 @@ public partial class MainWindow : Window
         var unmeasuredNote = data.ConnectionsWithoutBytes > 0
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("UnmeasuredReason"), data.ConnectionsWithoutBytes)
             : string.Empty;
+        // Delivery, but only when it is stuck.
+        //
+        // Measured over a day: the queue sat unacknowledged for up to twelve
+        // minutes while the backlog grew from 1,348 to 2,751, four separate
+        // times. The Agent noticed every one of them and raised an outage
+        // notification, and every one was suppressed -- HubDelivery is the
+        // only category that defaults to off. It was detected, recorded, and
+        // told to nobody.
+        //
+        // The same grace the notification uses, so the screen and the alert
+        // cannot disagree about whether delivery is stuck.
+        var deliveryNote = deliveryOldestPendingAt is { } stuckSince
+            && DateTimeOffset.UtcNow - stuckSince >= DeliveryNotificationTracker.OutageGrace
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DeliveryBackedUp"),
+                FormatDuration((DateTimeOffset.UtcNow - stuckSince).TotalSeconds), deliveryPending)
+            : string.Empty;
+
         // Said, not silently subtracted. The tiles count where traffic went,
         // and a flow to 127.0.0.1 did not go anywhere -- but leaving it out
         // without saying so turns a smaller number into an unexplained one.
@@ -343,7 +360,7 @@ public partial class MainWindow : Window
                 data.LocalConnections, data.LocalDestinations)
             : string.Empty;
         CoverageNote.Text = string.Join(Environment.NewLine,
-            new[] { coverageNote, sleepNote, unmeasuredNote, localNote }.Where(value => value.Length > 0));
+            new[] { coverageNote, sleepNote, unmeasuredNote, localNote, deliveryNote }.Where(value => value.Length > 0));
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
         Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods, data.BucketCount, data.MonitoringGaps);
@@ -746,6 +763,12 @@ public partial class MainWindow : Window
                 ? hub.GetString() ?? LocalizationManager.Text("NotEnrolled") : LocalizationManager.Text("NotEnrolled");
             HubDeliveryState.Text = DeliveryStateText(state);
             var pending = data.GetProperty("pending").GetInt64();
+            deliveryPending = pending;
+            deliveryOldestPendingAt = data.TryGetProperty("oldestPendingAt", out var oldestPending)
+                && oldestPending.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(oldestPending.GetString(), CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out var stuck)
+                ? stuck.ToUniversalTime() : null;
             HubPending.Text = pending.ToString("N0", CultureInfo.CurrentCulture);
             HubLastAck.Text = DateText(data, "lastAcknowledgedAt");
             HubOldestPending.Text = $"{LocalizationManager.Text("OldestPending")}: {DateText(data, "oldestPendingAt")}";
@@ -1785,6 +1808,8 @@ public partial class MainWindow : Window
             : string.Format(LocalizationManager.Text(claim.Key), string.Join(" / ", claim.Sources));
     }
 
+    private long deliveryPending;
+    private DateTimeOffset? deliveryOldestPendingAt;
     private bool enrichmentThirdParty;
     private bool enrichmentPublicFeeds;
     private bool enrichmentCountryTable;
