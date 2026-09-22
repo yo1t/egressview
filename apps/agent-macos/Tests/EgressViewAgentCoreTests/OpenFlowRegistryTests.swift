@@ -19,6 +19,58 @@ private func metadata(remotePort: UInt16 = 443, processID: Int32 = 501) -> Socke
 final class OpenFlowRegistryTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func test時計が巻き戻っても終わりが始まりより前にならない() throws {
+        // Measured on a Mac on 2026-09-12: three flows registered at 00:32:14
+        // reported their close at 00:32:12 and 00:32:13. The Hub refuses a
+        // batch carrying such a row -- a flow cannot end before it began --
+        // and on Windows one such row stopped delivery for three hours and
+        // cost 42,545 observations (P3-148).
+        var registry = OpenFlowRegistry()
+        let id = UUID()
+        let uptime = ContinuousClock.now
+        registry.register(flowID: id, metadata: metadata(), startedAt: start, uptime: uptime)
+
+        // Two seconds of real time pass, and the wall clock is set back three.
+        let observation = try XCTUnwrap(registry.complete(
+            flowID: id, kind: .flowClosed, bytesIn: 10, bytesOut: 20,
+            metadata: nil,
+            reportedAt: start.addingTimeInterval(-3),
+            uptime: uptime.advanced(by: .seconds(2))
+        ))
+
+        XCTAssertEqual(observation.firstObservedAt, start)
+        XCTAssertGreaterThanOrEqual(
+            observation.lastObservedAt, observation.firstObservedAt,
+            "終わりが始まりより前になっている"
+        )
+        // The duration that was actually measured, not a flow clamped to zero:
+        // clamping would lose the fact that it lasted at all.
+        XCTAssertEqual(
+            observation.lastObservedAt.timeIntervalSince(start), 2, accuracy: 0.05,
+            "実際に経過した2秒が残らなければならない"
+        )
+    }
+
+    func test時計が正しいときは報告された時刻をそのまま使う() throws {
+        // The repair must not touch the ordinary case: the system's own close
+        // time is the honest answer whenever it is not impossible.
+        var registry = OpenFlowRegistry()
+        let id = UUID()
+        let uptime = ContinuousClock.now
+        registry.register(flowID: id, metadata: metadata(), startedAt: start, uptime: uptime)
+
+        let observation = try XCTUnwrap(registry.complete(
+            flowID: id, kind: .flowClosed, bytesIn: 1, bytesOut: 2,
+            metadata: nil,
+            reportedAt: start.addingTimeInterval(90),
+            // Deliberately disagrees with the wall clock: the wall clock wins
+            // while it is still possible.
+            uptime: uptime.advanced(by: .seconds(5))
+        ))
+
+        XCTAssertEqual(observation.lastObservedAt, start.addingTimeInterval(90))
+    }
+
     func testClosedFlowCarriesTheByteCountsAndTheOriginalStartTime() throws {
         var registry = OpenFlowRegistry()
         let id = UUID()
