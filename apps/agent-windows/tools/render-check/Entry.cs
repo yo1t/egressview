@@ -43,6 +43,16 @@ internal static class Entry
                 + "Pass the directory after '--', as in: dotnet run --project ... -- render-check");
             return 2;
         }
+        // A relative path means the same directory wherever this is run from.
+        //
+        // It used to mean "relative to the shell", so running it from the
+        // repository root scattered a second copy of every image there --
+        // outside the one ignore rule, and straight into a commit. The
+        // .gitignore beside that rule already says the tool "writes a
+        // dot-less directory when run from the solution root", which is a
+        // note about a defect kept as a note. The output belongs to the tool,
+        // not to whoever invoked it.
+        output = Path.GetFullPath(Path.IsPathRooted(output) ? output : Path.Combine(AgentRoot(), output));
         Directory.CreateDirectory(output);
         var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.Resources.MergedDictionaries.Add(new ResourceDictionary
@@ -124,6 +134,21 @@ internal static class Entry
             glowingMap.RenderMoment = glowAt.AddSeconds(elapsed);
             Save(glowingMap, 700, 360, Path.Combine(output, $"country-atlas-glow-{label}.png"));
         }
+
+        // The legend is the exact half of a disclosure whose other half is
+        // deliberately inexact. On the machine this was first seen on, two
+        // five-second service restarts were reported as "1 minute".
+        foreach (var (seconds, expected) in new[]
+                 {
+                     (11d, "11秒"), (5d, "5秒"), (0.4d, "1秒"), (59d, "59秒"),
+                     (60d, "1分"), (90d, "2分"), (3900d, "1時間5分"),
+                 })
+        {
+            var actual = MainWindow.FormatDuration(seconds);
+            if (actual != expected)
+                throw new InvalidOperationException($"FormatDuration({seconds}) was \"{actual}\", expected \"{expected}\"");
+        }
+        Console.WriteLine("duration formatting: seconds stay seconds");
 
         var timelineStart = new DateTimeOffset(2026, 9, 6, 10, 0, 0, TimeSpan.FromHours(9));
         var timeline = new List<AppTimelineAggregate>();
@@ -416,6 +441,18 @@ internal static class Entry
 
         Console.WriteLine($"wrote {output}");
         return 0;
+    }
+
+    /// The apps/agent-windows directory, found by walking up from the binary.
+    private static string AgentRoot()
+    {
+        for (var candidate = AppContext.BaseDirectory; candidate is not null;
+             candidate = Path.GetDirectoryName(candidate.TrimEnd(Path.DirectorySeparatorChar)))
+            if (Directory.Exists(Path.Combine(candidate, "tools", "render-check")))
+                return candidate;
+        // Running from somewhere unrecognisable is not a reason to fail a
+        // render check; it only means the images land where they used to.
+        return Directory.GetCurrentDirectory();
     }
 
     private static void VerifyAutomationPeer(FrameworkElement element, string name)

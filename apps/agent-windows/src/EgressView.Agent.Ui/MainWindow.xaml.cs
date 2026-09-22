@@ -335,9 +335,24 @@ public partial class MainWindow : Window
         AutomationProperties.SetHelpText(Timeline, TimelineCaption.Text);
     }
 
-    private static string FormatDuration(double seconds)
+    /// Public because the render check asserts on it; it is a pure formatter.
+    public static string FormatDuration(double seconds)
     {
-        var minutes = Math.Max(1, (int)Math.Round(seconds / 60, MidpointRounding.AwayFromZero));
+        // Under a minute, say seconds.
+        //
+        // This used to floor at one minute, which was harmless while sleep was
+        // the only caller -- nobody sleeps a PC for eleven seconds. Monitoring
+        // gaps are routinely that short: a service restart is five seconds,
+        // and two of them read as "1 minute", overstating by more than five
+        // times.
+        //
+        // The band's width is already a deliberate overstatement, drawn at a
+        // floor so a sub-pixel outage still reaches the screen. This legend is
+        // what corrects for it, so it is the one place that has to be exact.
+        if (seconds < 60)
+            return string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DurationSeconds"),
+                Math.Max(1, (int)Math.Round(seconds, MidpointRounding.AwayFromZero)));
+        var minutes = (int)Math.Round(seconds / 60, MidpointRounding.AwayFromZero);
         return minutes >= 60
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DurationHoursMinutes"), minutes / 60, minutes % 60)
             : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DurationMinutes"), minutes);
