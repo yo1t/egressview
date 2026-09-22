@@ -359,10 +359,44 @@ try
             "nothing is downloaded and nothing is verified, because there is nothing being offered");
         Assert(client.DownloadPage.Scheme == "https" && client.DownloadPage.Host == "dl.egressview.com",
             "the page offered is the origin the manifest came from, over HTTPS");
+        // The host was all this checked, and the host was never the problem.
+        // It pointed at "windows/", which is the bucket prefix the .msi files
+        // sit under, not a page: a browser sent there got AccessDenied from
+        // S3. A gate that reads the host and not the path cannot tell the
+        // right page from the wrong one on the same site.
+        Assert(client.DownloadPage.AbsolutePath == "/",
+            "the download page is the site root, not a directory of packages");
+        Assert(!client.DownloadPage.AbsoluteUri.Contains("/windows/", StringComparison.Ordinal),
+            "and never the prefix the packages are stored under, which serves no page");
+        Assert(client.DownloadPage.Fragment == "#download-windows",
+            "arriving readers land on the Windows download rather than having to find it");
 
         var older = await client.CheckAsync("9.9.9", "10.0.26100");
         Assert(older.Kind == AgentUpdateDecisionKind.UpToDate,
             "and a build that is already newer is still simply up to date");
+    }
+
+    // What the assertions above cannot know: whether that URL serves a page.
+    //
+    // Everything else here is about the shape of the address. The defect this
+    // replaced was a well-formed HTTPS address on the right host that returned
+    // AccessDenied, and no amount of inspecting the string finds that. Kept
+    // out of the default run because a network failure is not a defect in this
+    // code -- the same arrangement the macOS suite uses.
+    if (Environment.GetEnvironmentVariable("RUN_AGENT_UPDATE_LIVE") == "1")
+    {
+        using var live = new WindowsAgentUpdateClient();
+        using var browser = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        using var page = await browser.GetAsync(live.DownloadPage);
+        Assert(page.IsSuccessStatusCode,
+            $"the live download page answers, rather than {(int)page.StatusCode}");
+        var type = page.Content.Headers.ContentType?.MediaType ?? "";
+        Assert(type == "text/html",
+            $"and answers with a page rather than {type}");
+        var body = await page.Content.ReadAsStringAsync();
+        Assert(body.Contains("download-windows", StringComparison.Ordinal),
+            "and the page carries the Windows download the reader was sent for");
+        Console.WriteLine("live: the download page serves HTML with a Windows download");
     }
 
     // A release the reader installs themselves, with the package still
