@@ -811,6 +811,11 @@
   .stats-bar { transition: opacity 0.15s; }
   .stats-bar:hover { opacity: 0.7; }
   .stats-bar.is-selected { stroke: #f8fafc; stroke-width: 1.5px; }
+  .stats-destination-tick { cursor: pointer; }
+  .stats-destination-tick:hover text,
+  .stats-destination-tick:focus-visible text,
+  .stats-destination-tick.is-selected text { fill: var(--text); }
+  .stats-destination-tick:focus-visible { outline: none; }
   .stats-legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10px; color: var(--muted); margin-top: 4px; }
   /* Sits under the legend and reads like the legend: it is a footnote about the
      chart, not a message about the network. It had no rule at all before, so a
