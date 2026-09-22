@@ -127,13 +127,26 @@ describe('macOS Agent privacy manifest', () => {
     }
   });
 
+  it('空き容量の読み取りに理由を宣言している', () => {
+    // Read before the store rewrites itself, to check the volume can hold the
+    // copy that rewrite makes (P3-158). E174.1 is Apple's reason for exactly
+    // that: checking there is room to write.
+    const sources = swiftSources();
+    assert.ok(
+      sources.some((s) => s.includes('volumeAvailableCapacity')),
+      'the scan found no free-space call; this test would pass vacuously'
+    );
+    for (const [name, file] of Object.entries(manifests)) {
+      const reasons = accessedApiReasons(read(file), 'NSPrivacyAccessedAPICategoryDiskSpace');
+      assert.ok(reasons, `${name} does not declare the disk space category`);
+      assert.ok(reasons.includes('E174.1'), `${name} is missing reason E174.1`);
+    }
+  });
+
   it('宣言していない要理由APIを新たに使い始めたら落ちる', () => {
     // The categories this app does not use today. If one appears in the source
     // without a matching declaration, the manifest has gone stale.
     const undeclared = {
-      NSPrivacyAccessedAPICategoryDiskSpace: [
-        'volumeAvailableCapacity', 'systemFreeSize', 'statfs(', 'volumeTotalCapacity',
-      ],
       NSPrivacyAccessedAPICategorySystemBootTime: [
         'kern.boottime', 'systemUptime', 'mach_absolute_time',
       ],

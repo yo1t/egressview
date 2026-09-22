@@ -19,6 +19,7 @@ const { CONNECTIONS_SQL, OBSERVATIONS_SQL, EVENTS_SQL } = require('./history-sch
 const { reportSchemaCompleteness } = require('./schema-completeness');
 const { applyWalPragmas } = require('./sqlite-wal');
 const { createConnectionBuckets } = require('./connection-buckets');
+const routerPollWindows = require('./router-poll-windows');
 const { createAgentAppDaily } = require('./agent-app-daily');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
@@ -718,6 +719,37 @@ function upsertRouterMetadata(record) {
   routerKinds.set(record.id, record.kind);
 }
 
+// Which five-minute windows a router answered in. Written once per poll
+// cycle, so the chart can tell "no answer" from "nothing was sent" (P3-157).
+function recordPollWindow({ id, ok, at } = {}) {
+  if (!db || !id) return;
+  try {
+    routerPollWindows.recordPoll(db, id, at || Date.now(), { ok: !!ok });
+  } catch (err) {
+    logger.warn(`[history] could not record the poll window for ${id}: ${err.message}`);
+  }
+}
+
+function prunePollWindows() {
+  if (!db) return 0;
+  try {
+    return routerPollWindows.prune(db);
+  } catch (err) {
+    logger.warn(`[history] could not prune the poll windows: ${err.message}`);
+    return 0;
+  }
+}
+
+function monitoringGaps({ from, to, now = Date.now() } = {}) {
+  if (!db) return [];
+  try {
+    return routerPollWindows.pollGaps(db, { from, to, now });
+  } catch (err) {
+    logger.warn(`[history] could not read the poll windows: ${err.message}`);
+    return [];
+  }
+}
+
 function tombstoneRouterMetadata(id) {
   if (!db || !id) return;
   db.prepare('UPDATE routers SET deletedAt = ? WHERE id = ?').run(Date.now(), id);
@@ -795,6 +827,9 @@ module.exports = {
   getKnownMacs,
   upsertRouterMetadata,
   tombstoneRouterMetadata,
+  recordPollWindow,
+  monitoringGaps,
+  prunePollWindows,
   logNotification,
   queryNotificationLog,
   queryNewNodes,

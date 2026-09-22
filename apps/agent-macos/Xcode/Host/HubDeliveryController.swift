@@ -190,7 +190,8 @@ final class HubDeliveryController: ObservableObject {
         status = label(for: state)
         let newlyDropped = droppedObservations.observe(
             queueOverflowCount: queueStatus.queueOverflowCount,
-            contractRejectedCount: queueStatus.contractRejectedCount
+            contractRejectedCount: queueStatus.contractRejectedCount,
+            abandonedCount: queueStatus.abandonedCount
         )
         if newlyDropped {
             notificationState = .dataDropped
@@ -212,6 +213,16 @@ final class HubDeliveryController: ObservableObject {
             queueStatus.queueOverflowCount,
             queueStatus.legacyUnclassifiedCount
         )
+        // Only when it has happened. The Hub refusing an observation this
+        // agent considered valid means the two disagree about the contract,
+        // and that is worth its own line -- but a line reading "given up on:
+        // 0" on every healthy install is noise.
+        if queueStatus.abandonedCount > 0 {
+            pending += " · " + L(
+                "given up on: %lld (after %lld split)", queueStatus.abandonedCount,
+                queueStatus.splitCount
+            )
+        }
         oldestPending = L("Oldest pending: %@", format(queueStatus.oldestPendingAt, fallback: L("none")))
         lastAcknowledged = L("Last acknowledged: %@", format(queueStatus.lastAcknowledgedAt, fallback: L("never")))
     }

@@ -264,6 +264,8 @@ public actor AgentIngestSender {
             guard response.statusCode == 200 else {
                 if response.statusCode >= 500 {
                     scheduleRetry()
+                } else if Self.refusesThePayload(response.statusCode) {
+                    try handleRefusal(of: envelope, statusCode: response.statusCode)
                 } else {
                     sendTask = nil
                     publish(.failed("Hub rejected the pending batch (HTTP \(response.statusCode))"))
@@ -366,6 +368,45 @@ public actor AgentIngestSender {
         encoder.dateEncodingStrategy = .iso8601
         request.httpBody = try encoder.encode(envelope)
         return request
+    }
+
+    /// Whether the status says something about what was sent, rather than
+    /// about the request reaching the Hub at all.
+    ///
+    /// Only these split a batch. A 404 or a 405 is about the address, and
+    /// halving the payload on one of those would abandon observations eight
+    /// batches at a time over a misconfigured URL.
+    static func refusesThePayload(_ statusCode: Int) -> Bool {
+        statusCode == 400 || statusCode == 422
+    }
+
+    /// Halve the refused batch and try again promptly.
+    ///
+    /// The backoff is not extended. It exists to protect a Hub in trouble,
+    /// and this Hub is answering -- it has said no to a payload that is about
+    /// to change. On Windows, letting an eight-step bisection run at the
+    /// 300-second ceiling filled the queue while it searched, and it
+    /// overflowed from the other end (P3-148).
+    private func handleRefusal(of envelope: AgentIngestEnvelope, statusCode: Int) throws {
+        let outcome = try queue.recordRejection(batchID: envelope.batchId)
+        switch outcome {
+        case .split(let remaining):
+            logger.notice(
+                "delivery-batch-split: status=\(statusCode, privacy: .public) remaining=\(remaining, privacy: .public)"
+            )
+        case .abandoned:
+            // The identifier is not logged: it names one of the user's own
+            // connections. The count is in the delivery status.
+            logger.notice(
+                "delivery-observation-abandoned: status=\(statusCode, privacy: .public)"
+            )
+        case .ignored:
+            // A reply about a batch that is no longer in flight. Nothing was
+            // cut, and the next attempt sends whatever is current.
+            logger.notice("delivery-rejection-ignored: not the batch in flight")
+        }
+        failureCount = 0
+        scheduleRetry(minimumDelay: 1)
     }
 
     private func scheduleRetry(minimumDelay: TimeInterval? = nil) {

@@ -142,6 +142,8 @@ final class AgentDiagnosticsExporter {
             unreadableStateResetAt: queue?.unreadableStateResetAt,
             threatIntelSource: String(describing: threatIntel.activeSource),
             contractRejections: queue?.contractRejectionReasons ?? [:],
+            abandonedCount: queue?.abandonedCount ?? 0,
+            splitCount: queue?.splitCount ?? 0,
             // Read fresh rather than held: the export exists to describe a
             // fault, and a copy taken at launch would predate it.
             runHistory: AgentRunRecorder.inAppGroup()?.snapshot() ?? AgentRunHistory(),

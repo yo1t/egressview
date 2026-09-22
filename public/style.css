@@ -830,6 +830,12 @@
   .stats-legend-item:hover, .stats-legend-item:focus-visible { color: var(--text); outline: 1px solid var(--accent); }
   .stats-legend-item.is-selected { color: var(--text); background: rgba(59,130,246,0.16); }
   .stats-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  /* The swatch carries the same stripes as the band, because the band is the
+     only thing on the chart that is not a colour. */
+  .stats-legend-hatch { border-radius: 2px; background:
+    repeating-linear-gradient(45deg, #94a3b8 0 1.5px, rgba(148,163,184,0.12) 1.5px 6px); }
+  .stats-legend-item.is-static { cursor: default; }
+  .stats-legend-item.is-static:hover { color: inherit; outline: none; }
   .stats-timeline-tooltip rect { fill: rgba(5,10,20,0.96); stroke: var(--border); }
   .stats-timeline-tooltip text { fill: var(--text); font: 10px ui-monospace, monospace; }
   /* ── Stats maps (globe + flat) ──────────────────────── */

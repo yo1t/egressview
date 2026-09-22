@@ -20,6 +20,76 @@ final class ObservationStoreTests: XCTestCase {
         )
     }
 
+    // P3-158. Deleting rows does not make the file smaller: SQLite keeps the
+    // pages on a free list. On a real Mac that had reached 30% free -- 93 MB
+    // of a 311.5 MB file -- and stayed there, because nothing ever vacuumed.
+    // From the user's side, they deleted their history and the disk gave
+    // nothing back.
+    func test保持で消した分がファイルから返る() throws {
+        let store = try makeStore()
+        let url = directory.appendingPathComponent("history.sqlite")
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let old = now.addingTimeInterval(-40 * 86_400)
+        // Enough rows that the file is worth measuring, and distinct enough
+        // that the rollup cannot fold them into a handful.
+        try store.append((0..<4_000).map {
+            observation(
+                process: "App\($0 % 200)",
+                remote: "203.0.113.\($0 % 250)",
+                at: old.addingTimeInterval(Double($0) * 7)
+            )
+        })
+        try store.append([observation(at: now)])
+
+        // Everything the store occupies, because in WAL mode the pages live
+        // in the -wal file until a checkpoint and a measurement of the
+        // database file alone would show no change at all.
+        func bytesOnDisk() -> Int64 {
+            ["", "-wal", "-shm"].reduce(0) { total, suffix in
+                let path = url.path + suffix
+                let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size])
+                    .flatMap { ($0 as? NSNumber)?.int64Value } ?? 0
+                return total + size
+            }
+        }
+
+        let before = bytesOnDisk()
+        try store.compact(now: now)
+        let freed = try store.reclaimFreeSpace()
+        let after = bytesOnDisk()
+
+        XCTAssertGreaterThan(freed, 0, "nothing was given back")
+        XCTAssertLessThan(after, before, "the disk did not shrink")
+        XCTAssertEqual(try store.statistics().rawCount, 1, "the surviving row is still there")
+        XCTAssertEqual(
+            try store.reclaimFreeSpace(), 0,
+            "ran a second time with nothing left to reclaim"
+        )
+    }
+
+    // A vacuum writes a second copy of the file before swapping it in. Running
+    // one to recover a few pages costs more than it returns, and on a laptop
+    // it is the moment the disk is most needed.
+    func test空きが少なければ書き直さない() throws {
+        let store = try makeStore()
+        let url = directory.appendingPathComponent("history.sqlite")
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        try store.append((0..<200).map {
+            observation(remote: "203.0.113.\($0 % 250)", at: now.addingTimeInterval(Double($0)))
+        })
+
+        // The database file itself, not the total: a vacuum checkpoints the
+        // -wal into it, so if one ran this size cannot be what it was.
+        func databaseFileSize() -> Int64 {
+            (try? FileManager.default.attributesOfItem(atPath: url.path)[.size])
+                .flatMap { ($0 as? NSNumber)?.int64Value } ?? -1
+        }
+        let before = databaseFileSize()
+
+        XCTAssertEqual(try store.reclaimFreeSpace(), 0)
+        XCTAssertEqual(databaseFileSize(), before, "the file was rewritten for nothing")
+    }
+
     private func observation(
         process: String = "Safari",
         remote: String = "203.0.113.5",

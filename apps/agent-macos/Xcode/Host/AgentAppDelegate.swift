@@ -470,10 +470,20 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private func applyRetentionPolicy(days: Int? = nil) {
         let days = days ?? ObservationWindowController.configuredRetentionDays
         guard let store else { return }
+        let logger = self.logger
         historyMaintenanceQueue.async { [weak self] in
             do {
                 store.setRetention(ObservationRetention(retentionDays: days, rawDays: 14))
                 try store.compact()
+                // After the deletes, not before: the free pages this reclaims
+                // are the ones `compact` just made. Deleting rows leaves the
+                // file the size it was, so without this the user deletes
+                // their history and the disk does not give anything back
+                // (P3-158).
+                let freed = try store.reclaimFreeSpace()
+                if freed > 0 {
+                    logger.notice("reclaimed \(freed, privacy: .public) bytes of free pages")
+                }
             } catch {
                 DispatchQueue.main.async {
                     self?.recordStorageError(error.localizedDescription)
