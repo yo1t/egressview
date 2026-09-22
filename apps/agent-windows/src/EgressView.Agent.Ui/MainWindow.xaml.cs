@@ -319,9 +319,16 @@ public partial class MainWindow : Window
             new[] { coverageNote, sleepNote, unmeasuredNote }.Where(value => value.Length > 0));
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
-        Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods, data.BucketCount);
+        Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods, data.BucketCount, data.MonitoringGaps);
         DescribeCharts(data);
         SleepLegend.Visibility = data.SleepPeriods.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        // The legend says how much, because the band alone cannot: a gap
+        // drawn at its minimum width looks the same whether it lasted ten
+        // seconds or three minutes.
+        MonitoringGapLegend.Visibility = data.MonitoringGaps.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        if (data.MonitoringGaps.Count > 0)
+            MonitoringGapLegendText.Text = string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("MonitoringGapLegend"), FormatDuration(data.MonitoringGapSeconds));
         FlowCaption.Text = IsByteMetric ? LocalizationManager.Text("RibbonBytes") : LocalizationManager.Text("RibbonConnections");
         TimelineCaption.Text = IsByteMetric ? LocalizationManager.Text("TimelineBytes") : LocalizationManager.Text("TimelineTotal");
         AutomationProperties.SetHelpText(FlowDiagram, FlowCaption.Text);
