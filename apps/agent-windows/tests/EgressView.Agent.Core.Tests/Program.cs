@@ -1001,6 +1001,61 @@ try
         }
     }
 
+    // What the Agent is doing while it cannot say anything. A migration runs
+    // inside the store's constructor, so the pipe does not exist yet; the file
+    // beside the database is the only thing a window can read.
+    {
+        var progressDb = Path.Combine(directory, "progress.db");
+        Assert(MigrationProgress.Read(progressDb) is null,
+            "a database that is not being migrated reports nothing");
+
+        var at = DateTimeOffset.UtcNow;
+        MigrationProgress.Write(progressDb, new(25, 26, MigrationProgress.MovingRows, 31_387_127, at));
+        var read = MigrationProgress.Read(progressDb);
+        Assert(read is { FromVersion: 25, ToVersion: 26, Rows: 31_387_127 }
+               && read.Phase == MigrationProgress.MovingRows,
+            "and one that is reports the versions, the phase and how much there is to move");
+        // The scale of the wait is the point. "43%" invites watching a number
+        // that does not move for a minute at a time.
+        Assert(read!.Rows > 0, "the row count is what makes the wait explicable");
+
+        MigrationProgress.Clear(progressDb);
+        Assert(MigrationProgress.Read(progressDb) is null, "and it stops reporting once the schema is whole");
+
+        // The window is in ui\ and the service in service\, both under one
+        // installation root, so the file can be found without a registry key.
+        var located = MigrationProgress.ServiceDatabaseFrom(@"C:\Program Files\EgressView Agent\ui\");
+        Assert(located.EndsWith(Path.Combine("service", "data", "egressview-agent.db"), StringComparison.OrdinalIgnoreCase)
+               && !located.Contains(@"ui\", StringComparison.OrdinalIgnoreCase),
+            $"the window finds the service's database beside its own directory, not {located}");
+    }
+
+    // A real migration writes it. The v1 fixture goes through every version,
+    // so it passes the phase that takes the time.
+    {
+        var watched = Path.Combine(directory, "watched-v1.db");
+        ObservationStore.CreateVersion1FixtureForTesting(watched);
+        var reported = new List<MigrationProgress>();
+        using (var migrating = new ObservationStore(watched, reported.Add))
+            Assert(migrating.SchemaVersion == 26, "the fixture migrated");
+
+        var moving = reported.SingleOrDefault(step => step.Phase == MigrationProgress.MovingRows);
+        Assert(moving is not null, "the phase that takes the time says so before it starts");
+        // Four, because the fixture has four. A report of zero reads as "this
+        // will be quick" for a wait that is anything but, and a number nobody
+        // checks is a number that drifts to zero.
+        Assert(moving!.Rows == 4,
+            $"and says how many rows there are to move, not {moving.Rows}");
+        Assert(moving.ToVersion == 26 && moving.FromVersion == 25,
+            "and which version it is moving them to");
+        Assert(reported.Any(step => step.Phase == MigrationProgress.BackingUp),
+            "the copy that happens first is reported first");
+        Assert(MigrationProgress.Read(watched) is null,
+            "a finished migration leaves nothing behind for the window to misread as ongoing");
+        Assert(!File.Exists(MigrationProgress.PathFor(watched)),
+            "and the file itself is gone");
+    }
+
     var liveSnapshot = StartupSnapshot.Capture();
     Assert(liveSnapshot.Where(flow => flow.Protocol == "TCP").All(flow => flow.RemotePort > 0),
         "TCP startup snapshot excludes listeners");

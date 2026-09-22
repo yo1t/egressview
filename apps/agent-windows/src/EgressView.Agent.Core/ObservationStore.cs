@@ -398,8 +398,18 @@ public sealed partial class ObservationStore : IDisposable
     /// diagnostics say which question was actually answered.
     public bool IntegrityCheckWasDeep { get; private set; }
 
-    public ObservationStore(string path)
+    /// Told what each migration is doing, as it starts doing it.
+    ///
+    /// The file beside the database is what a window reads, and a window is a
+    /// hard thing to assert. This is the same report, handed to whoever asked
+    /// for it: without it, nothing checks that the number written down is the
+    /// number of rows there actually are, and a migration that reported zero
+    /// would look exactly like one that reported the truth.
+    private readonly Action<MigrationProgress>? onMigration;
+
+    public ObservationStore(string path, Action<MigrationProgress>? onMigration = null)
     {
+        this.onMigration = onMigration;
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         this.path = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(this.path)!);
@@ -455,6 +465,7 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 24) { MigrateVersion24To25(); version = 25; }
         if (version == 25) MigrateVersion25To26();
         ValidateSchema();
+        MigrationProgress.Clear(path);
         PruneMigrationBackups(CurrentSchemaVersion);
     }
 
@@ -769,6 +780,8 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute("BEGIN IMMEDIATE");
             Execute(Version26Schema);
+            ReportMigration(26, MigrationProgress.MovingRows,
+                ScalarInt64("SELECT COUNT(*) FROM observations"));
             // Flows arrived in v2. An observation older than that has nothing
             // to point at, and so does one whose flow retention removed first.
             //
@@ -819,8 +832,20 @@ public sealed partial class ObservationStore : IDisposable
         var backup = $"{path}.pre-v{targetVersion}.bak";
         if (File.Exists(backup)) return backup;
         EnsureFreeSpaceForCopy();
+        // Said before it starts, not after. On the machine this was measured
+        // on the copy took fifteen seconds of the hundred and fifty, and a
+        // reader watching nothing happen cannot tell which part they are in.
+        ReportMigration(targetVersion, MigrationProgress.BackingUp, 0);
         Execute($"VACUUM INTO '{Sql(backup)}'");
         return backup;
+    }
+
+    /// Writes down what this migration is doing, for a window that cannot ask.
+    private void ReportMigration(int targetVersion, string phase, long rows)
+    {
+        var progress = new MigrationProgress(targetVersion - 1, targetVersion, phase, rows, DateTimeOffset.UtcNow);
+        MigrationProgress.Write(path, progress);
+        onMigration?.Invoke(progress);
     }
 
     private void EnsureFreeSpaceForCopy()

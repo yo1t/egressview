@@ -150,6 +150,28 @@ internal static class Entry
         }
         Console.WriteLine("duration formatting: seconds stay seconds");
 
+        // "Cannot read state" is what the window says when the service is
+        // broken, and it was also what it said during a two and a half minute
+        // migration. Only one of those is worth acting on.
+        {
+            var db = MigrationProgress.ServiceDatabaseFrom(AppContext.BaseDirectory);
+            Directory.CreateDirectory(Path.GetDirectoryName(db)!);
+            MigrationProgress.Clear(db);
+            var broken = MainWindow.UnavailableText("cannot-read-state");
+            if (broken != "cannot-read-state")
+                throw new InvalidOperationException(
+                    $"with no migration in progress the window keeps its own message, not \"{broken}\"");
+
+            MigrationProgress.Write(db, new(25, 26, MigrationProgress.MovingRows, 31_387_127, DateTimeOffset.UtcNow));
+            var migrating = MainWindow.UnavailableText("cannot-read-state");
+            MigrationProgress.Clear(db);
+            if (migrating == "cannot-read-state")
+                throw new InvalidOperationException("a migration in progress still reads as a broken service");
+            if (!migrating.Contains("31,387,127", StringComparison.Ordinal))
+                throw new InvalidOperationException($"and it does not say how much there is to move: \"{migrating}\"");
+            Console.WriteLine("unavailable text: a migration is not a broken service");
+        }
+
         var timelineStart = new DateTimeOffset(2026, 9, 6, 10, 0, 0, TimeSpan.FromHours(9));
         var timeline = new List<AppTimelineAggregate>();
         var applications = new[] { "chrome", "codex", "svchost", "tailscaled", "zabbix_agent2", "Other" };
