@@ -40,10 +40,20 @@ describe('stats chart layout', () => {
     assert.match(charts, /timeline-selected/);
   });
 
-  it('keeps the timeline to five named destinations plus Other', () => {
+  it('keeps the timeline to ten named destinations plus Other', () => {
     const stats = fs.readFileSync(path.join(root, 'public/js/stats.js'), 'utf8');
-    const limits = [...stats.matchAll(/const topN = (\d+);/g)].map(match => Number(match[1]));
 
-    assert.deepEqual(limits, [5, 5]);
+    assert.match(stats, /const TIMELINE_TARGET_LIMIT = 10;/);
+    assert.equal((stats.match(/slice\(0, TIMELINE_TARGET_LIMIT\)/g) || []).length, 2);
+  });
+
+  it('lets bars and destination labels toggle comparison mode', () => {
+    const charts = fs.readFileSync(path.join(root, 'public/js/stats-charts.js'), 'utf8');
+
+    assert.match(charts, /selectedTimelineTarget === target/);
+    assert.match(charts, /activateChartMode\('composition'\)/);
+    assert.match(charts, /classed\('stats-destination-tick'/);
+    assert.ok((charts.match(/selectTimelineTarget\(d\[0\]\)/g) || []).length >= 2,
+      'the bar and its value path should share the selection action');
   });
 });

@@ -22,6 +22,12 @@ function activateChartMode(mode) {
 }
 
 export function selectTimelineTarget(target) {
+  if (chartMode === 'compare' && selectedTimelineTarget === target) {
+    selectedTimelineTarget = null;
+    activateChartMode('composition');
+    chartModeChanged?.();
+    return;
+  }
   selectedTimelineTarget = target;
   activateChartMode('compare');
   chartModeChanged?.();
@@ -234,7 +240,11 @@ export function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
         .attr('fill-opacity', 0.85);
     }
   } else {
-    if (!visibleLabels.includes(selectedTimelineTarget)) {
+    // Keep the person's target even when it has no recorded windows in this
+    // period. Replacing it with the first non-zero target makes the highlight
+    // disagree with the clicked row and prevents a second click from clearing
+    // the comparison. An empty selected series is an honest zero comparison.
+    if (!selectedTimelineTarget || !series.has(selectedTimelineTarget)) {
       selectedTimelineTarget = visibleLabels.find(label => label !== '__other__') || visibleLabels[0] || null;
     }
     const selected = selectedTimelineTarget ? series.get(selectedTimelineTarget) : new Array(buckets).fill(0);
@@ -346,16 +356,32 @@ export function drawBarChart(orgs /* [[name, count], ...] */, selectableTargets 
   const selectable = new Set(selectableTargets);
 
   // Labels (truncate long names; show full name via title)
-  g.append('g').attr('class', 'stats-axis').call(
+  const labelAxis = g.append('g').attr('class', 'stats-axis').call(
     d3.axisLeft(yScale).tickSize(0).tickFormat(d => truncateLabel(d, labelMax))
-  ).selectAll('text')
+  );
+  labelAxis.selectAll('text')
     .style('font-size', isMobile ? '9px' : '10px')
     .append('title').text(d => d);
+  labelAxis.selectAll('.tick')
+    .classed('stats-destination-tick', d => selectable.has(d))
+    .classed('is-selected', d => chartMode === 'compare' && d === selectedTimelineTarget)
+    .attr('data-stats-target', d => selectable.has(d) ? d : null)
+    .attr('tabindex', d => selectable.has(d) ? 0 : null)
+    .attr('role', d => selectable.has(d) ? 'button' : null)
+    .attr('aria-label', d => selectable.has(d) ? `${d}: ${orgs.find(row => row[0] === d)?.[1] || 0}` : null)
+    .on('click', (_, d) => { if (selectable.has(d)) selectTimelineTarget(d); })
+    .on('keydown', (event, d) => {
+      if (selectable.has(d) && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        selectTimelineTarget(d);
+      }
+    });
 
   // Bars
   g.selectAll('rect').data(orgs).join('rect')
     .attr('class', 'stats-bar')
     .classed('is-selected', d => chartMode === 'compare' && d[0] === selectedTimelineTarget)
+    .attr('data-stats-target', d => selectable.has(d[0]) ? d[0] : null)
     .attr('x', 0)
     .attr('y', d => yScale(d[0]))
     .attr('height', yScale.bandwidth())

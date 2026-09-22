@@ -1573,9 +1573,35 @@ test('stats timeline uses discrete windows and compares one destination with the
   await expect(page.locator('#chart-timeline .stack-area, #chart-timeline .stats-line')).toHaveCount(0);
   await expect(page.locator('.chart-mode-btn[data-mode="composition"]')).toHaveClass(/active/);
 
-  await page.locator('.chart-mode-btn[data-mode="compare"]').click();
+  const selectableBars = page.locator('#chart-bar .stats-bar[role="button"]');
+  const selectableLabels = page.locator('#chart-bar .stats-destination-tick[role="button"]');
+  await expect.poll(() => selectableBars.count()).toBeGreaterThan(0);
+  await expect(selectableLabels).toHaveCount(await selectableBars.count());
+  expect(await selectableBars.count()).toBeLessThanOrEqual(10);
+
+  const selectedTarget = await selectableLabels.first().getAttribute('data-stats-target');
+  const selectedLabel = () => page.locator('#chart-bar .stats-destination-tick').evaluateAll((elements, target) => {
+    const match = elements.find(element => element.getAttribute('data-stats-target') === target);
+    if (!match) throw new Error(`Missing destination label for ${target}`);
+    match.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  }, selectedTarget);
+  await selectedLabel();
+  await expect(page.locator('.chart-mode-btn[data-mode="compare"]')).toHaveClass(/active/);
   await expect.poll(() => page.locator('#chart-timeline .timeline-total').count()).toBeGreaterThan(0);
   await expect.poll(() => page.locator('#chart-timeline .timeline-selected').count()).toBeGreaterThan(0);
+
+  // Selecting the same destination again returns to the composition chart.
+  await selectedLabel();
+  await expect(page.locator('.chart-mode-btn[data-mode="composition"]')).toHaveClass(/active/);
+  await expect(page.locator('#chart-timeline .timeline-selected')).toHaveCount(0);
+
+  // The bar itself uses the same selection path as its hostname/IP label.
+  await page.locator('#chart-bar .stats-bar').evaluateAll((elements, target) => {
+    const match = elements.find(element => element.getAttribute('data-stats-target') === target);
+    if (!match) throw new Error(`Missing destination bar for ${target}`);
+    match.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  }, selectedTarget);
+  await expect(page.locator('.chart-mode-btn[data-mode="compare"]')).toHaveClass(/active/);
 
   await windows.first().focus();
   await expect(page.locator('#chart-timeline .stats-timeline-tooltip')).toHaveAttribute('visibility', 'visible');

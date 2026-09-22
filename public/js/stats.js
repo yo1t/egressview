@@ -124,6 +124,8 @@ function showTimelineBasis(summary) {
     : '';
 }
 
+const TIMELINE_TARGET_LIMIT = 10;
+
 function renderStatsSummary(summary, selIp) {
   const targetRows = statsTargetRows(summary);
   if (!targetRows.length && !(summary.total > 0)) {
@@ -136,8 +138,7 @@ function renderStatsSummary(summary, selIp) {
 
   const isMobile = window.matchMedia('(max-width: 768px)').matches;
   const sortedTargets = targetRows.map(r => [r.key, r.count]);
-  const topN = 5;
-  const topTargets = sortedTargets.slice(0, topN).map(([key]) => key);
+  const topTargets = sortedTargets.slice(0, TIMELINE_TARGET_LIMIT).map(([key]) => key);
   drawBarChart(isMobile ? sortedTargets.slice(0, 15) : sortedTargets, topTargets);
 
   const buckets = summary.buckets || 60;
@@ -193,8 +194,7 @@ function renderStatsFromLocalConnections(selIp) {
     orgCounts.set(key, (orgCounts.get(key) || 0) + 1);
   }
   const sortedOrgs = [...orgCounts.entries()].sort((a,b) => b[1] - a[1]);
-  const topN = 5;
-  const topOrgs = sortedOrgs.slice(0, topN).map(e => e[0]);
+  const topOrgs = sortedOrgs.slice(0, TIMELINE_TARGET_LIMIT).map(e => e[0]);
 
   drawBarChart(isMobile ? sortedOrgs.slice(0, 15) : sortedOrgs, topOrgs);
 
