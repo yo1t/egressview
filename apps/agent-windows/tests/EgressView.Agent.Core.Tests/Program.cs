@@ -386,6 +386,24 @@ try
     if (Environment.GetEnvironmentVariable("RUN_AGENT_UPDATE_LIVE") == "1")
     {
         using var live = new WindowsAgentUpdateClient();
+
+        // The whole of "check for updates", against what is actually
+        // published, minus the mouse. A build old enough that anything
+        // published is newer reaches the state the button belongs to.
+        var offered = await live.CheckAsync("0.0.1", "10.0.26100");
+        Assert(offered.Kind == AgentUpdateDecisionKind.DownloadManually,
+            $"the live release is offered as a manual download, not as {offered.Kind}");
+        Assert(offered.PublishedVersion is { Length: > 0 },
+            "and it says which version it is offering");
+        Console.WriteLine($"live: {offered.PublishedVersion} is offered as {offered.Kind}");
+
+        // The same client on the published build. A release that tells its own
+        // version it is out of date is an update loop, and that is exactly how
+        // 0.5.49 would have behaved if its packages had shipped.
+        var current = await live.CheckAsync(offered.PublishedVersion!, "10.0.26100");
+        Assert(current.Kind == AgentUpdateDecisionKind.UpToDate,
+            $"and the published version is up to date with itself, not {current.Kind}");
+
         using var browser = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         using var page = await browser.GetAsync(live.DownloadPage);
         Assert(page.IsSuccessStatusCode,
