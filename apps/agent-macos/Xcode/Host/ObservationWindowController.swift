@@ -213,7 +213,8 @@ struct AgentMainView: View {
                             .frame(width: metrics.sankeyWidth)
                         AgentTimelineChart(
                             model: model.timeline, scale: model.scale,
-                            sleepPeriods: model.sleepPeriods
+                            sleepPeriods: model.sleepPeriods,
+                            monitoringGaps: model.coverage.gaps
                         )
                             .frame(maxWidth: .infinity)
                     }

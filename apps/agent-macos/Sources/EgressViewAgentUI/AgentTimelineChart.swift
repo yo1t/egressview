@@ -11,11 +11,26 @@ public struct AgentTimelineChart: View {
     /// stretch of chart, and an empty chart reads as "nothing happened" rather
     /// than "the Mac was not running".
     var sleepPeriods: [DateInterval] = []
+    /// Stretches the Mac was awake and nothing was recorded. Hatched behind the
+    /// bars, because an outage drawn as empty chart is indistinguishable from
+    /// quiet minutes -- and for a product that says it records what left this
+    /// Mac, "no record" and "no traffic" are opposite claims.
+    ///
+    /// Sleep has been drawn since the band above existed. Without this, the
+    /// time the user chose to stop was visible and the time the machine
+    /// crashed was not, though to the user both are the same unknown.
+    var monitoringGaps: [DateInterval] = []
 
-    public init(model: TimelineModel, scale: TimeScale, sleepPeriods: [DateInterval] = []) {
+    public init(
+        model: TimelineModel,
+        scale: TimeScale,
+        sleepPeriods: [DateInterval] = [],
+        monitoringGaps: [DateInterval] = []
+    ) {
         self.model = model
         self.scale = scale
         self.sleepPeriods = sleepPeriods
+        self.monitoringGaps = monitoringGaps
     }
 
     public var body: some View {
@@ -30,7 +45,10 @@ public struct AgentTimelineChart: View {
                         : L("No connections in this period.")
                 )
             } else {
-                AgentTimelinePlot(model: model, scale: scale, sleepPeriods: sleepPeriods)
+                AgentTimelinePlot(
+                    model: model, scale: scale,
+                    sleepPeriods: sleepPeriods, monitoringGaps: monitoringGaps
+                )
                     // A Canvas is hit-tested where it drew, so the gaps
                     // between bars are not part of it and a pointer lands on
                     // nothing. The globe is an NSView and gets a solid frame
@@ -59,6 +77,17 @@ public struct AgentTimelineChart: View {
                             )
                             .frame(width: 18, height: 10)
                         Text(L("Shaded: the Mac was asleep. Traffic during sleep is not recorded."))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                if !monitoringGaps.isEmpty {
+                    // An unexplained hatched band is worse than none, for the
+                    // same reason the sleep band has a line of its own.
+                    HStack(spacing: 6) {
+                        AgentMonitoringGapKey()
+                            .frame(width: 18, height: 10)
+                        Text(L("Hatched: nothing was recorded here. Traffic in that time is unknown."))
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -104,6 +133,7 @@ struct AgentTimelinePlot: View {
     let model: TimelineModel
     let scale: TimeScale
     let sleepPeriods: [DateInterval]
+    var monitoringGaps: [DateInterval] = []
 
     var body: some View {
         Canvas { context, size in draw(in: &context, size: size) }
@@ -137,6 +167,26 @@ struct AgentTimelinePlot: View {
 
     /// Kept in one place so the band and its key cannot drift apart.
     static let sleepColor = Color.blue
+
+    /// The distance between the diagonal strokes that mark missing time.
+    static let hatchSpacing: CGFloat = 6
+
+    /// The narrowest a gap may be drawn: one stroke's worth.
+    ///
+    /// Thirty seconds in six hours is a seventh of a percent of the width --
+    /// under a pixel, drawn to scale. An outage that rounds away is the whole
+    /// defect: the chart goes back to showing no traffic for a stretch it knows
+    /// nothing about.
+    ///
+    /// The floor is the hatch spacing rather than something smaller that would
+    /// also survive a pixel comparison. Narrower than one stroke the band stops
+    /// being hatching and becomes a tick -- detectable by a test, but no longer
+    /// the pattern that means "no record" everywhere else. Being legible and
+    /// being detectable are not the same bar.
+    ///
+    /// It overstates a very short gap, which is the right way to be wrong here:
+    /// the band says a gap is there, and the coverage figure says how much.
+    static let minimumGapWidth: CGFloat = hatchSpacing
 
     private func drawSleep(in context: inout GraphicsContext, plot: CGRect) {
         guard !sleepPeriods.isEmpty, let first = model.bucketStarts.first,
@@ -174,6 +224,55 @@ struct AgentTimelinePlot: View {
         }
     }
 
+    /// Draws the stretches with no record as diagonal hatching.
+    ///
+    /// Hatching rather than another translucent wash: a flat fill reads as a
+    /// faint value, and the point is that there is no value here. It goes
+    /// behind the bars, so a bucket that is only part covered still shows the
+    /// traffic it did record over the hatched part of itself.
+    ///
+    /// Grey, not the sleep band's blue. They mean different things and the
+    /// chart says so twice: different colour, different fill.
+    private func drawMonitoringGaps(in context: inout GraphicsContext, plot: CGRect) {
+        guard !monitoringGaps.isEmpty, let first = model.bucketStarts.first,
+              model.bucketDuration > 0, model.bucketStarts.count > 1 else { return }
+        let span = model.bucketDuration * Double(model.bucketStarts.count)
+        guard span > 0 else { return }
+        for gap in monitoringGaps {
+            let startFraction = max(0, min(1, gap.start.timeIntervalSince(first) / span))
+            let endFraction = max(0, min(1, gap.end.timeIntervalSince(first) / span))
+            guard endFraction >= startFraction else { continue }
+            let width = max(Self.minimumGapWidth, plot.width * CGFloat(endFraction - startFraction))
+            // A gap ending at the right edge must not be pushed past it by the
+            // minimum width, or it stops lining up with its own time.
+            let x = min(
+                plot.minX + plot.width * CGFloat(startFraction),
+                plot.maxX - width
+            )
+            let rect = CGRect(x: x, y: plot.minY, width: width, height: plot.height)
+            context.fill(Path(rect), with: .color(.secondary.opacity(0.10)))
+
+            var hatch = Path()
+            var offset = -plot.height
+            while offset < width {
+                hatch.move(to: CGPoint(x: rect.minX + offset, y: rect.maxY))
+                hatch.addLine(to: CGPoint(x: rect.minX + offset + plot.height, y: rect.minY))
+                offset += Self.hatchSpacing
+            }
+            context.drawLayer { layer in
+                layer.clip(to: Path(rect))
+                layer.stroke(hatch, with: .color(.secondary.opacity(0.55)), lineWidth: 1)
+            }
+
+            var edges = Path()
+            edges.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            edges.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            edges.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+            edges.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            context.stroke(edges, with: .color(.secondary.opacity(0.75)), lineWidth: 1)
+        }
+    }
+
     /// The same ceiling the card's clipped-peak note talks about.
     private var axis: TimelineAxis { TimelineAxis.fit(totals: model.bucketTotals) }
 
@@ -197,6 +296,7 @@ struct AgentTimelinePlot: View {
         // Behind everything else: the sleep is the background the bars sit on,
         // not a thing drawn over them.
         drawSleep(in: &context, plot: plot)
+        drawMonitoringGaps(in: &context, plot: plot)
         let step = plot.width / CGFloat(model.bucketStarts.count)
         var baselines = [CGFloat](repeating: plot.maxY, count: model.bucketStarts.count)
 
@@ -252,5 +352,31 @@ struct AgentTimelinePlot: View {
             let clamped = position == 0 ? plot.minX : (position == 2 ? plot.maxX : x)
             context.draw(label, at: CGPoint(x: clamped, y: plot.maxY + xAxisHeight / 2), anchor: anchor)
         }
+    }
+}
+
+/// The key for the hatched band, drawn the same way the band is.
+///
+/// A plain swatch would have to be a flat fill, which is the thing the band
+/// deliberately is not -- a key that does not look like what it explains sends
+/// the reader back to the chart no wiser.
+struct AgentMonitoringGapKey: View {
+    var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size)
+            context.fill(Path(rect), with: .color(.secondary.opacity(0.10)))
+            var hatch = Path()
+            var offset = -size.height
+            while offset < size.width {
+                hatch.move(to: CGPoint(x: offset, y: size.height))
+                hatch.addLine(to: CGPoint(x: offset + size.height, y: 0))
+                offset += AgentTimelinePlot.hatchSpacing
+            }
+            context.clip(to: Path(rect))
+            context.stroke(hatch, with: .color(.secondary.opacity(0.55)), lineWidth: 1)
+        }
+        .overlay(
+            Rectangle().strokeBorder(.secondary.opacity(0.75), lineWidth: 1)
+        )
     }
 }
