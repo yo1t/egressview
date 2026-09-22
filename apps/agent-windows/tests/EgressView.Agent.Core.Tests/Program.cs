@@ -977,6 +977,30 @@ try
             "sleep disclosure is clipped to the selected chart period");
     }
 
+    // A privacy claim the screen makes about its own network use. The card
+    // used to carry both "this sends watched addresses outside", in a warning
+    // under the radio buttons, and "observed destinations are never sent", in
+    // the summary above them -- and the wrong one was the summary.
+    {
+        var none = EnrichmentDisclosure.Describe(false, false, false, "ipwho", "feeds", "maxmind");
+        Assert(none.Key == EnrichmentDisclosure.HubOnlyKey && none.Sources.Count == 0,
+            "with nothing fetched directly, the screen may say the Hub is the only source");
+
+        var downloads = EnrichmentDisclosure.Describe(false, true, true, "ipwho", "feeds", "maxmind");
+        Assert(downloads.Key == EnrichmentDisclosure.DownloadOnlyKey
+               && downloads.Sources.SequenceEqual(["feeds", "maxmind"]),
+            "sources that only download may be described as downloads");
+
+        foreach (var (feeds, table) in new[] { (false, false), (true, false), (false, true), (true, true) })
+        {
+            var outside = EnrichmentDisclosure.Describe(true, feeds, table, "ipwho", "feeds", "maxmind");
+            Assert(outside.Key == EnrichmentDisclosure.SendsAddressesKey,
+                $"the third-party lookup is never described as download-only (feeds={feeds}, table={table})");
+            Assert(outside.Sources.Contains("ipwho"),
+                "and the source that is sent addresses is named");
+        }
+    }
+
     var liveSnapshot = StartupSnapshot.Capture();
     Assert(liveSnapshot.Where(flow => flow.Protocol == "TCP").All(flow => flow.RemotePort > 0),
         "TCP startup snapshot excludes listeners");
