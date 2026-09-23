@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
+const { Worker } = require('worker_threads');
 const backupInventory = require('./backup-inventory');
 const { BackupPruneRunner, DEFAULT_TIMEOUT_MS } = require('./backup-prune-runner');
 
@@ -114,18 +115,42 @@ function removeSidecars(dbPath) {
 }
 
 function replaceDbAtomically(sourcePath) {
-  const tempPath = `${DB_PATH}.restore-${crypto.randomBytes(6).toString('hex')}.tmp`;
+  const id = crypto.randomBytes(6).toString('hex');
+  const tempPath = `${DB_PATH}.restore-${id}.tmp`;
+  // The replaced database's -wal and -shm leave *before* the swap. Removed
+  // after it (as this used to), a failure in between left the restored file
+  // beside the old -wal, and SQLite replays a -wal into whatever main file it
+  // sits next to (db-restore.js has the same rule for the startup restore).
+  const asidePrefix = `${DB_PATH}.replaced-${id}`;
+  const movedAside = [];
   try {
     fs.copyFileSync(sourcePath, tempPath);
     fs.chmodSync(tempPath, 0o600);
     verifyDbFile(tempPath);
+    for (const suffix of ['-wal', '-shm']) {
+      if (!fs.existsSync(DB_PATH + suffix)) continue;
+      fs.renameSync(DB_PATH + suffix, asidePrefix + suffix);
+      movedAside.push(suffix);
+    }
     fs.renameSync(tempPath, DB_PATH);
-    removeSidecars(DB_PATH);
-    verifyDbFile(DB_PATH);
-    removeSidecars(DB_PATH);
+  } catch (error) {
+    for (const suffix of movedAside.slice().reverse()) {
+      try { fs.renameSync(asidePrefix + suffix, DB_PATH + suffix); } catch (restoreError) {
+        logger.error(`[backup] Could not put ${path.basename(DB_PATH + suffix)} back; `
+          + `it is kept at ${path.basename(asidePrefix + suffix)}: ${restoreError.message}`);
+      }
+    }
+    throw error;
   } finally {
     try { fs.unlinkSync(tempPath); } catch {}
   }
+  // Swapped. What was moved aside belonged to the database just replaced,
+  // whose content is in the safety backup every restore takes first.
+  for (const suffix of movedAside) {
+    try { fs.unlinkSync(asidePrefix + suffix); } catch {}
+  }
+  verifyDbFile(DB_PATH);
+  removeSidecars(DB_PATH);
 }
 
 // Create a backup of the DB using SQLite's online backup API.
@@ -149,36 +174,41 @@ function removeWithSidecars(filePath) {
   }
 }
 
+// How long a backup copy may take before it is abandoned. On the production
+// Hub a verified 3.6 GB copy took 8 min 38 s (the pre-migration backup of
+// 2026-09-22); an hour leaves room for a slower disk without letting a stuck
+// copy hold its single-flight slot forever.
+const BACKUP_COPY_TIMEOUT_MS = 60 * 60 * 1000;
+
 /**
- * Whether a freshly written copy is the whole of its source.
+ * Copies and verifies on a worker thread (backup-copy.js), so the main
+ * thread -- which serves the UI and is watched by the watchdog -- only waits.
  *
- * `verifyDbFile` alone is not enough: an empty file passes `integrity_check`
- * as an empty database. So the copy must also be as long as the pages it
- * declares, on the same schema version, and hold every table the source
- * holds -- which is also what rules out an empty copy, since it has none.
+ * @returns {Promise<{ ok: boolean, error?: string, bytes?: number, copiedMs?: number, verifiedMs?: number }>}
  */
-function verifyCompleteCopy(copyPath, source) {
-  const size = fs.statSync(copyPath).size;
-  verifyDbFile(copyPath);
-  const copy = new Database(copyPath, { readonly: true, fileMustExist: true });
-  try {
-    const declared = copy.pragma('page_size', { simple: true }) * copy.pragma('page_count', { simple: true });
-    if (declared !== size) throw new Error(`the copy is ${size} bytes but declares ${declared}`);
-    const version = copy.pragma('user_version', { simple: true });
-    const sourceVersion = source.pragma('user_version', { simple: true });
-    if (version !== sourceVersion) {
-      throw new Error(`the copy is schema v${version}, the source v${sourceVersion}`);
-    }
-    const tables = db => new Set(db.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table'"
-    ).all().map(row => row.name));
-    const have = tables(copy);
-    const missing = [...tables(source)].filter(name => !have.has(name));
-    if (missing.length) throw new Error(`the copy is missing ${missing.join(', ')}`);
-  } finally {
-    copy.close();
-  }
+function copyOnWorker(source, destination, { timeoutMs = BACKUP_COPY_TIMEOUT_MS } = {}) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const worker = new Worker(path.join(__dirname, 'backup-copy-worker.js'), {
+      workerData: { source, destination },
+    });
+    const timer = setTimeout(() => {
+      finish({ ok: false, error: `the copy did not finish within ${Math.round(timeoutMs / 60000)} minutes` });
+      worker.terminate().catch(() => {});
+    }, timeoutMs);
+    worker.once('message', finish);
+    worker.once('error', error => finish({ ok: false, error: error.message }));
+    worker.once('exit', code => finish({ ok: false, error: `the copy worker exited with code ${code}` }));
+  });
 }
+
+let copyImpl = copyOnWorker;
 
 async function runBackup({ capacityPruned = false } = {}) {
   if (!fs.existsSync(DB_PATH)) {
@@ -210,26 +240,13 @@ async function runBackup({ capacityPruned = false } = {}) {
   // file and before filling it leaves something that looks like a backup to
   // everything that reads the directory -- including the startup restore.
   const partialPath = `${backupPath}.partial`;
-  let src = null;
   try {
-    src = new Database(DB_PATH, { fileMustExist: true });
-    await src.backup(partialPath);
-    verifyCompleteCopy(partialPath, src);
-    // Opening the copy to check it makes SQLite create a -shm beside it (the
-    // copy keeps the source's WAL mode). Renaming only the main file left
-    // those behind; the production backup of 2026-09-23 had both. Nothing
-    // wrote to the copy, so they carry nothing -- a -wal that does is a
-    // reason to stop, not to delete it.
-    for (const suffix of ['-wal', '-shm']) {
-      const sidecar = partialPath + suffix;
-      if (!fs.existsSync(sidecar)) continue;
-      if (suffix === '-wal' && fs.statSync(sidecar).size > 0) {
-        throw new Error('the copy has a non-empty -wal after being read');
-      }
-      fs.unlinkSync(sidecar);
-    }
+    const copy = await copyImpl(DB_PATH, partialPath);
+    if (!copy.ok) throw new Error(copy.error || 'the copy failed');
     fs.renameSync(partialPath, backupPath);
-    logger.info(`[backup] Created: ${backupName}`);
+    logger.info(`[backup] Created: ${backupName} (${copy.bytes ?? '?'} bytes; `
+      + `copied in ${((copy.copiedMs ?? 0) / 1000).toFixed(1)} s, verified in ${((copy.verifiedMs ?? 0) / 1000).toFixed(1)} s, `
+      + 'off the main thread)');
     if (autoPrune) {
       try {
         const job = startPruneJob({ execute: true, source: 'automatic' });
@@ -245,8 +262,6 @@ async function runBackup({ capacityPruned = false } = {}) {
     logger.error('[backup] Failed:', err.message);
     removeWithSidecars(partialPath);
     return null;
-  } finally {
-    if (src) { try { src.close(); } catch {} }
   }
 }
 
@@ -473,7 +488,13 @@ function _setPathsForTest(dbPath, backupDir) {
   maxBackupBytes      = 0;
   autoPrune           = false;
   freeBytesOverride   = null;
+  copyImpl            = copyOnWorker;
   stopPeriodicBackup();
+}
+
+/** Replaces the copy step, for tests that need a copy to hang or fail. */
+function _setCopyForTest(fn) {
+  copyImpl = fn || copyOnWorker;
 }
 
 function _setFreeBytesForTest(value) {
@@ -501,5 +522,8 @@ module.exports = {
   logCapacityWarning,
   _setPathsForTest,
   _setFreeBytesForTest,
+  _setCopyForTest,
+  _copyOnWorker: copyOnWorker,
+  _replaceDbAtomically: replaceDbAtomically,
   _verifyDbFile: verifyDbFile,
 };

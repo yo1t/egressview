@@ -499,21 +499,9 @@ describe('periodic backup start', () => {
   });
 });
 
-describe('a backup in progress, or one that is not whole', () => {
+describe('a backup in progress, or one that failed', () => {
   before(setup);
   after(teardown);
-
-  // Replaces the online backup with one that writes `content` to its
-  // destination and then does whatever `finish` says.
-  function withBackup(write, finish) {
-    const proto = Database.prototype;
-    const original = proto.backup;
-    proto.backup = function (destination) {
-      write(destination);
-      return finish();
-    };
-    return () => { proto.backup = original; };
-  }
 
   // What a process killed mid-backup leaves behind. Nothing under a final
   // name may appear until the copy is complete and checked: the startup
@@ -522,10 +510,10 @@ describe('a backup in progress, or one that is not whole', () => {
     const isolatedDir = path.join(tmpDir, 'backups-in-progress');
     backup._setPathsForTest(fakeDb, isolatedDir);
     let release;
-    const restore = withBackup(
-      destination => fs.writeFileSync(destination, 'half a database'),
-      () => new Promise(resolve => { release = resolve; })
-    );
+    backup._setCopyForTest((source, destination) => {
+      fs.writeFileSync(destination, 'half a database');
+      return new Promise(resolve => { release = () => resolve({ ok: false, error: 'stopped' }); });
+    });
     let pending;
     try {
       pending = backup.createBackup();
@@ -536,85 +524,128 @@ describe('a backup in progress, or one that is not whole', () => {
       // handed to every later caller as the backup in progress.
       release?.();
       const result = await pending;
-      restore();
       backup._setPathsForTest(fakeDb, backupDir);
-      assert.equal(result, null, 'half a database was accepted');
+      assert.equal(result, null, 'a copy that failed was accepted');
     }
   });
 
-  it('is refused when the copy is missing a table the source has', async () => {
-    const isolatedDir = path.join(tmpDir, 'backups-missing-table');
+  it('leaves nothing behind when the copy fails its check', async () => {
+    const isolatedDir = path.join(tmpDir, 'backups-failed-check');
     backup._setPathsForTest(fakeDb, isolatedDir);
-    const restore = withBackup(
-      destination => {
-        const d = new Database(destination);
-        d.exec('CREATE TABLE something_else (x)');
-        d.close();
-      },
-      () => Promise.resolve()
-    );
+    backup._setCopyForTest(async (source, destination) => {
+      fs.writeFileSync(destination, 'not whole');
+      fs.writeFileSync(`${destination}-journal`, 'x');
+      return { ok: false, error: 'the copy is missing connections' };
+    });
     try {
       assert.equal(await backup.createBackup(), null);
       assert.deepEqual(fs.readdirSync(isolatedDir), []);
     } finally {
-      restore();
       backup._setPathsForTest(fakeDb, backupDir);
     }
   });
 
-  // An empty file opens as an empty database and passes integrity_check.
-  it('is refused when the copy is 0 bytes, although integrity_check would pass it', async () => {
-    const isolatedDir = path.join(tmpDir, 'backups-zero');
+  // The review finding this PR answers: the copy was checked with
+  // integrity_check on the main thread, which takes 171-283 s on the
+  // production database while the watchdog kills at 120 s. The main thread
+  // must now do nothing with the database during a backup but wait.
+  it('never checks the database on the main thread', async () => {
+    const isolatedDir = path.join(tmpDir, 'backups-off-thread');
     backup._setPathsForTest(fakeDb, isolatedDir);
-    const restore = withBackup(destination => fs.writeFileSync(destination, ''), () => Promise.resolve());
+    const asked = [];
+    const proto = Database.prototype;
+    const original = proto.pragma;
+    proto.pragma = function (source, ...rest) {
+      asked.push(String(source));
+      return original.call(this, source, ...rest);
+    };
+    let name;
     try {
-      assert.equal(await backup.createBackup(), null);
-      assert.deepEqual(fs.readdirSync(isolatedDir), []);
+      name = await backup.createBackup();
     } finally {
-      restore();
+      proto.pragma = original;
       backup._setPathsForTest(fakeDb, backupDir);
     }
+    assert.ok(name, 'the backup did not complete');
+    const checks = asked.filter(p => /integrity_check|quick_check/.test(p));
+    assert.deepEqual(checks, [], `the main thread ran ${checks.join(', ')}`);
   });
 
-  // Everything else about this copy is right; only its length says it is not
-  // the file that was written.
-  it('is refused when the copy is longer than the pages it declares', async () => {
-    const isolatedDir = path.join(tmpDir, 'backups-padded');
-    backup._setPathsForTest(fakeDb, isolatedDir);
-    const restore = withBackup(
-      destination => {
-        fs.copyFileSync(fakeDb, destination);
-        fs.appendFileSync(destination, Buffer.alloc(4096, 0));
-      },
-      () => Promise.resolve()
-    );
-    try {
-      assert.equal(await backup.createBackup(), null);
-      assert.deepEqual(fs.readdirSync(isolatedDir), []);
-    } finally {
-      restore();
-      backup._setPathsForTest(fakeDb, backupDir);
+  it('abandons a copy that does not finish in time', async () => {
+    const out = path.join(tmpDir, 'timeout-copy.db');
+    const result = await backup._copyOnWorker(fakeDb, out, { timeoutMs: 1 });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /did not finish/);
+  });
+});
+
+// The admin-screen restore swaps a verified copy over the live file. It used
+// to remove the old -wal/-shm after the swap; a failure in between left the
+// restored file beside the old -wal, which SQLite replays into it.
+describe('replacing the database during a restore', () => {
+  before(setup);
+  after(teardown);
+
+  // Leaves the database as a crash leaves a WAL database: one row in the main
+  // file and one only in the -wal.
+  function crashWithWalOnlyRow(file) {
+    for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(file + suffix); } catch {} }
+    const scratch = `${file}.crashing`;
+    const d = new Database(scratch);
+    d.pragma('journal_mode = WAL');
+    d.pragma('wal_autocheckpoint = 0');
+    d.exec('CREATE TABLE marks (val TEXT)');
+    d.prepare('INSERT INTO marks VALUES (?)').run('original');
+    d.pragma('wal_checkpoint(TRUNCATE)');
+    d.prepare('INSERT INTO marks VALUES (?)').run('only-in-wal');
+    for (const suffix of ['', '-wal', '-shm']) {
+      if (fs.existsSync(scratch + suffix)) fs.copyFileSync(scratch + suffix, file + suffix);
     }
+    d.close();
+    for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(scratch + suffix); } catch {} }
+  }
+
+  function marks(file) {
+    const d = new Database(file);
+    try { return d.prepare('SELECT val FROM marks').all().map(r => r.val); } finally { d.close(); }
+  }
+
+  it('never puts the restored file beside the replaced database\'s -wal', () => {
+    backup._setPathsForTest(fakeDb, backupDir);
+    crashWithWalOnlyRow(fakeDb);
+    const source = path.join(tmpDir, 'restore-me.db');
+    makeRealDb(source, 'restored');
+    const original = fs.renameSync;
+    let walPresentAtSwap = null;
+    fs.renameSync = (from, to) => {
+      if (to === fakeDb) walPresentAtSwap = fs.existsSync(`${fakeDb}-wal`);
+      return original(from, to);
+    };
+    try {
+      backup._replaceDbAtomically(source);
+    } finally {
+      fs.renameSync = original;
+    }
+    assert.equal(walPresentAtSwap, false, 'the old -wal was beside the file being swapped in');
+    assert.deepEqual(marks(fakeDb), ['restored'], 'the replaced database was replayed into the restored one');
   });
 
-  it('is refused when the copy is on another schema version', async () => {
-    const isolatedDir = path.join(tmpDir, 'backups-version');
-    backup._setPathsForTest(fakeDb, isolatedDir);
-    const restore = withBackup(
-      destination => {
-        fs.copyFileSync(fakeDb, destination);
-        const d = new Database(destination);
-        d.pragma('user_version = 99');
-        d.close();
-      },
-      () => Promise.resolve()
-    );
+  it('puts the -wal back when the swap fails, so reopening shows the original whole', () => {
+    backup._setPathsForTest(fakeDb, backupDir);
+    crashWithWalOnlyRow(fakeDb);
+    const source = path.join(tmpDir, 'restore-me-2.db');
+    makeRealDb(source, 'restored');
+    const original = fs.renameSync;
+    fs.renameSync = (from, to) => {
+      if (to === fakeDb && from.endsWith('.tmp')) throw Object.assign(new Error('rename refused'), { code: 'EPERM' });
+      return original(from, to);
+    };
     try {
-      assert.equal(await backup.createBackup(), null);
-      assert.deepEqual(fs.readdirSync(isolatedDir), []);
+      assert.throws(() => backup._replaceDbAtomically(source), /rename refused/);
     } finally {
-      restore();
-      backup._setPathsForTest(fakeDb, backupDir);
+      fs.renameSync = original;
     }
+    assert.deepEqual(marks(fakeDb).sort(), ['only-in-wal', 'original'], 'the original, reopened, lost what was in its -wal');
+    makeRealDb(fakeDb, 'fake-db-content');
   });
 });
