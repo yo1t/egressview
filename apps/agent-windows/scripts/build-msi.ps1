@@ -30,6 +30,38 @@ $parsedVersion = [version]$Version
 # legacy floor for Windows Installer's four-part numeric comparison.
 $payloadFileVersion = "1.$($parsedVersion.Major).$($parsedVersion.Minor).$($parsedVersion.Build)"
 
+# One version names one build.
+#
+# Windows Installer decides whether to replace a file by comparing its version,
+# and every payload here carries the package version. Build twice under one
+# number and install the second over the first, and msiexec returns 0 having
+# replaced nothing: the machine goes on running the first build while every
+# check that reads the version reports the second.
+#
+# That happened twice on 2026-09-23. 0.1.117 existed as two different builds,
+# one of them published; and 0.1.118 was rebuilt with a fix, installed, and
+# found thirty-four minutes later still running the code without it.
+#
+# Refused here, before anything is built, because this is the cheapest place
+# to find out and the only one that sees both builds.
+$msiName = "EgressView-Agent-Windows-$Version-$arch-unsigned.msi"
+$existingMsi = Join-Path $outputPath $msiName
+if (Test-Path -LiteralPath $existingMsi) {
+    throw ("$msiName already exists in $outputPath, so this build would be a second, different build " +
+        "under the same version. Raise the version. If that file was never installed on any machine and never " +
+        "published, delete it yourself and build again -- a deliberate act, not something this script decides.")
+}
+# And a version that was withdrawn is not built again. The publisher refuses
+# it too; finding out here costs seconds instead of a build.
+$withdrawnList = Join-Path $agentRoot '..\..\release-signing\withdrawn-agent-releases.json'
+if (Test-Path -LiteralPath $withdrawnList) {
+    $withdrawn = (Get-Content -LiteralPath $withdrawnList -Raw | ConvertFrom-Json).releases |
+        Where-Object { $_.platform -eq 'windows' -and $_.version -eq $Version } | Select-Object -First 1
+    if ($withdrawn) {
+        throw "windows $Version is withdrawn and cannot be built again: $($withdrawn.reason) Superseded by $($withdrawn.supersededBy)."
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $servicePublish, $uiPublish, $outputPath | Out-Null
 $licenseText = Get-Content -LiteralPath (Join-Path $agentRoot '..\..\LICENSE') -Raw
 $licenseBody = $licenseText.Replace('\', '\\').Replace('{', '\{').Replace('}', '\}') `
@@ -75,6 +107,6 @@ dotnet build (Join-Path $agentRoot 'installer\EgressView.Agent.Installer.wixproj
     -p:OutputPath=$outputPath
 if ($LASTEXITCODE -ne 0) { throw "MSI build failed: $LASTEXITCODE" }
 
-$msi = Join-Path $outputPath "EgressView-Agent-Windows-$Version-$arch-unsigned.msi"
+$msi = Join-Path $outputPath $msiName
 if (-not (Test-Path -LiteralPath $msi -PathType Leaf)) { throw "MSI was not produced: $msi" }
 Get-FileHash -Algorithm SHA256 -LiteralPath $msi | Select-Object Path, Hash
