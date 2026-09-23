@@ -162,6 +162,27 @@ people learn to ignore.** A test refuses any entry for a release published on
 or after the policy date, so the list cannot become a way to quiet a new
 failure.
 
+### Agent versions that must not be published again
+
+Agents are published to `dl.egressview.com` by `publish-agent-release.js`, not
+as GitHub releases, and each platform carries its own version line. A version
+that was built or published and must not be used again is recorded in
+`release-signing/withdrawn-agent-releases.json`, with what supersedes it and
+why.
+
+`publish-agent-release.js` reads that list and refuses, on a dry run as well as
+a real one. **A withdrawal that lives only in a person's memory is not a
+withdrawal.** Windows `0.1.117` was served for six hours with a migration that
+could not finish on a database of any size, and nothing in this repository
+would have stopped it being put back.
+
+Every entry names a successor, because "do not use this" is half an instruction
+if there is nothing to move to, and a test refuses a successor that is older
+than the version it replaces or is itself withdrawn. The test runs the
+publisher rather than reading it: the first version of it grepped the source
+for the refusal message and passed with the check replaced by `null`, because
+every string it looked for was still there.
+
 ### Signing stays on the workstation
 
 It is tempting to give GitHub Actions an OIDC role with `kms:Sign` and remove

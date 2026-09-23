@@ -28,6 +28,25 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
+const WITHDRAWN = path.join(ROOT, 'release-signing', 'withdrawn-agent-releases.json');
+
+/// Versions that were built or published and must not be published again.
+///
+/// A withdrawal that lives only in a person's memory is not a withdrawal.
+/// 0.1.117 was on the CDN for six hours with a migration that could not
+/// finish, and nothing in this repository would have stopped it being put
+/// back.
+function withdrawnReason(platform, version) {
+  let policy;
+  try { policy = JSON.parse(fs.readFileSync(WITHDRAWN, 'utf8')); }
+  catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  const hit = policy.releases.find(
+    (entry) => entry.platform === platform && entry.version === version);
+  return hit ? hit : null;
+}
 const MANIFEST_SCHEMA_VERSION = 1;
 const KMS_MAX_RAW_MESSAGE_BYTES = 4096;
 // Long enough to outlast the manifest cache TTL, so a publication without an
@@ -193,6 +212,17 @@ function parseArgs(argv) {
   }
   if (!config.dryRun && !config.bucket) {
     problems.push('--bucket is required unless --dry-run is given');
+  }
+  // Checked on a dry run too: finding out at upload time that the version is
+  // withdrawn is finding out too late to be useful.
+  const withdrawn = withdrawnReason(config.platform, config.version);
+  if (withdrawn) {
+    problems.push(
+      `${config.platform} ${config.version} is withdrawn and cannot be published again.
+`
+      + `    ${withdrawn.reason}
+`
+      + `    Superseded by ${withdrawn.supersededBy}.`);
   }
   if (problems.length) throw new Error(problems.join('\n- '));
   return config;
