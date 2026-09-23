@@ -66,6 +66,24 @@ describe('configure / getConfig', () => {
     assert.equal(backup.getConfig().intervalHours, 12);
   });
 
+  // Node replaces a timer delay above 2^31-1 ms with 1 ms, silently. 8,760
+  // hours is above it, and that is what ran the backup continuously on
+  // 2026-09-23.
+  it('configure() refuses an interval a timer cannot hold, and keeps the old one', () => {
+    backup.configure({ intervalHours: 12 });
+    backup.configure({ intervalHours: 8760 });
+    assert.equal(backup.getConfig().intervalHours, 12);
+    backup.configure({ intervalHours: backup.MAX_INTERVAL_HOURS + 1 });
+    assert.equal(backup.getConfig().intervalHours, 12);
+  });
+
+  it('configure() accepts the largest interval a timer can hold', () => {
+    backup.configure({ intervalHours: backup.MAX_INTERVAL_HOURS });
+    assert.equal(backup.getConfig().intervalHours, backup.MAX_INTERVAL_HOURS);
+    assert.ok(backup.MAX_INTERVAL_HOURS * 3_600_000 <= 2 ** 31 - 1);
+    assert.ok((backup.MAX_INTERVAL_HOURS + 1) * 3_600_000 > 2 ** 31 - 1);
+  });
+
   it('configure() updates maxGenerations', () => {
     backup.configure({ maxGenerations: 3 });
     assert.equal(backup.getConfig().maxGenerations, 3);
@@ -191,11 +209,22 @@ describe('createBackup', () => {
     assert.ok(fs.existsSync(p));
   });
 
-  it('creates distinct generations when backups run in the same millisecond', async () => {
+  // One at a time. On 2026-09-23 a timer that overflowed to 1 ms started a
+  // backup every millisecond, each on its own connection, until the process
+  // held 1,031 of them and 7 GB. A second caller now gets the run in progress.
+  it('runs one backup at a time: a second caller gets the run in progress', async () => {
+    const before = backup.listBackups().length;
     const [first, second] = await Promise.all([backup.createBackup(), backup.createBackup()]);
-    assert.notEqual(first, second);
-    assert.ok(fs.existsSync(path.join(backupDir, first)));
-    assert.ok(fs.existsSync(path.join(backupDir, second)));
+    assert.ok(first, 'the backup did not complete');
+    assert.equal(second, first, 'a second backup ran alongside the first');
+    assert.equal(backup.listBackups().length, before + 1);
+  });
+
+  it('starts a new backup once the previous one has finished', async () => {
+    const first = await backup.createBackup();
+    const second = await backup.createBackup();
+    assert.ok(first && second);
+    assert.notEqual(second, first, 'a finished run was handed out again');
   });
 
   it('backup is a valid SQLite DB with the same content as the source', async () => {
@@ -220,6 +249,19 @@ describe('createBackup', () => {
     assert.ok(rows.includes('wal-only-row'), 'WAL-resident row must be present in backup');
   });
 
+  it('names a backup only once it is complete', async () => {
+    const isolatedDir = path.join(tmpDir, 'backups-naming');
+    backup._setPathsForTest(fakeDb, isolatedDir);
+    try {
+      const name = await backup.createBackup();
+      assert.ok(name);
+      assert.deepEqual(fs.readdirSync(isolatedDir), [name], 'the copy was left under another name');
+      assert.equal(readMark(path.join(isolatedDir, name)), readMark(fakeDb));
+    } finally {
+      backup._setPathsForTest(fakeDb, backupDir);
+    }
+  });
+
   it('returns null and leaves no partial file for a corrupt source DB', async () => {
     const corruptDb  = path.join(tmpDir, 'corrupt.db');
     const isolatedDir = path.join(tmpDir, 'backups-corrupt');  // avoid same-second name collision with earlier tests
@@ -227,6 +269,9 @@ describe('createBackup', () => {
     backup._setPathsForTest(corruptDb, isolatedDir);
     assert.equal(await backup.createBackup(), null);
     assert.equal(backup.listBackups().length, 0, 'no partial backup left behind');
+    // Not merely unlisted: nothing at all, under any name. A .partial or its
+    // -journal left here is disk spent on a copy that proved nothing.
+    assert.deepEqual(fs.readdirSync(isolatedDir), [], 'something was left in the backup directory');
     backup._setPathsForTest(fakeDb, backupDir);
   });
 });
@@ -425,5 +470,151 @@ describe('restoreFromGeneration', () => {
     makeRealDb(fakeDb, 'overwritten');
     await backup.restoreFromGeneration(name);
     assert.equal(readMark(fakeDb), 'fake-db-content');
+  });
+});
+
+describe('periodic backup start', () => {
+  before(setup);
+  after(teardown);
+
+  // A process that dies mid-backup leaves its .partial behind. The next start
+  // clears it: nothing else can be writing it, and it is not a backup.
+  it('removes unfinished copies left by an earlier run', () => {
+    fs.mkdirSync(backupDir, { recursive: true });
+    const partial = path.join(backupDir, 'egressview_2026-09-23_10-32-24-091-5055ce1b.db.partial');
+    fs.writeFileSync(partial, 'half a database');
+    fs.writeFileSync(`${partial}-journal`, 'its journal');
+    const keep = path.join(backupDir, 'egressview_2026-09-22_00-00-00.db');
+    makeRealDb(keep, 'kept');
+    backup._setPathsForTest(fakeDb, backupDir);
+    backup.configure({ intervalHours: 24 });
+    try {
+      backup.startPeriodicBackup();
+    } finally {
+      backup.stopPeriodicBackup();
+    }
+    assert.equal(fs.existsSync(partial), false, 'the unfinished copy is still there');
+    assert.equal(fs.existsSync(`${partial}-journal`), false, 'its journal is still there');
+    assert.equal(readMark(keep), 'kept', 'a finished backup was touched');
+  });
+});
+
+describe('a backup in progress, or one that is not whole', () => {
+  before(setup);
+  after(teardown);
+
+  // Replaces the online backup with one that writes `content` to its
+  // destination and then does whatever `finish` says.
+  function withBackup(write, finish) {
+    const proto = Database.prototype;
+    const original = proto.backup;
+    proto.backup = function (destination) {
+      write(destination);
+      return finish();
+    };
+    return () => { proto.backup = original; };
+  }
+
+  // What a process killed mid-backup leaves behind. Nothing under a final
+  // name may appear until the copy is complete and checked: the startup
+  // restore and the "is there a recent backup" test both read final names.
+  it('is not listed while it is still being written', async () => {
+    const isolatedDir = path.join(tmpDir, 'backups-in-progress');
+    backup._setPathsForTest(fakeDb, isolatedDir);
+    let release;
+    const restore = withBackup(
+      destination => fs.writeFileSync(destination, 'half a database'),
+      () => new Promise(resolve => { release = resolve; })
+    );
+    let pending;
+    try {
+      pending = backup.createBackup();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(backup.listBackups().length, 0, 'an unfinished copy is listed as a backup');
+    } finally {
+      // Released even when the assertion fails: a run left pending would be
+      // handed to every later caller as the backup in progress.
+      release?.();
+      const result = await pending;
+      restore();
+      backup._setPathsForTest(fakeDb, backupDir);
+      assert.equal(result, null, 'half a database was accepted');
+    }
+  });
+
+  it('is refused when the copy is missing a table the source has', async () => {
+    const isolatedDir = path.join(tmpDir, 'backups-missing-table');
+    backup._setPathsForTest(fakeDb, isolatedDir);
+    const restore = withBackup(
+      destination => {
+        const d = new Database(destination);
+        d.exec('CREATE TABLE something_else (x)');
+        d.close();
+      },
+      () => Promise.resolve()
+    );
+    try {
+      assert.equal(await backup.createBackup(), null);
+      assert.deepEqual(fs.readdirSync(isolatedDir), []);
+    } finally {
+      restore();
+      backup._setPathsForTest(fakeDb, backupDir);
+    }
+  });
+
+  // An empty file opens as an empty database and passes integrity_check.
+  it('is refused when the copy is 0 bytes, although integrity_check would pass it', async () => {
+    const isolatedDir = path.join(tmpDir, 'backups-zero');
+    backup._setPathsForTest(fakeDb, isolatedDir);
+    const restore = withBackup(destination => fs.writeFileSync(destination, ''), () => Promise.resolve());
+    try {
+      assert.equal(await backup.createBackup(), null);
+      assert.deepEqual(fs.readdirSync(isolatedDir), []);
+    } finally {
+      restore();
+      backup._setPathsForTest(fakeDb, backupDir);
+    }
+  });
+
+  // Everything else about this copy is right; only its length says it is not
+  // the file that was written.
+  it('is refused when the copy is longer than the pages it declares', async () => {
+    const isolatedDir = path.join(tmpDir, 'backups-padded');
+    backup._setPathsForTest(fakeDb, isolatedDir);
+    const restore = withBackup(
+      destination => {
+        fs.copyFileSync(fakeDb, destination);
+        fs.appendFileSync(destination, Buffer.alloc(4096, 0));
+      },
+      () => Promise.resolve()
+    );
+    try {
+      assert.equal(await backup.createBackup(), null);
+      assert.deepEqual(fs.readdirSync(isolatedDir), []);
+    } finally {
+      restore();
+      backup._setPathsForTest(fakeDb, backupDir);
+    }
+  });
+
+  it('is refused when the copy is on another schema version', async () => {
+    const isolatedDir = path.join(tmpDir, 'backups-version');
+    backup._setPathsForTest(fakeDb, isolatedDir);
+    const restore = withBackup(
+      destination => {
+        fs.copyFileSync(fakeDb, destination);
+        const d = new Database(destination);
+        d.pragma('user_version = 99');
+        d.close();
+      },
+      () => Promise.resolve()
+    );
+    try {
+      assert.equal(await backup.createBackup(), null);
+      assert.deepEqual(fs.readdirSync(isolatedDir), []);
+    } finally {
+      restore();
+      backup._setPathsForTest(fakeDb, backupDir);
+    }
   });
 });

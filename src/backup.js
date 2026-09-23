@@ -17,6 +17,21 @@ let BACKUP_DIR = DEFAULT_BACKUP_DIR;
 
 let backupIntervalTimer = null;
 let backupIntervalHours = 24; // default: daily
+
+// Node's timers take a signed 32-bit number of milliseconds. A larger delay is
+// not an error: Node prints a TimeoutOverflowWarning and uses 1 ms instead.
+// On 2026-09-23 an interval of 8,760 hours (31,536,000,000 ms) did exactly
+// that on the production Hub -- the backup ran continuously, each run opening
+// its own database connection, until the process held 1,031 connections and
+// 7 GB and the machine stopped answering SSH. 596 hours is the largest whole
+// number of hours that fits.
+const MAX_TIMER_MS = 2 ** 31 - 1;
+const MAX_INTERVAL_HOURS = Math.floor(MAX_TIMER_MS / (60 * 60 * 1000));
+
+// One backup at a time. Every run opens its own connection to the database and
+// copies all of it; two at once is twice the disk and memory for the same
+// result, and the storm above was hundreds at once.
+let backupInFlight = null;
 let maxGenerations = 7;       // default: 7 backups
 let maxBackupBytes = 0;       // default: no storage cap
 let autoPrune = false;        // explicit opt-in only
@@ -58,7 +73,14 @@ const pruneRunner = new BackupPruneRunner({
 function configure(cfg) {
   if (cfg.dbPath) DB_PATH = cfg.dbPath;
   if (cfg.backupDir) BACKUP_DIR = cfg.backupDir;
-  if (Number.isInteger(cfg.intervalHours) && cfg.intervalHours > 0) backupIntervalHours = cfg.intervalHours;
+  if (Number.isInteger(cfg.intervalHours) && cfg.intervalHours > 0) {
+    if (cfg.intervalHours > MAX_INTERVAL_HOURS) {
+      logger.warn(`[backup] intervalHours ${cfg.intervalHours} is above the ${MAX_INTERVAL_HOURS}-hour limit `
+        + `a timer can hold; keeping ${backupIntervalHours}`);
+    } else {
+      backupIntervalHours = cfg.intervalHours;
+    }
+  }
   if (Number.isInteger(cfg.maxGenerations) && cfg.maxGenerations >= 2) maxGenerations = cfg.maxGenerations;
   if (Number.isSafeInteger(cfg.maxBackupBytes) && cfg.maxBackupBytes >= 0) maxBackupBytes = cfg.maxBackupBytes;
   if (typeof cfg.autoPrune === 'boolean') autoPrune = cfg.autoPrune;
@@ -110,7 +132,55 @@ function replaceDbAtomically(sourcePath) {
 // db.backup() takes a consistent snapshot including WAL contents, unlike a
 // plain file copy which would miss transactions not yet checkpointed into
 // the main DB file.
-async function createBackup({ capacityPruned = false } = {}) {
+//
+// Only one runs at a time: a second caller gets the run already in progress.
+function createBackup(options) {
+  if (backupInFlight) {
+    logger.info('[backup] A backup is already running; not starting another');
+    return backupInFlight;
+  }
+  backupInFlight = runBackup(options).finally(() => { backupInFlight = null; });
+  return backupInFlight;
+}
+
+function removeWithSidecars(filePath) {
+  for (const suffix of ['', '-journal', '-wal', '-shm']) {
+    try { fs.unlinkSync(filePath + suffix); } catch { /* not there */ }
+  }
+}
+
+/**
+ * Whether a freshly written copy is the whole of its source.
+ *
+ * `verifyDbFile` alone is not enough: an empty file passes `integrity_check`
+ * as an empty database. So the copy must also be as long as the pages it
+ * declares, on the same schema version, and hold every table the source
+ * holds -- which is also what rules out an empty copy, since it has none.
+ */
+function verifyCompleteCopy(copyPath, source) {
+  const size = fs.statSync(copyPath).size;
+  verifyDbFile(copyPath);
+  const copy = new Database(copyPath, { readonly: true, fileMustExist: true });
+  try {
+    const declared = copy.pragma('page_size', { simple: true }) * copy.pragma('page_count', { simple: true });
+    if (declared !== size) throw new Error(`the copy is ${size} bytes but declares ${declared}`);
+    const version = copy.pragma('user_version', { simple: true });
+    const sourceVersion = source.pragma('user_version', { simple: true });
+    if (version !== sourceVersion) {
+      throw new Error(`the copy is schema v${version}, the source v${sourceVersion}`);
+    }
+    const tables = db => new Set(db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table'"
+    ).all().map(row => row.name));
+    const have = tables(copy);
+    const missing = [...tables(source)].filter(name => !have.has(name));
+    if (missing.length) throw new Error(`the copy is missing ${missing.join(', ')}`);
+  } finally {
+    copy.close();
+  }
+}
+
+async function runBackup({ capacityPruned = false } = {}) {
   if (!fs.existsSync(DB_PATH)) {
     logger.info('[backup] No database to backup');
     return null;
@@ -134,11 +204,31 @@ async function createBackup({ capacityPruned = false } = {}) {
   const uniqueId = crypto.randomBytes(4).toString('hex');
   const backupName = `egressview_${timestamp}-${uniqueId}.db`;
   const backupPath = path.join(BACKUP_DIR, backupName);
+  // Written under a name nothing lists, and given its real name only once it
+  // has been checked. The backup directory on 2026-09-23 held 2,761 files
+  // under final names, nearly all 0 bytes: a run that dies after naming its
+  // file and before filling it leaves something that looks like a backup to
+  // everything that reads the directory -- including the startup restore.
+  const partialPath = `${backupPath}.partial`;
   let src = null;
   try {
     src = new Database(DB_PATH, { fileMustExist: true });
-    await src.backup(backupPath);
-    verifyDbFile(backupPath);
+    await src.backup(partialPath);
+    verifyCompleteCopy(partialPath, src);
+    // Opening the copy to check it makes SQLite create a -shm beside it (the
+    // copy keeps the source's WAL mode). Renaming only the main file left
+    // those behind; the production backup of 2026-09-23 had both. Nothing
+    // wrote to the copy, so they carry nothing -- a -wal that does is a
+    // reason to stop, not to delete it.
+    for (const suffix of ['-wal', '-shm']) {
+      const sidecar = partialPath + suffix;
+      if (!fs.existsSync(sidecar)) continue;
+      if (suffix === '-wal' && fs.statSync(sidecar).size > 0) {
+        throw new Error('the copy has a non-empty -wal after being read');
+      }
+      fs.unlinkSync(sidecar);
+    }
+    fs.renameSync(partialPath, backupPath);
     logger.info(`[backup] Created: ${backupName}`);
     if (autoPrune) {
       try {
@@ -153,7 +243,7 @@ async function createBackup({ capacityPruned = false } = {}) {
     return backupName;
   } catch (err) {
     logger.error('[backup] Failed:', err.message);
-    try { fs.unlinkSync(backupPath); } catch {}  // remove partial backup
+    removeWithSidecars(partialPath);
     return null;
   } finally {
     if (src) { try { src.close(); } catch {} }
@@ -252,9 +342,27 @@ async function restoreFromGeneration(name, options) {
 }
 
 // Start periodic backup
+/**
+ * Removes copies a previous process started and never finished. There is one
+ * Hub process, so at start nothing else can be writing them; left in place
+ * they cost disk and prove nothing.
+ */
+function removeAbandonedPartials() {
+  let names;
+  try { names = fs.readdirSync(BACKUP_DIR); } catch { return 0; }
+  const partials = names.filter(name => name.startsWith('egressview_') && name.endsWith('.db.partial'));
+  for (const name of partials) removeWithSidecars(path.join(BACKUP_DIR, name));
+  if (partials.length) logger.info(`[backup] Removed ${partials.length} unfinished backup(s) from an earlier run`);
+  return partials.length;
+}
+
 function startPeriodicBackup() {
   stopPeriodicBackup();
-  const intervalMs = backupIntervalHours * 60 * 60 * 1000;
+  ensureBackupDir();
+  removeAbandonedPartials();
+  // configure() already refuses a larger value; this is the last line, because
+  // the failure it prevents is silent and continuous.
+  const intervalMs = Math.min(backupIntervalHours * 60 * 60 * 1000, MAX_TIMER_MS);
   backupIntervalTimer = setInterval(() => { createBackup().catch(() => {}); }, intervalMs);
   logger.info(`[backup] Periodic backup every ${backupIntervalHours}h, keep ${maxGenerations} generations`);
   logCapacityWarning();
@@ -373,6 +481,7 @@ function _setFreeBytesForTest(value) {
 }
 
 module.exports = {
+  MAX_INTERVAL_HOURS,
   configure,
   createBackup,
   listBackups,
