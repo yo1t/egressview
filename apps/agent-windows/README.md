@@ -69,6 +69,12 @@ Program Filesへの配置、LocalService、スタートメニュー、ログオ�
 「インストールされているアプリ」からのアンインストールを管理します。`-unsigned`は開発成果物であり、
 一般配布前にはAuthenticode署名、署名検証、SmartScreen実測が必要です。
 
+**1つの版番号は1つのビルドを指します。**同じ版・同じアーキのMSIが出力先に既にあれば、
+`build-msi.ps1`は何もビルドする前に拒否します。Windows Installerはファイルの版で置き換えを判断するため、
+同じ版番号で作り直したMSIを上から入れると、`msiexec`は成功（0）を返したまま**何も置き換えません**。
+直したら版を上げてください。既存のMSIが一度もインストールも公開もされていない場合に限り、
+自分で削除してから作り直せます。`release-signing/withdrawn-agent-releases.json`に載った版も拒否します。
+
 開発用installerはServiceを`LocalService`として配置し、同時にUIを`ui` subdirectoryへ配置します。
 **管理者PowerShellで実行する必要があります。** 既定のtray自動起動は次回ログオンから有効で、installerが
 昇格UIをその場で起動することはありません。

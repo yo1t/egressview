@@ -37,6 +37,21 @@ jobs:
         shell: pwsh
         run: .\scripts\build-msi.ps1 -Version 0.1.0
 
+      # Run it, do not read it: the second build of one version has to be
+      # refused, and so does a withdrawn one. Both fail before anything is
+      # built, so this costs seconds. If either is ever allowed, the step
+      # below it builds a whole MSI and then fails, which is slow but loud.
+      - name: Refuse a second build under one version
+        working-directory: apps/agent-windows
+        shell: pwsh
+        run: |
+          function Refused([scriptblock] $build, [string] $because) {
+            try { & $build | Out-Null } catch { if ($_.Exception.Message -match $because) { return }; throw "refused for the wrong reason: $($_.Exception.Message)" }
+            throw "built when it should have been refused ($because)"
+          }
+          Refused { .\scripts\build-msi.ps1 -Version 0.1.0 } 'already exists'
+          Refused { .\scripts\build-msi.ps1 -Version 0.1.117 -Output (Join-Path $env:RUNNER_TEMP 'withdrawn') } 'withdrawn'
+
       - name: Parse Windows Agent PowerShell scripts
         shell: pwsh
         run: |
