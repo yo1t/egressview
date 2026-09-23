@@ -239,14 +239,23 @@ public partial class MainWindow : Window
             // on saying 監視 because the last successful poll said so. That is
             // the same "Running is a lie" this was written to fix, reaching
             // the window.
-            var migrating = MigrationDisplay.Text();
-            if (migrating is not null)
+            //
+            // One reading for the chip and the sentence, so they cannot
+            // disagree; and a third word for a migration whose service is
+            // gone, which is neither running nor failed.
+            var migration = MigrationDisplay.Describe();
+            if (migration is not null)
             {
-                MonitoringStatus.Text = LocalizationManager.Text(
-                    MigrationDisplay.Failed() ? "MigrationFailedState" : "MigrationState");
-                CoverageNote.Text = migrating;
-                NetworkLastUpdated.Text = LocalizationManager.Text("MigrationState");
-                LogStatus.Text = migrating;
+                var chip = migration.State switch
+                {
+                    MigrationState.Failed => "MigrationFailedState",
+                    MigrationState.Interrupted => "MigrationInterruptedState",
+                    _ => "MigrationState",
+                };
+                MonitoringStatus.Text = LocalizationManager.Text(chip);
+                CoverageNote.Text = migration.Text;
+                NetworkLastUpdated.Text = LocalizationManager.Text(chip);
+                LogStatus.Text = migration.Text;
                 return;
             }
             NetworkLastUpdated.Text = LocalizationManager.Text("CannotConnect");
