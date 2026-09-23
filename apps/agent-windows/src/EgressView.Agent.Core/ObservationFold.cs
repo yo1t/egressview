@@ -62,7 +62,7 @@ public static class ObservationFold
     }
 
     private static string Key(RecentFlow row) =>
-        StartupSnapshot.FlowKey(row.Protocol, row.LocalAddress, row.LocalPort, row.RemoteAddress, row.RemotePort, row.ProcessId);
+        StartupSnapshot.FlowKey(row.Protocol, row.LocalAddress, row.LocalPort, row.RemoteAddress, row.RemotePort, row.ProcessId, row.ProcessInstanceId);
 
     /// A conversation that has never had a measurement stays unmeasured until
     /// one arrives: summing a null as zero would report a measured zero.

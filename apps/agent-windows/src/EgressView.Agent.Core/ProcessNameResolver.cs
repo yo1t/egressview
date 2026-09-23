@@ -36,6 +36,8 @@ public sealed class ProcessNameResolver
     private readonly TimeSpan retention;
     private readonly Func<int, LiveProcess?> probe;
     private readonly Func<DateTimeOffset> clock;
+    private readonly string sessionId = Guid.NewGuid().ToString("N");
+    private readonly ConcurrentDictionary<int, long> generations = new();
 
     /// Do not ask Windows for the same process on every packet.
     ///
@@ -68,6 +70,11 @@ public sealed class ProcessNameResolver
     /// A process as it exists right now. StartedAt is absent when the process
     /// is visible but its start time is not readable.
     public readonly record struct LiveProcess(string Name, DateTimeOffset? StartedAt);
+
+    /// Name and immutable owner of a PID at the time of an observation.
+    /// The session/generation form is deliberately not durable across a
+    /// collector restart when Windows refuses the process start time.
+    public readonly record struct ResolvedProcess(string? Name, string InstanceId);
 
     private sealed record Entry(string Name, DateTimeOffset? StartedAt, DateTimeOffset LastSeenAlive);
 
@@ -104,12 +111,15 @@ public sealed class ProcessNameResolver
     /// reach here through a channel, so wall-clock time would judge staleness
     /// against the wrong moment.
     /// </param>
-    public string? Resolve(int processId, DateTimeOffset observedAt)
+    public string? Resolve(int processId, DateTimeOffset observedAt) =>
+        ResolveIdentity(processId, observedAt).Name;
+
+    public ResolvedProcess ResolveIdentity(int processId, DateTimeOffset observedAt)
     {
         if (processId <= 0)
         {
             Interlocked.Increment(ref invalidProcessId);
-            return null;
+            return new(null, FallbackInstance(processId));
         }
 
         // The lifecycle provider is the primary PID-reuse guard. Between its
@@ -123,7 +133,7 @@ public sealed class ProcessNameResolver
             clock() - cached.LastSeenAlive < LiveProbeInterval)
         {
             Interlocked.Increment(ref cacheHits);
-            return cached.Name;
+            return Identity(processId, cached);
         }
 
         var live = SafeProbe(processId);
@@ -131,7 +141,7 @@ public sealed class ProcessNameResolver
         {
             Interlocked.Increment(ref liveLookups);
             var name = Sanitize(running.Name);
-            if (name is null) return null;
+            if (name is null) return new(null, FallbackInstance(processId));
             // Remember the current owner for subsequent packets even when this
             // particular event predates it. If the PID was reused while an ETW
             // backlog was draining, the cached previous owner still answers
@@ -142,12 +152,12 @@ public sealed class ProcessNameResolver
                 if (cached is not null && BelongsTo(cached, observedAt))
                 {
                     Interlocked.Increment(ref cacheHits);
-                    return cached.Name;
+                    return Identity(processId, cached);
                 }
                 Interlocked.Increment(ref pidReuseRejected);
-                return null;
+                return new(null, FallbackInstance(processId));
             }
-            return name;
+            return new(name, Instance(processId, running.StartedAt));
         }
 
         // The process is gone. Its name is still the right answer for the
@@ -168,7 +178,7 @@ public sealed class ProcessNameResolver
                 else
                     Interlocked.Increment(ref neverSeenWithoutStartEvent);
             }
-            return null;
+            return new(null, FallbackInstance(processId));
         }
 
         if (cached.StartedAt is { } startedAt && observedAt < startedAt)
@@ -176,18 +186,18 @@ public sealed class ProcessNameResolver
             // This observation predates the process we cached, so it belongs
             // to whatever held the PID before it.
             Interlocked.Increment(ref pidReuseRejected);
-            return null;
+            return new(null, FallbackInstance(processId));
         }
 
         if (observedAt - cached.LastSeenAlive > retention)
         {
             Interlocked.Increment(ref expired);
             cache.TryRemove(processId, out _);
-            return null;
+            return new(null, FallbackInstance(processId));
         }
 
         Interlocked.Increment(ref cacheHits);
-        return cached.Name;
+        return Identity(processId, cached);
     }
 
     /// Record a process the moment it starts, before any of its traffic is
@@ -213,6 +223,15 @@ public sealed class ProcessNameResolver
         return name;
     }
 
+    /// Marks a lifecycle boundary before a newly assigned PID can publish
+    /// DNS or network events. Even without a readable start time, the new
+    /// owner receives a new session-local identity.
+    public void BeginProcessInstance(int processId)
+    {
+        if (processId <= 0) return;
+        generations.AddOrUpdate(processId, 1, (_, value) => value + 1);
+    }
+
     /// Learn the name of a process that has just started.
     ///
     /// The provider's ProcessStart event carries the PID and the create time
@@ -224,6 +243,7 @@ public sealed class ProcessNameResolver
     public void Learn(int processId, DateTimeOffset startedAt)
     {
         if (processId <= 0) return;
+        BeginProcessInstance(processId);
         // Seeing a start proves this use of the PID is not the process that
         // was present in the initial snapshot, even if it exits before the
         // live-process query completes.
@@ -319,6 +339,16 @@ public sealed class ProcessNameResolver
 
     private static bool BelongsTo(Entry entry, DateTimeOffset observedAt) =>
         entry.StartedAt is not { } startedAt || observedAt >= startedAt;
+
+    private ResolvedProcess Identity(int processId, Entry entry) =>
+        new(entry.Name, Instance(processId, entry.StartedAt));
+
+    private string Instance(int processId, DateTimeOffset? startedAt) => startedAt is { } value
+        ? $"pid:{processId}:start:{value.ToUniversalTime().UtcTicks}"
+        : FallbackInstance(processId);
+
+    private string FallbackInstance(int processId) =>
+        $"session:{sessionId}:pid:{processId}:generation:{generations.GetOrAdd(processId, 0)}";
 
     /// An observation timestamped in the past still confirms the process was
     /// alive now, so the later of the two is what the retention window runs
