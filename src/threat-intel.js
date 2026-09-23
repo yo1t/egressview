@@ -539,8 +539,53 @@ function getStats() {
   };
 }
 
+/**
+ * Whether a connection's threat verdict has actually changed.
+ *
+ * "No verdict recorded" and "checked, no match" are the same fact. A
+ * connection read back from the database has no `threat` field at all --
+ * `connections` has no column for it -- while a match that finds nothing
+ * returns null. Compared as JSON, `undefined` and `null` differ, so every
+ * clean connection loaded at startup looked changed: on the production Hub
+ * each start re-saved and re-broadcast about 98,900 connections (98,897 on
+ * 2026-09-22, 98,614 on 2026-09-23), where the hourly re-match of the same
+ * cache finds between 1 and 7.
+ */
+function threatChanged(previous, next) {
+  return JSON.stringify(previous ?? null) !== JSON.stringify(next ?? null);
+}
+
+/**
+ * Re-applies the current indicators to connections already in memory, and
+ * returns the ones whose verdict changed.
+ *
+ * Yields to the event loop every `chunk` entries: the hot cache holds up to
+ * 100,000, and matching them all in one go holds the loop for seconds.
+ */
+async function reMatchConnections(entries, { match = matchThreatIntel, chunk = 5000 } = {}) {
+  const updated = [];
+  let processed = 0;
+  for (const entry of entries) {
+    const next = match(entry.dst, entry.dstHost || entry.dst) || null;
+    if (threatChanged(entry.threat, next)) {
+      entry.threat = next;
+      updated.push(entry);
+    } else if (entry.threat === undefined) {
+      // Record the verdict so the next pass compares like with like. Nothing
+      // changed for anyone watching, so it is neither saved nor broadcast.
+      entry.threat = null;
+    }
+    if (++processed % chunk === 0) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  }
+  return updated;
+}
+
 module.exports = {
   initDb,
+  threatChanged,
+  reMatchConnections,
   closeDb,
   setOfflinePolicy,
   fetchThreatIntel,
