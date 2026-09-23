@@ -959,15 +959,34 @@ function shutdown(exitCode = 0) {
   agentCorrelationRunner.stop();
   try { runtimeProfiler.measureSync('history.shutdownSnapshot', () => history.snapshotHistory()); } catch {}
   runtimeProfiler.stop();
-  try { history.closeDb();         } catch {}
-  try { agentIdentities.closeDb(); } catch {}
-  try { agentIngest.closeDb();     } catch {}
+  // Every module that opens its own connection to the database, closed
+  // before the clean stop is recorded. Only three were closed here before;
+  // markCleanShutdown() now also asks the OS what is still open, so a module
+  // missing from this list withholds the marker rather than being ignored.
+  for (const [name, closeDb] of [
+    ['history', () => history.closeDb()],
+    ['agentIdentities', () => agentIdentities.closeDb()],
+    ['agentIngest', () => agentIngest.closeDb()],
+    ['enrichment', () => enrichment.closeDb()],
+    ['threatIntel', () => threatIntel.closeDb()],
+    ['devices', () => devices.closeDb()],
+    ['beacons', () => beacons.closeDb()],
+    ['sessions', () => sessions.closeDb()],
+    ['authAudit', () => authAudit.closeDb()],
+    ['apiIdentities', () => apiIdentities.closeDb()],
+  ]) {
+    try { closeDb(); } catch (error) {
+      logger.warn(`[shutdown] Could not close the ${name} database connection:`, error.message);
+    }
+  }
   // Only an orderly stop earns the quick check at the next start. exitCode 1
   // is the uncaught-exception path, where state may be damaged; the watchdog
   // and the OOM killer never reach this function at all (db-startup-check.js).
   if (exitCode === 0) {
     try {
-      if (history.markCleanShutdown()) logger.info('[shutdown] Stopped cleanly; the next start can use the quick check');
+      const marked = history.markCleanShutdown();
+      if (marked.written) logger.info(`[shutdown] Stopped cleanly (${marked.reason}); the next start can use the quick check`);
+      else logger.warn(`[shutdown] Not recording a clean stop: ${marked.reason}. The next start will check in full`);
     } catch (error) {
       logger.warn('[shutdown] Could not record the clean stop; the next start will check in full:', error.message);
     }

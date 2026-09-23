@@ -27,6 +27,7 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 
 const MARKER_SUFFIX = '.clean-shutdown';
 const FULL_CHECK_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -97,7 +98,36 @@ function writeCleanShutdownMarker(dbPath, { lastFullCheckAt = null, now = Date.n
   fsImpl.renameSync(temporary, file);
 }
 
+/**
+ * File descriptors this process still holds on the database, its -wal, -shm
+ * or -journal.
+ *
+ * "Stopped cleanly" has to mean every connection was closed, not the ones the
+ * shutdown code remembers to close. Eleven modules open their own connection
+ * to the same file; the first version of the marker was written after three
+ * of them had closed. Asking the operating system what is still open catches
+ * the ones nobody listed -- including any added later.
+ *
+ * @returns {string[]|null} the paths still open, or null where the process's
+ *   descriptors cannot be listed (anything but Linux). The production Hub runs
+ *   on Linux.
+ */
+function openHandlesTo(dbPath, { fdDir = '/proc/self/fd', fsImpl = fs } = {}) {
+  let entries;
+  try { entries = fsImpl.readdirSync(fdDir); } catch { return null; }
+  const base = path.resolve(dbPath);
+  const targets = new Set(['', '-wal', '-shm', '-journal'].map(suffix => base + suffix));
+  const open = [];
+  for (const entry of entries) {
+    let target;
+    try { target = fsImpl.readlinkSync(path.join(fdDir, entry)); } catch { continue; }
+    if (targets.has(target)) open.push(target);
+  }
+  return open;
+}
+
 module.exports = {
+  openHandlesTo,
   MARKER_SUFFIX,
   FULL_CHECK_MAX_AGE_MS,
   markerPath,
