@@ -375,22 +375,7 @@ const THREAT_EMIT_BATCH = 2000;
 
 async function reMatchAndNotify() {
   const startedAt = Date.now();
-  const connectionHistory = history.getConnectionHistory();
-  const updated = [];
-  const CHUNK = 5000;
-  let processed = 0;
-  for (const [, entry] of connectionHistory) {
-    const host     = entry.dstHost || entry.dst;
-    const threat   = threatIntel.matchThreatIntel(entry.dst, host);
-    const newThreat = threat || null;
-    if (JSON.stringify(entry.threat) !== JSON.stringify(newThreat)) {
-      entry.threat = newThreat;
-      updated.push(entry);
-    }
-    if (++processed % CHUNK === 0) {
-      await new Promise(r => setImmediate(r));
-    }
-  }
+  const updated = await threatIntel.reMatchConnections(history.getConnectionHistory().values());
   if (updated.length) {
     // These entries were changed in place without their lastSeen moving, so the
     // periodic snapshot no longer covers them. Whoever changes an entry
