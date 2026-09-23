@@ -1149,6 +1149,12 @@ try
             // end rather than that a second check in SQL catches it.
             new NetworkObservation(namedAt, 13, "TCP", "10.1.1.1", 4011, "198.51.100.7", 443, 10, 10,
                 ObservationLayer.Logical, null, "etw", "outward", "198.51.100.7"),
+            // A second connection to a destination already counted once. With
+            // one connection each, counting connections and counting distinct
+            // addresses give the same answer, and a mutation that counted the
+            // wrong one survived -- it did. Here the two answers are 2 and 1.
+            new NetworkObservation(namedAt, 14, "TCP", "10.1.1.1", 4012, "93.184.216.34", 8443, 10, 10,
+                ObservationLayer.Logical, null, "etw", "outward", "example.com"),
         ]);
         var withNames = scopeStore.ReadPeriodAnalysis(scopeAt.AddMinutes(-1), DateTimeOffset.UtcNow);
         Assert(withNames.Destinations == 3 && withNames.NamedDestinations == 1,
@@ -1160,6 +1166,19 @@ try
         // screen while both look right on their own.
         Assert(withNames.Links.Select(link => link.Destination).Distinct().Count() == withNames.Destinations,
             "the card counts the destinations the chart draws, not a different set");
+
+        // The same question over connections, which is a different answer.
+        // On the machine this was written for the two were 93% and 11%: the
+        // destinations that resolve are the majority, and the ones that do
+        // not carry almost all the traffic. A reader shown only the first
+        // sees a high percentage above a chart that is nearly all addresses.
+        Assert(withNames.NamedConnections == 2 && withNames.Connections == 5,
+            $"connections are counted too, not {withNames.NamedConnections}/{withNames.Connections}");
+        // Two connections, one address: counting the wrong one shows here.
+        Assert(withNames.NamedConnections != withNames.NamedDestinations,
+            "counted over connections, not over addresses a second time");
+        Assert(withNames.NamedConnections <= withNames.Connections,
+            "and that share can never exceed one either");
         // And so does the chart under them. Before v28 the timeline read
         // chart_hourly, which folds by application and has no destination to
         // filter on, so the tiles said one thing and the picture below said

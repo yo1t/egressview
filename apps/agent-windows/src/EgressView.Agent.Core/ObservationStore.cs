@@ -2774,10 +2774,19 @@ public sealed partial class ObservationStore : IDisposable
             // and two of them survived a mutation run saying exactly that.
             var named = "remote_hostname IS NOT NULL";
             var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),"
-                + $"COUNT(DISTINCT CASE WHEN {named} THEN remote_address END) FROM flows WHERE {where} AND NOT {DestinationScope.LoopbackSql()}";
+                + $"COUNT(DISTINCT CASE WHEN {named} THEN remote_address END),"
+                // The same question asked of connections rather than of
+                // addresses. On this machine the two answers are 93% and 11%:
+                // the destinations that resolve are the majority, and the ones
+                // that do not carry almost all the traffic -- a monitoring
+                // poller to one LAN address was 17,818 connections in six
+                // hours. A reader looking at a chart sorted by connections is
+                // looking at the second number.
+                + $"SUM(CASE WHEN {named} THEN 1 ELSE 0 END) FROM flows WHERE {where} AND NOT {DestinationScope.LoopbackSql()}";
             CheckOperation(WinSqlite.Prepare(db, totalsSql, -1, out var totalsStatement, 0));
             long connections; int applications; int destinations; long bytes; long unknown; long sent; long received;
             var namedDestinations = 0;
+            long namedConnections = 0;
             try
             {
                 CheckQueryRow(WinSqlite.Step(totalsStatement));
@@ -2786,6 +2795,7 @@ public sealed partial class ObservationStore : IDisposable
                 destinations = (int)WinSqlite.ColumnInt64(totalsStatement, 2);
                 unknown = WinSqlite.ColumnInt64(totalsStatement, 3);
                 namedDestinations = (int)WinSqlite.ColumnInt64(totalsStatement, 4);
+                namedConnections = WinSqlite.ColumnInt64(totalsStatement, 5);
             }
             finally { WinSqlite.Finalize(totalsStatement); }
 
@@ -2990,6 +3000,7 @@ public sealed partial class ObservationStore : IDisposable
             {
                 BucketCount = bucketCount,
                 NamedDestinations = namedDestinations,
+                NamedConnections = namedConnections,
                 IncludesUnseparatedHours = unseparated,
                 LocalConnections = localConnections,
                 LocalDestinations = localDestinations,
