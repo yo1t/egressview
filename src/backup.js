@@ -115,18 +115,42 @@ function removeSidecars(dbPath) {
 }
 
 function replaceDbAtomically(sourcePath) {
-  const tempPath = `${DB_PATH}.restore-${crypto.randomBytes(6).toString('hex')}.tmp`;
+  const id = crypto.randomBytes(6).toString('hex');
+  const tempPath = `${DB_PATH}.restore-${id}.tmp`;
+  // The replaced database's -wal and -shm leave *before* the swap. Removed
+  // after it (as this used to), a failure in between left the restored file
+  // beside the old -wal, and SQLite replays a -wal into whatever main file it
+  // sits next to (db-restore.js has the same rule for the startup restore).
+  const asidePrefix = `${DB_PATH}.replaced-${id}`;
+  const movedAside = [];
   try {
     fs.copyFileSync(sourcePath, tempPath);
     fs.chmodSync(tempPath, 0o600);
     verifyDbFile(tempPath);
+    for (const suffix of ['-wal', '-shm']) {
+      if (!fs.existsSync(DB_PATH + suffix)) continue;
+      fs.renameSync(DB_PATH + suffix, asidePrefix + suffix);
+      movedAside.push(suffix);
+    }
     fs.renameSync(tempPath, DB_PATH);
-    removeSidecars(DB_PATH);
-    verifyDbFile(DB_PATH);
-    removeSidecars(DB_PATH);
+  } catch (error) {
+    for (const suffix of movedAside.slice().reverse()) {
+      try { fs.renameSync(asidePrefix + suffix, DB_PATH + suffix); } catch (restoreError) {
+        logger.error(`[backup] Could not put ${path.basename(DB_PATH + suffix)} back; `
+          + `it is kept at ${path.basename(asidePrefix + suffix)}: ${restoreError.message}`);
+      }
+    }
+    throw error;
   } finally {
     try { fs.unlinkSync(tempPath); } catch {}
   }
+  // Swapped. What was moved aside belonged to the database just replaced,
+  // whose content is in the safety backup every restore takes first.
+  for (const suffix of movedAside) {
+    try { fs.unlinkSync(asidePrefix + suffix); } catch {}
+  }
+  verifyDbFile(DB_PATH);
+  removeSidecars(DB_PATH);
 }
 
 // Create a backup of the DB using SQLite's online backup API.
@@ -500,5 +524,6 @@ module.exports = {
   _setFreeBytesForTest,
   _setCopyForTest,
   _copyOnWorker: copyOnWorker,
+  _replaceDbAtomically: replaceDbAtomically,
   _verifyDbFile: verifyDbFile,
 };

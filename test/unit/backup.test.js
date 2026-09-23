@@ -578,3 +578,74 @@ describe('a backup in progress, or one that failed', () => {
     assert.match(result.error, /did not finish/);
   });
 });
+
+// The admin-screen restore swaps a verified copy over the live file. It used
+// to remove the old -wal/-shm after the swap; a failure in between left the
+// restored file beside the old -wal, which SQLite replays into it.
+describe('replacing the database during a restore', () => {
+  before(setup);
+  after(teardown);
+
+  // Leaves the database as a crash leaves a WAL database: one row in the main
+  // file and one only in the -wal.
+  function crashWithWalOnlyRow(file) {
+    for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(file + suffix); } catch {} }
+    const scratch = `${file}.crashing`;
+    const d = new Database(scratch);
+    d.pragma('journal_mode = WAL');
+    d.pragma('wal_autocheckpoint = 0');
+    d.exec('CREATE TABLE marks (val TEXT)');
+    d.prepare('INSERT INTO marks VALUES (?)').run('original');
+    d.pragma('wal_checkpoint(TRUNCATE)');
+    d.prepare('INSERT INTO marks VALUES (?)').run('only-in-wal');
+    for (const suffix of ['', '-wal', '-shm']) {
+      if (fs.existsSync(scratch + suffix)) fs.copyFileSync(scratch + suffix, file + suffix);
+    }
+    d.close();
+    for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(scratch + suffix); } catch {} }
+  }
+
+  function marks(file) {
+    const d = new Database(file);
+    try { return d.prepare('SELECT val FROM marks').all().map(r => r.val); } finally { d.close(); }
+  }
+
+  it('never puts the restored file beside the replaced database\'s -wal', () => {
+    backup._setPathsForTest(fakeDb, backupDir);
+    crashWithWalOnlyRow(fakeDb);
+    const source = path.join(tmpDir, 'restore-me.db');
+    makeRealDb(source, 'restored');
+    const original = fs.renameSync;
+    let walPresentAtSwap = null;
+    fs.renameSync = (from, to) => {
+      if (to === fakeDb) walPresentAtSwap = fs.existsSync(`${fakeDb}-wal`);
+      return original(from, to);
+    };
+    try {
+      backup._replaceDbAtomically(source);
+    } finally {
+      fs.renameSync = original;
+    }
+    assert.equal(walPresentAtSwap, false, 'the old -wal was beside the file being swapped in');
+    assert.deepEqual(marks(fakeDb), ['restored'], 'the replaced database was replayed into the restored one');
+  });
+
+  it('puts the -wal back when the swap fails, so reopening shows the original whole', () => {
+    backup._setPathsForTest(fakeDb, backupDir);
+    crashWithWalOnlyRow(fakeDb);
+    const source = path.join(tmpDir, 'restore-me-2.db');
+    makeRealDb(source, 'restored');
+    const original = fs.renameSync;
+    fs.renameSync = (from, to) => {
+      if (to === fakeDb && from.endsWith('.tmp')) throw Object.assign(new Error('rename refused'), { code: 'EPERM' });
+      return original(from, to);
+    };
+    try {
+      assert.throws(() => backup._replaceDbAtomically(source), /rename refused/);
+    } finally {
+      fs.renameSync = original;
+    }
+    assert.deepEqual(marks(fakeDb).sort(), ['only-in-wal', 'original'], 'the original, reopened, lost what was in its -wal');
+    makeRealDb(fakeDb, 'fake-db-content');
+  });
+});
