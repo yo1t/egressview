@@ -509,16 +509,20 @@ public sealed partial class ObservationStore : IDisposable
     /// would look exactly like one that reported the truth.
     private readonly Action<MigrationProgress>? onMigration;
 
+    /// Writes the progress file and keeps its heartbeat going.
+    private readonly MigrationReporter reporter;
+
     public ObservationStore(string path, Action<MigrationProgress>? onMigration = null)
     {
         this.onMigration = onMigration;
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         this.path = Path.GetFullPath(path);
+        reporter = new MigrationReporter(this.path);
         Directory.CreateDirectory(Path.GetDirectoryName(this.path)!);
         Check(WinSqlite.Open(this.path, out db, WinSqlite.OpenReadWrite | WinSqlite.OpenCreate | WinSqlite.OpenFullMutex, 0));
         var opened = System.Diagnostics.Stopwatch.StartNew();
         try { Initialize(); }
-        catch { if (db != 0) WinSqlite.Close(db); db = 0; throw; }
+        catch { reporter.Stop(); if (db != 0) WinSqlite.Close(db); db = 0; throw; }
         OpenMilliseconds = opened.ElapsedMilliseconds;
     }
 
@@ -575,6 +579,10 @@ public sealed partial class ObservationStore : IDisposable
         ValidateSchema();
         }
         catch { ReportMigrationFailed(startedAt); throw; }
+        // Stopped before it is cleared, or a beat already on its way would
+        // write the file back and the window would describe a finished
+        // migration as running.
+        reporter.Stop();
         MigrationProgress.Clear(path);
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -899,13 +907,14 @@ public sealed partial class ObservationStore : IDisposable
     /// a cheap migration that goes wrong costs the same as an expensive one.
     private void MigrateVersion27To28()
     {
-        CreateMigrationBackup(28);
+        const int steps = 3;
+        CreateMigrationBackup(28, steps);
         try
         {
             Execute("BEGIN IMMEDIATE");
             Execute(Version28Schema);
-            ReportMigration(28, MigrationProgress.MovingRows,
-                ScalarInt64("SELECT COUNT(*) FROM chart_hourly"));
+            var rows = ScalarInt64("SELECT COUNT(*) FROM chart_hourly");
+            ReportMigration(28, MigrationProgress.MovingRows, rows, 2, steps);
             // 'mixed', and no test reaches this line. A database has to hold
             // folded hours *and* be at v27 for it to matter, and the fixture
             // path cannot make one: a store always migrates to the current
@@ -921,6 +930,7 @@ public sealed partial class ObservationStore : IDisposable
                        observation_count,flow_count,bytes_sent,bytes_received,bytes_unknown
                 FROM chart_hourly;
                 """);
+            ReportMigration(28, MigrationProgress.Finishing, rows, 3, steps);
             var before = ScalarInt64("SELECT COUNT(*) FROM chart_hourly");
             var after = ScalarInt64("SELECT COUNT(*) FROM chart_hourly_v28");
             if (before != after)
@@ -954,12 +964,25 @@ public sealed partial class ObservationStore : IDisposable
 
     private void MigrateVersion28To29()
     {
-        CreateMigrationBackup(29);
+        // Eight steps, each reported before it starts. Measured on a copy of
+        // a real database, in order: the copy, then 42.7, 10.6, 95.8, 0.5,
+        // 134.4, 22.6 and 22.4 seconds. The position is what lets a reader
+        // tell a slow step from one that is not going to end.
+        const int steps = 8;
+        CreateMigrationBackup(29, steps);
         EnsureFreeSpaceForCopy();
         try
         {
             Execute("BEGIN IMMEDIATE");
             Execute(Version29Schema);
+            // Counted once and carried: the same number is the scale of every
+            // step that follows, and counting 31 million rows again for each
+            // report would be its own step.
+            var rows = ScalarInt64("SELECT COUNT(*) FROM observations");
+            // Reported before the first rewrite, not after it. It used to come
+            // after, so the 43 seconds spent here were described as still
+            // making the copy.
+            ReportMigration(29, MigrationProgress.MovingRows, rows, 2, steps);
             // Old rows have no trustworthy process start time. Mark that fact
             // instead of manufacturing one; new observations never use this
             // namespace and therefore cannot merge into legacy ownership.
@@ -967,7 +990,6 @@ public sealed partial class ObservationStore : IDisposable
             Execute("UPDATE observations SET process_instance_id='legacy:pid:'||(SELECT process_id FROM flows WHERE flows.rowid=observations.flow_id)||':name:'||COALESCE(process_name,(SELECT process_name FROM flows WHERE flows.rowid=observations.flow_id),'unknown')");
             Execute("UPDATE delivery_queue SET process_instance_id='legacy:pid:'||process_id||':name:'||process_name");
             Execute("UPDATE delivery_queue SET stable_key=UPPER(protocol)||'|'||local_address||'|'||local_port||'|'||remote_address||'|'||remote_port||'|'||process_id||'|'||process_instance_id");
-            ReportMigration(29, MigrationProgress.MovingRows, ScalarInt64("SELECT COUNT(*) FROM observations"));
             Execute("""
                 CREATE TABLE flows_v29(
                   flow_key TEXT PRIMARY KEY, protocol TEXT NOT NULL, local_address TEXT NOT NULL,
@@ -989,13 +1011,14 @@ public sealed partial class ObservationStore : IDisposable
             // "has this flow no observations?" once per flow. Without this
             // index that is a full scan of observations per row of flows.
             //
-            // Measured on the machine this was written for: 650,325 flows
+            // Measured on the machine this was written for: 664,572 flows
             // against 31,647,027 observations sat for 25 minutes reading
             // 1.2 TB, one core saturated, having written nothing since the
             // first statement. It was not slow. It was not going to finish.
             //
             // The index costs one sort of the table and is dropped with it
             // below, so nothing carries it into the new schema.
+            ReportMigration(29, MigrationProgress.MovingRows, rows, 3, steps);
             Execute("CREATE INDEX IF NOT EXISTS observations_flow_id ON observations(flow_id)");
             // And a gate, because "too slow" is invisible in a test and
             // catastrophic on real data: refuse to run rather than discover
@@ -1013,6 +1036,7 @@ public sealed partial class ObservationStore : IDisposable
             // Raw observations still know UDP's real peer and the process
             // name at that instant. Split those rows instead of carrying the
             // old socket-only identity into the new schema.
+            ReportMigration(29, MigrationProgress.MovingRows, rows, 4, steps);
             Execute("""
                 INSERT INTO flows_v29(flow_key,protocol,local_address,local_port,remote_address,remote_port,
                   process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,
@@ -1026,7 +1050,9 @@ public sealed partial class ObservationStore : IDisposable
                 GROUP BY f.protocol,f.local_address,f.local_port,o.remote_address,o.remote_port,
                          f.process_id,o.process_instance_id,COALESCE(o.process_name,f.process_name);
                 """);
+            ReportMigration(29, MigrationProgress.MovingRows, rows, 5, steps);
             Execute(FlowsWithoutObservations);
+            ReportMigration(29, MigrationProgress.MovingRows, rows, 6, steps);
             Execute("""
                 INSERT INTO observations_v29(id,observed_at,flow_id,remote_address,remote_port,bytes_sent,
                   bytes_received,layer,source,process_name,remote_hostname,process_instance_id)
@@ -1035,6 +1061,7 @@ public sealed partial class ObservationStore : IDisposable
                 FROM observations o JOIN flows f ON f.rowid=o.flow_id JOIN flows_v29 n
                   ON n.flow_key=f.protocol||'|'||f.local_address||'|'||f.local_port||'|'||o.remote_address||'|'||o.remote_port||'|'||f.process_id||'|'||o.process_instance_id;
                 """);
+            ReportMigration(29, MigrationProgress.Finishing, rows, 7, steps);
             var before = ScalarInt64("SELECT COUNT(*) FROM observations");
             var after = ScalarInt64("SELECT COUNT(*) FROM observations_v29");
             if (before != after)
@@ -1048,6 +1075,7 @@ public sealed partial class ObservationStore : IDisposable
                 CREATE INDEX flows_last_seen ON flows(last_seen);
                 CREATE INDEX observations_observed_at ON observations(observed_at);
                 """);
+            ReportMigration(29, MigrationProgress.Finishing, rows, 8, steps);
             Execute("UPDATE schema_version SET version=29 WHERE version=28");
             Execute("COMMIT");
             PruneMigrationBackups(29);
@@ -1057,14 +1085,15 @@ public sealed partial class ObservationStore : IDisposable
 
     private void MigrateVersion26To27()
     {
-        CreateMigrationBackup(27);
+        const int steps = 3;
+        CreateMigrationBackup(27, steps);
         EnsureFreeSpaceForCopy();
         try
         {
             Execute("BEGIN IMMEDIATE");
             Execute(Version27Schema);
-            ReportMigration(27, MigrationProgress.MovingRows,
-                ScalarInt64("SELECT COUNT(*) FROM observations"));
+            var rows = ScalarInt64("SELECT COUNT(*) FROM observations");
+            ReportMigration(27, MigrationProgress.MovingRows, rows, 2, steps);
             Execute("""
                 INSERT INTO observations_v27(id,observed_at,flow_id,remote_address,remote_port,
                   bytes_sent,bytes_received,layer,source,process_name,remote_hostname)
@@ -1079,6 +1108,7 @@ public sealed partial class ObservationStore : IDisposable
                        bytes_sent,bytes_received,layer,source,process_name,remote_hostname
                 FROM observations;
                 """);
+            ReportMigration(27, MigrationProgress.Finishing, rows, 3, steps);
             var before = ScalarInt64("SELECT COUNT(*) FROM observations");
             var after = ScalarInt64("SELECT COUNT(*) FROM observations_v27");
             if (before != after)
@@ -1098,7 +1128,8 @@ public sealed partial class ObservationStore : IDisposable
 
     private void MigrateVersion25To26()
     {
-        CreateMigrationBackup(26);
+        const int steps = 4;
+        CreateMigrationBackup(26, steps);
         // Both tables exist at once in the middle of this, so the peak is the
         // database again on top of the backup. Rehearsed on the real file: a
         // 6.72 GiB database passed through 9.79 GiB of pages before the old
@@ -1109,8 +1140,8 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute("BEGIN IMMEDIATE");
             Execute(Version26Schema);
-            ReportMigration(26, MigrationProgress.MovingRows,
-                ScalarInt64("SELECT COUNT(*) FROM observations"));
+            var rows = ScalarInt64("SELECT COUNT(*) FROM observations");
+            ReportMigration(26, MigrationProgress.MovingRows, rows, 2, steps);
             // Flows arrived in v2. An observation older than that has nothing
             // to point at, and so does one whose flow retention removed first.
             //
@@ -1132,6 +1163,7 @@ public sealed partial class ObservationStore : IDisposable
                 WHERE NOT EXISTS(SELECT 1 FROM flows f WHERE f.flow_key={LegacyFlowKey})
                 GROUP BY {LegacyFlowKey},o.protocol,o.local_address,o.local_port,o.process_id;
                 """);
+            ReportMigration(26, MigrationProgress.MovingRows, rows, 3, steps);
             Execute($"""
                 INSERT INTO observations_v26(id,observed_at,flow_id,remote_address,remote_port,
                   bytes_sent,bytes_received,layer,source,process_name,remote_hostname)
@@ -1139,6 +1171,7 @@ public sealed partial class ObservationStore : IDisposable
                        o.bytes_sent,o.bytes_received,o.layer,o.source,o.process_name,o.remote_hostname
                 FROM observations o JOIN flows f ON f.flow_key={LegacyFlowKey};
                 """);
+            ReportMigration(26, MigrationProgress.Finishing, rows, 4, steps);
             var before = ScalarInt64("SELECT COUNT(*) FROM observations");
             var after = ScalarInt64("SELECT COUNT(*) FROM observations_v26");
             if (before != after)
@@ -1156,7 +1189,11 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
-    private string CreateMigrationBackup(int targetVersion)
+    /// Copies the database aside before a migration changes it.
+    ///
+    /// steps is the length of the migration that follows, for the ones that
+    /// say where they are; the copy is always its first step.
+    private string CreateMigrationBackup(int targetVersion, int steps = 0)
     {
         var backup = $"{path}.pre-v{targetVersion}.bak";
         if (File.Exists(backup)) return backup;
@@ -1164,7 +1201,7 @@ public sealed partial class ObservationStore : IDisposable
         // Said before it starts, not after. On the machine this was measured
         // on the copy took fifteen seconds of the hundred and fifty, and a
         // reader watching nothing happen cannot tell which part they are in.
-        ReportMigration(targetVersion, MigrationProgress.BackingUp, 0);
+        ReportMigration(targetVersion, MigrationProgress.BackingUp, 0, steps == 0 ? 0 : 1, steps);
         Execute($"VACUUM INTO '{Sql(backup)}'");
         return backup;
     }
@@ -1173,21 +1210,31 @@ public sealed partial class ObservationStore : IDisposable
     ///
     /// Read back rather than remembered, so the phase and the size in the
     /// report are the ones that were actually written: what the reader was
-    /// last told is what they keep, with "failed" in front of it.
+    /// last told is what they keep, with "failed" in front of it. The step
+    /// and the start are kept too -- "failed at step 6 of 8, 12 minutes in"
+    /// is what someone reading a diagnostics bundle needs.
+    ///
+    /// The heartbeat stops first. A failure is final, and a beat arriving
+    /// after it would write "moving rows" back over "failed".
     private void ReportMigrationFailed(long currentVersion)
     {
+        reporter.Stop();
         var last = MigrationProgress.Read(path);
         MigrationProgress.Write(path, new(
             last?.FromVersion ?? (int)currentVersion,
             last?.ToVersion ?? CurrentSchemaVersion,
-            MigrationProgress.Failed, last?.Rows ?? 0, DateTimeOffset.UtcNow));
+            MigrationProgress.Failed, last?.Rows ?? 0, last?.At ?? DateTimeOffset.UtcNow,
+            last?.Step ?? 0, last?.Steps ?? 0, Environment.ProcessId, DateTimeOffset.UtcNow));
     }
 
     /// Writes down what this migration is doing, for a window that cannot ask.
-    private void ReportMigration(int targetVersion, string phase, long rows)
+    ///
+    /// step and steps are its position; zero for the migrations that were
+    /// written before a position was worth saying, which are the ones that
+    /// finish in a moment.
+    private void ReportMigration(int targetVersion, string phase, long rows, int step = 0, int steps = 0)
     {
-        var progress = new MigrationProgress(targetVersion - 1, targetVersion, phase, rows, DateTimeOffset.UtcNow);
-        MigrationProgress.Write(path, progress);
+        var progress = reporter.Report(targetVersion - 1, targetVersion, phase, rows, step, steps);
         onMigration?.Invoke(progress);
     }
 
