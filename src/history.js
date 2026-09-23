@@ -6,7 +6,10 @@ const { summarizeAppGroups } = require('./app-classifier');
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
-const { runMigrations } = require('./db-migrate');
+const { runMigrations, SCHEMA_VERSION } = require('./db-migrate');
+const {
+  checkLiveDatabase, isCorruptionError, restoreFromCandidates, DbRestoreFailClosedError,
+} = require('./db-restore');
 const { MIGRATED_IDS, expandSourceToRouterIds, routerKindForId } = require('./router-id');
 const { checkObservationConsistency: checkConsistency } = require('./observation-consistency');
 const { createHistoryCache, DEFAULT_HOT_MAX_ENTRIES } = require('./history-cache');
@@ -154,37 +157,19 @@ function _openDb(p) {
   return d;
 }
 
-function _isDbHealthy(d) {
-  try { return d.pragma('integrity_check')[0]?.integrity_check === 'ok'; }
-  catch { return false; }
-}
+// The tables a Hub database cannot be without. A candidate lacking them is not
+// a backup of this Hub, whatever `integrity_check` says -- an empty file passes
+// that check with no tables at all.
+const RESTORE_REQUIRED_TABLES = ['connections'];
 
-function _removeDbFiles(p) {
-  for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(p + suffix); } catch {}
-  }
-}
-
-/**
- * Copy the most recent backup generation over `targetPath`.
- * Backup files are closed snapshots, so a plain copy is safe.
- * @returns {boolean} true if a backup was copied
- */
-function _tryRestoreLatestBackup(targetPath) {
-  try {
-    const backup = require('./backup');  // lazy: backup.js has no dependency on history.js
-    const list = backup.listBackups();   // sorted oldest first
-    if (!list.length) return false;
-    const latest = list[list.length - 1];
-    const p = backup.getBackupPath(latest.name);
-    if (!p) return false;
-    fs.copyFileSync(p, targetPath);
-    logger.info(`[history] Restored from backup: ${latest.name}`);
-    return true;
-  } catch (e) {
-    logger.error('[history] Backup restore failed:', e.message);
-    return false;
-  }
+/** Backup files newest first, as paths. */
+function _backupCandidates() {
+  const backup = require('./backup');  // lazy: backup.js has no dependency on history.js
+  return backup.listBackups()
+    .slice()
+    .reverse()
+    .map(entry => backup.getBackupPath(entry.name))
+    .filter(Boolean);
 }
 
 function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
@@ -192,30 +177,42 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
   ensuredRouterIds = new Set();
   const actualPath = dbPath === ':memory:' ? ':memory:' : (dbPath ? path.resolve(dbPath) : DEFAULT_DB_PATH);
   currentDbPath = actualPath;
-  // A heavily corrupted file can throw on open (SQLITE_NOTADB from the first
-  // pragma), so treat open failure and integrity failure the same way.
-  try { db = _openDb(actualPath); } catch { db = null; }
-  _secureDbFiles();
-
-  // Integrity check on startup; on failure, try the latest backup before
-  // falling back to an empty database.
-  if (!db || !_isDbHealthy(db)) {
-    logger.error('[history] Database integrity check failed');
-    if (db) { try { db.close(); } catch {} }
-    _removeDbFiles(actualPath);
-
-    if (_tryRestoreLatestBackup(actualPath)) {
-      try { db = _openDb(actualPath); } catch { db = null; }
-      if (!db || !_isDbHealthy(db)) {
-        logger.error('[history] Restored backup is also corrupt, recreating empty DB');
-        if (db) { try { db.close(); } catch {} }
-        _removeDbFiles(actualPath);
-        db = _openDb(actualPath);
-      }
-    } else {
-      logger.warn('[history] No usable backup found, recreating empty DB');
-      db = _openDb(actualPath);
+  // Startup check, failing closed (db-restore.js says why). Only a check that
+  // ran and found damage leads to a restore, and the restore never removes the
+  // live file until a backup has been copied beside it and verified. Anything
+  // else stops the start with the files as they were.
+  let damaged = false;
+  try {
+    db = _openDb(actualPath);
+  } catch (error) {
+    if (!isCorruptionError(error)) {
+      throw new DbRestoreFailClosedError(
+        `The database could not be opened (${error.code || error.message}). `
+        + 'It has not been touched. Stopping rather than guessing.',
+        { cause: error }
+      );
     }
+    db = null;
+    damaged = true;
+  }
+  _secureDbFiles();
+  if (db && checkLiveDatabase(db) === 'corrupt') damaged = true;
+
+  if (damaged) {
+    logger.error('[history] Database integrity check failed; looking for a backup that verifies');
+    if (db) { try { db.close(); } catch {} db = null; }
+    if (actualPath === ':memory:') {
+      throw new DbRestoreFailClosedError('An in-memory database failed its check.');
+    }
+    restoreFromCandidates({
+      targetPath: actualPath,
+      candidates: _backupCandidates(),
+      Database,
+      maxSchemaVersion: SCHEMA_VERSION,
+      requiredTables: RESTORE_REQUIRED_TABLES,
+      logger,
+    });
+    db = _openDb(actualPath);
     _secureDbFiles();
   }
 
