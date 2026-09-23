@@ -67,13 +67,14 @@ public sealed partial class ObservationStore
                 continue;
             }
             var id = Guid.NewGuid().ToString("D");
-            var stable = Sql(StartupSnapshot.FlowKey(item.Protocol, item.LocalAddress, item.LocalPort, item.RemoteAddress, item.RemotePort, item.ProcessId));
+            var instanceId = item.ProcessInstanceId ?? $"legacy:pid:{item.ProcessId}:name:{item.ProcessName ?? "unknown"}";
+            var stable = Sql(StartupSnapshot.FlowKey(item.Protocol, item.LocalAddress, item.LocalPort, item.RemoteAddress, item.RemotePort, item.ProcessId, instanceId));
             var first = item.ObservedAt.ToUniversalTime().ToString("O");
             var sent = item.BytesSent?.ToString() ?? "NULL";
             var received = item.BytesReceived?.ToString() ?? "NULL";
             Execute($"""
-                INSERT INTO delivery_queue(delivery_id,stable_key,protocol,local_address,local_port,remote_address,remote_port,process_id,process_name,first_observed_at,last_observed_at,bytes_in,bytes_out,queued_at,batch_id,remote_hostname)
-                VALUES('{id}','{stable}','{item.Protocol.ToLowerInvariant()}','{Sql(item.LocalAddress)}',{item.LocalPort},'{Sql(item.RemoteAddress)}',{item.RemotePort},{item.ProcessId},'{Sql(item.ProcessName!)}','{first}','{first}',{received},{sent},'{queuedAt.ToUniversalTime():O}',NULL,{(item.RemoteHostname is null ? "NULL" : $"'{Sql(item.RemoteHostname)}'")})
+                INSERT INTO delivery_queue(delivery_id,stable_key,protocol,local_address,local_port,remote_address,remote_port,process_id,process_name,first_observed_at,last_observed_at,bytes_in,bytes_out,queued_at,batch_id,remote_hostname,process_instance_id)
+                VALUES('{id}','{stable}','{item.Protocol.ToLowerInvariant()}','{Sql(item.LocalAddress)}',{item.LocalPort},'{Sql(item.RemoteAddress)}',{item.RemotePort},{item.ProcessId},'{Sql(item.ProcessName!)}','{first}','{first}',{received},{sent},'{queuedAt.ToUniversalTime():O}',NULL,{(item.RemoteHostname is null ? "NULL" : $"'{Sql(item.RemoteHostname)}'")},'{Sql(instanceId)}')
                 ON CONFLICT(stable_key) WHERE batch_id IS NULL DO UPDATE SET first_observed_at=MIN(delivery_queue.first_observed_at,excluded.first_observed_at),last_observed_at=MAX(delivery_queue.last_observed_at,excluded.last_observed_at),process_name=excluded.process_name,remote_hostname=COALESCE(excluded.remote_hostname,delivery_queue.remote_hostname),bytes_in=CASE WHEN delivery_queue.bytes_in IS NULL OR excluded.bytes_in IS NULL THEN NULL ELSE delivery_queue.bytes_in+excluded.bytes_in END,bytes_out=CASE WHEN delivery_queue.bytes_out IS NULL OR excluded.bytes_out IS NULL THEN NULL ELSE delivery_queue.bytes_out+excluded.bytes_out END
                 """);
         }

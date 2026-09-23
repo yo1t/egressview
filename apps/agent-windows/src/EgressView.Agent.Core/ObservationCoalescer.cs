@@ -121,7 +121,7 @@ internal sealed class ObservationCoalescer
         Truncate(observation.ObservedAt), observation.ProcessId, observation.Protocol,
         observation.LocalAddress, observation.LocalPort, observation.RemoteAddress, observation.RemotePort,
         observation.Layer, observation.InterfaceId, observation.Source,
-        observation.ProcessName, observation.RemoteHostname);
+        observation.ProcessName, observation.RemoteHostname, observation.ProcessInstanceId);
 
     internal static DateTimeOffset Truncate(DateTimeOffset value) =>
         new(value.UtcTicks - value.UtcTicks % BucketDuration.Ticks, TimeSpan.Zero);
@@ -130,7 +130,7 @@ internal sealed class ObservationCoalescer
         DateTimeOffset BucketStart, int ProcessId, string Protocol,
         string LocalAddress, int LocalPort, string RemoteAddress, int RemotePort,
         ObservationLayer Layer, string? InterfaceId, string Source,
-        string? ProcessName, string? RemoteHostname);
+        string? ProcessName, string? RemoteHostname, string? ProcessInstanceId);
 
     /// One flow's running total within one bucket.
     ///

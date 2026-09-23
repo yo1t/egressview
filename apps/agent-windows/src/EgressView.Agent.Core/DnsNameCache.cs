@@ -6,7 +6,7 @@ namespace EgressView.Agent.Core;
 internal sealed class DnsNameCache(TimeSpan? ttl = null, int capacity = 50_000)
 {
     private readonly TimeSpan ttl = ttl ?? TimeSpan.FromMinutes(10);
-    private readonly Dictionary<(int ProcessId, string Address), Entry> entries = [];
+    private readonly Dictionary<(string ProcessInstanceId, string Address), Entry> entries = [];
     private readonly object gate = new();
     private readonly IdnMapping idn = new();
 
@@ -14,9 +14,9 @@ internal sealed class DnsNameCache(TimeSpan? ttl = null, int capacity = 50_000)
     public long CacheHits { get; private set; }
     public long CacheMisses { get; private set; }
 
-    public void Observe(int processId, string? queryName, string? queryResults, DateTimeOffset observedAt)
+    public void Observe(string? processInstanceId, string? queryName, string? queryResults, DateTimeOffset observedAt)
     {
-        if (processId <= 0 || NormalizeHostname(queryName) is not { } hostname || string.IsNullOrWhiteSpace(queryResults)) return;
+        if (string.IsNullOrWhiteSpace(processInstanceId) || NormalizeHostname(queryName) is not { } hostname || string.IsNullOrWhiteSpace(queryResults)) return;
         var addresses = queryResults.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(CanonicalAddress).Where(value => value is not null).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (addresses.Length == 0) return;
@@ -27,7 +27,7 @@ internal sealed class DnsNameCache(TimeSpan? ttl = null, int capacity = 50_000)
             if (entries.Count + addresses.Length > capacity)
                 foreach (var key in entries.OrderBy(item => item.Value.ObservedAt).Take(entries.Count + addresses.Length - capacity).Select(item => item.Key).ToArray())
                     entries.Remove(key);
-            foreach (var address in addresses) entries[(processId, address!)] = new(hostname, observedAt);
+            foreach (var address in addresses) entries[(processInstanceId, address!)] = new(hostname, observedAt);
         }
     }
 
@@ -43,13 +43,24 @@ internal sealed class DnsNameCache(TimeSpan? ttl = null, int capacity = 50_000)
         lock (gate) entries.Clear();
     }
 
-    public string? Resolve(int processId, string address, DateTimeOffset observedAt)
+    internal void Observe(int processId, string? queryName, string? queryResults, DateTimeOffset observedAt) =>
+        Observe($"legacy:pid:{processId}", queryName, queryResults, observedAt);
+
+    public void ForgetProcessInstance(string? processInstanceId)
+    {
+        if (string.IsNullOrWhiteSpace(processInstanceId)) return;
+        lock (gate)
+            foreach (var key in entries.Keys.Where(key => key.ProcessInstanceId == processInstanceId).ToArray())
+                entries.Remove(key);
+    }
+
+    public string? Resolve(string? processInstanceId, string address, DateTimeOffset observedAt)
     {
         var canonical = CanonicalAddress(address);
-        if (processId <= 0 || canonical is null) { lock (gate) CacheMisses++; return null; }
+        if (string.IsNullOrWhiteSpace(processInstanceId) || canonical is null) { lock (gate) CacheMisses++; return null; }
         lock (gate)
         {
-            if (entries.TryGetValue((processId, canonical), out var entry) && observedAt - entry.ObservedAt <= ttl && observedAt >= entry.ObservedAt - TimeSpan.FromSeconds(2))
+            if (entries.TryGetValue((processInstanceId, canonical), out var entry) && observedAt - entry.ObservedAt <= ttl && observedAt >= entry.ObservedAt - TimeSpan.FromSeconds(2))
             {
                 CacheHits++;
                 return entry.Hostname;
@@ -58,6 +69,9 @@ internal sealed class DnsNameCache(TimeSpan? ttl = null, int capacity = 50_000)
             return null;
         }
     }
+
+    internal string? Resolve(int processId, string address, DateTimeOffset observedAt) =>
+        Resolve($"legacy:pid:{processId}", address, observedAt);
 
     internal string? NormalizeHostname(string? value)
     {

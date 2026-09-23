@@ -60,9 +60,10 @@ public static class StartupSnapshot
             // exists to fill the gap for connections already carrying traffic.
             if (state != 5) continue; // MIB_TCP_STATE_ESTAB
             var pid = BitConverter.ToInt32(buffer, offset + (family == AfInet ? 20 : 52));
+            var identity = names.ResolveIdentity(pid, observedAt);
             yield return family == AfInet
-                ? new StartupFlow("TCP", V4(buffer, offset + 4), Port(buffer, offset + 8), V4(buffer, offset + 12), Port(buffer, offset + 16), pid, names.Resolve(pid, observedAt))
-                : new StartupFlow("TCP", V6(buffer, offset), Port(buffer, offset + 20), V6(buffer, offset + 24), Port(buffer, offset + 44), pid, names.Resolve(pid, observedAt));
+                ? new StartupFlow("TCP", V4(buffer, offset + 4), Port(buffer, offset + 8), V4(buffer, offset + 12), Port(buffer, offset + 16), pid, identity.Name, identity.InstanceId)
+                : new StartupFlow("TCP", V6(buffer, offset), Port(buffer, offset + 20), V6(buffer, offset + 24), Port(buffer, offset + 44), pid, identity.Name, identity.InstanceId);
         }
     }
 
@@ -75,14 +76,16 @@ public static class StartupSnapshot
             var offset = 4 + index * rowSize;
             if (offset + rowSize > buffer.Length) yield break;
             var pid = BitConverter.ToInt32(buffer, offset + (family == AfInet ? 8 : 24));
+            var identity = names.ResolveIdentity(pid, observedAt);
             yield return family == AfInet
-                ? new StartupFlow("UDP", V4(buffer, offset), Port(buffer, offset + 4), "", 0, pid, names.Resolve(pid, observedAt))
-                : new StartupFlow("UDP", V6(buffer, offset), Port(buffer, offset + 20), "", 0, pid, names.Resolve(pid, observedAt));
+                ? new StartupFlow("UDP", V4(buffer, offset), Port(buffer, offset + 4), "", 0, pid, identity.Name, identity.InstanceId)
+                : new StartupFlow("UDP", V6(buffer, offset), Port(buffer, offset + 20), "", 0, pid, identity.Name, identity.InstanceId);
         }
     }
 
-    public static string FlowKey(string protocol, string localAddress, int localPort, string remoteAddress, int remotePort, int processId) =>
-        protocol == "UDP" ? $"UDP|{localAddress}|{localPort}|{processId}" : $"TCP|{localAddress}|{localPort}|{remoteAddress}|{remotePort}|{processId}";
+    public static string FlowKey(string protocol, string localAddress, int localPort, string remoteAddress, int remotePort,
+        int processId, string? processInstanceId = null) =>
+        $"{protocol}|{localAddress}|{localPort}|{remoteAddress}|{remotePort}|{processId}|{processInstanceId ?? $"legacy:pid:{processId}"}";
     private static int Port(byte[] buffer, int offset) { var raw = BitConverter.ToUInt32(buffer, offset); return (int)(((raw & 0xff) << 8) | ((raw >> 8) & 0xff)); }
     private static string V4(byte[] buffer, int offset) => new IPAddress(BitConverter.GetBytes(BitConverter.ToUInt32(buffer, offset))).ToString();
     private static string V6(byte[] buffer, int offset) { var bytes = new byte[16]; Array.Copy(buffer, offset, bytes, 0, 16); return new IPAddress(bytes).ToString(); }

@@ -20,7 +20,8 @@ public sealed record NetworkObservation(
     string? InterfaceId,
     string Source,
     string? ProcessName = null,
-    string? RemoteHostname = null);
+    string? RemoteHostname = null,
+    string? ProcessInstanceId = null);
 
 public sealed record StartupFlow(
     string Protocol,
@@ -29,7 +30,8 @@ public sealed record StartupFlow(
     string RemoteAddress,
     int RemotePort,
     int ProcessId,
-    string? ProcessName = null);
+    string? ProcessName = null,
+    string? ProcessInstanceId = null);
 
 public sealed record HourlySummary(
     DateTimeOffset BucketStart,
@@ -56,7 +58,8 @@ public sealed record RecentFlow(
     string? InterfaceId,
     string Origin,
     string? RemoteHostname = null,
-    string? CountryCode = null);
+    string? CountryCode = null,
+    string? ProcessInstanceId = null);
 
 public enum RunComponent { Service, Ui }
 

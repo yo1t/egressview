@@ -321,7 +321,8 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private void RecordDnsResult(TraceEvent e)
     {
         if ((int)e.ID != 3008 || !string.Equals(Payload(e, "QueryStatus"), "0", StringComparison.Ordinal)) return;
-        dnsNames.Observe(e.ProcessID, Payload(e, "QueryName"), Payload(e, "QueryResults"), e.TimeStamp.ToUniversalTime());
+        var identity = processNames.ResolveIdentity(e.ProcessID, e.TimeStamp.ToUniversalTime());
+        dnsNames.Observe(identity.InstanceId, Payload(e, "QueryName"), Payload(e, "QueryResults"), e.TimeStamp.ToUniversalTime());
     }
 
     /// Names a process from its lifecycle events, before its traffic is seen.
@@ -343,19 +344,25 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
 
         if (started)
         {
+            var previous = processNames.ResolveIdentity(pid, createdAt.AddTicks(-1));
+            dnsNames.ForgetProcessInstance(previous.InstanceId);
             processNames.Learn(pid, createdAt);
             return;
         }
 
+        var stopping = processNames.ResolveIdentity(pid, e.TimeStamp.ToUniversalTime());
+        dnsNames.ForgetProcessInstance(stopping.InstanceId);
         var stoppedName = processNames.Observe(pid, Payload(e, "ImageName"), createdAt);
         if (stoppedName is not null)
         {
+            var stoppedIdentity = processNames.ResolveIdentity(pid, e.TimeStamp.ToUniversalTime());
             foreach (var observation in deferredNames.Complete(pid, createdAt, stoppedName))
             {
                 var localInterface = FindInterface(observation.LocalAddress);
                 pipeline.TrySubmit(observation with
                 {
                     Layer = IsVpnTransport(stoppedName, localInterface) ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
+                    ProcessInstanceId = stoppedIdentity.InstanceId,
                 });
             }
         }
@@ -418,15 +425,16 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         // The event timestamp, not the current time: events reach here through
         // a channel, so a short-lived process may already be gone by now and
         // the name has to be judged against when the traffic happened.
-        var processName = processNames.Resolve(pid, e.TimeStamp.ToUniversalTime());
-        var remoteHostname = dnsNames.Resolve(pid, remoteAddress, e.TimeStamp.ToUniversalTime());
+        var process = processNames.ResolveIdentity(pid, e.TimeStamp.ToUniversalTime());
+        var processName = process.Name;
+        var remoteHostname = dnsNames.Resolve(process.InstanceId, remoteAddress, e.TimeStamp.ToUniversalTime());
         var layer = IsVpnTransport(processName, localInterface) ? ObservationLayer.VpnTransport : ObservationLayer.Logical;
         var observation = new NetworkObservation(
             e.TimeStamp.ToUniversalTime(), pid,
             e.EventName.Contains("UDP", StringComparison.OrdinalIgnoreCase) ? "UDP" : "TCP",
             localAddress, localPort, remoteAddress, remotePort,
             direction == Direction.Send ? bytes : 0, direction == Direction.Receive ? bytes : 0,
-            layer, localInterface?.Id, "etw", processName, remoteHostname);
+            layer, localInterface?.Id, "etw", processName, remoteHostname, process.InstanceId);
         if (processName is null
             && processNames.TryGetUnresolvedStart(pid, out var processStartedAt)
             && deferredNames.TryDefer(observation, processStartedAt, observation.ObservedAt))

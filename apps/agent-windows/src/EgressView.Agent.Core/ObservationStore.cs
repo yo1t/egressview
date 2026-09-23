@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 28;
+    private const int CurrentSchemaVersion = 29;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -258,6 +258,22 @@ public sealed partial class ObservationStore : IDisposable
           bytes_unknown INTEGER NOT NULL,
           PRIMARY KEY(bucket_start,application,layer,scope)
         );
+        """;
+
+    private const string Version29Schema = """
+        ALTER TABLE flows ADD COLUMN process_instance_id TEXT NOT NULL DEFAULT 'legacy:unknown';
+        ALTER TABLE observations ADD COLUMN process_instance_id TEXT NOT NULL DEFAULT 'legacy:unknown';
+        ALTER TABLE delivery_queue ADD COLUMN process_instance_id TEXT NOT NULL DEFAULT 'legacy:unknown';
+        CREATE TABLE IF NOT EXISTS startup_udp_placeholders(
+          coverage_id INTEGER NOT NULL,
+          local_address TEXT NOT NULL,
+          local_port INTEGER NOT NULL,
+          process_id INTEGER NOT NULL,
+          process_name TEXT,
+          process_instance_id TEXT NOT NULL,
+          FOREIGN KEY(coverage_id) REFERENCES coverage_sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS startup_udp_placeholders_coverage ON startup_udp_placeholders(coverage_id);
         """;
 
     private const string Version27Schema = """
@@ -515,7 +531,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); {Version29Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -554,7 +570,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 24) { MigrateVersion24To25(); version = 25; }
         if (version == 25) { MigrateVersion25To26(); version = 26; }
         if (version == 26) { MigrateVersion26To27(); version = 27; }
-        if (version == 27) MigrateVersion27To28();
+        if (version == 27) { MigrateVersion27To28(); version = 28; }
+        if (version == 28) MigrateVersion28To29();
         ValidateSchema();
         }
         catch { ReportMigrationFailed(startedAt); throw; }
@@ -917,6 +934,86 @@ public sealed partial class ObservationStore : IDisposable
                 COMMIT;
                 """);
             PruneMigrationBackups(28);
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    private void MigrateVersion28To29()
+    {
+        CreateMigrationBackup(29);
+        EnsureFreeSpaceForCopy();
+        try
+        {
+            Execute("BEGIN IMMEDIATE");
+            Execute(Version29Schema);
+            // Old rows have no trustworthy process start time. Mark that fact
+            // instead of manufacturing one; new observations never use this
+            // namespace and therefore cannot merge into legacy ownership.
+            Execute("UPDATE flows SET process_instance_id='legacy:pid:'||process_id||':name:'||COALESCE(process_name,'unknown')");
+            Execute("UPDATE observations SET process_instance_id='legacy:pid:'||(SELECT process_id FROM flows WHERE flows.rowid=observations.flow_id)||':name:'||COALESCE(process_name,(SELECT process_name FROM flows WHERE flows.rowid=observations.flow_id),'unknown')");
+            Execute("UPDATE delivery_queue SET process_instance_id='legacy:pid:'||process_id||':name:'||process_name");
+            Execute("UPDATE delivery_queue SET stable_key=UPPER(protocol)||'|'||local_address||'|'||local_port||'|'||remote_address||'|'||remote_port||'|'||process_id||'|'||process_instance_id");
+            ReportMigration(29, MigrationProgress.MovingRows, ScalarInt64("SELECT COUNT(*) FROM observations"));
+            Execute("""
+                CREATE TABLE flows_v29(
+                  flow_key TEXT PRIMARY KEY, protocol TEXT NOT NULL, local_address TEXT NOT NULL,
+                  local_port INTEGER NOT NULL, remote_address TEXT NOT NULL, remote_port INTEGER NOT NULL,
+                  process_id INTEGER NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+                  origin TEXT NOT NULL CHECK(origin IN ('snapshot','etw','both')), bytes_sent INTEGER,
+                  bytes_received INTEGER, layer TEXT NOT NULL CHECK(layer IN ('logical','vpn_transport')),
+                  interface_id TEXT, process_name TEXT, remote_hostname TEXT,
+                  process_instance_id TEXT NOT NULL);
+                CREATE TABLE observations_v29(
+                  id INTEGER PRIMARY KEY, observed_at INTEGER NOT NULL, flow_id INTEGER NOT NULL,
+                  remote_address TEXT NOT NULL, remote_port INTEGER NOT NULL, bytes_sent INTEGER,
+                  bytes_received INTEGER, layer TEXT NOT NULL CHECK(layer IN ('logical','vpn_transport')),
+                  source TEXT NOT NULL CHECK(source IN ('etw','snapshot')), process_name TEXT,
+                  remote_hostname TEXT, process_instance_id TEXT NOT NULL);
+                """);
+            // Raw observations still know UDP's real peer and the process
+            // name at that instant. Split those rows instead of carrying the
+            // old socket-only identity into the new schema.
+            Execute("""
+                INSERT INTO flows_v29(flow_key,protocol,local_address,local_port,remote_address,remote_port,
+                  process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,
+                  process_name,remote_hostname,process_instance_id)
+                SELECT f.protocol||'|'||f.local_address||'|'||f.local_port||'|'||o.remote_address||'|'||o.remote_port||'|'||f.process_id||'|'||o.process_instance_id,
+                       f.protocol,f.local_address,f.local_port,o.remote_address,o.remote_port,f.process_id,
+                       f.first_seen,f.last_seen,f.origin,SUM(o.bytes_sent),SUM(o.bytes_received),
+                       MIN(o.layer),f.interface_id,COALESCE(o.process_name,f.process_name),
+                       MIN(COALESCE(o.remote_hostname,f.remote_hostname)),o.process_instance_id
+                FROM observations o JOIN flows f ON f.rowid=o.flow_id
+                GROUP BY f.protocol,f.local_address,f.local_port,o.remote_address,o.remote_port,
+                         f.process_id,o.process_instance_id,COALESCE(o.process_name,f.process_name);
+                INSERT INTO flows_v29
+                SELECT f.protocol||'|'||f.local_address||'|'||f.local_port||'|'||f.remote_address||'|'||f.remote_port||'|'||f.process_id||'|'||f.process_instance_id,
+                       f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,
+                       f.first_seen,f.last_seen,f.origin,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,
+                       f.process_name,f.remote_hostname,f.process_instance_id
+                FROM flows f WHERE NOT EXISTS(SELECT 1 FROM observations o WHERE o.flow_id=f.rowid);
+                INSERT INTO observations_v29(id,observed_at,flow_id,remote_address,remote_port,bytes_sent,
+                  bytes_received,layer,source,process_name,remote_hostname,process_instance_id)
+                SELECT o.id,o.observed_at,n.rowid,o.remote_address,o.remote_port,o.bytes_sent,o.bytes_received,
+                       o.layer,o.source,o.process_name,o.remote_hostname,o.process_instance_id
+                FROM observations o JOIN flows f ON f.rowid=o.flow_id JOIN flows_v29 n
+                  ON n.flow_key=f.protocol||'|'||f.local_address||'|'||f.local_port||'|'||o.remote_address||'|'||o.remote_port||'|'||f.process_id||'|'||o.process_instance_id;
+                """);
+            var before = ScalarInt64("SELECT COUNT(*) FROM observations");
+            var after = ScalarInt64("SELECT COUNT(*) FROM observations_v29");
+            if (before != after)
+                throw new ObservationStoreException(StoreFailureKind.SchemaInvalid,
+                    $"Separating process instances would keep {after} of {before} observations.");
+            Execute("""
+                DROP TABLE observations;
+                DROP TABLE flows;
+                ALTER TABLE flows_v29 RENAME TO flows;
+                ALTER TABLE observations_v29 RENAME TO observations;
+                CREATE INDEX flows_last_seen ON flows(last_seen);
+                CREATE INDEX observations_observed_at ON observations(observed_at);
+                """);
+            Execute("UPDATE schema_version SET version=29 WHERE version=28");
+            Execute("COMMIT");
+            PruneMigrationBackups(29);
         }
         catch { TryRollback(); throw; }
     }
@@ -1347,6 +1444,9 @@ public sealed partial class ObservationStore : IDisposable
         var hostnameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='remote_hostname') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='remote_hostname')");
         if (hostnameColumns != 2)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing remote hostname columns.");
+        var instanceColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_instance_id') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_instance_id') + (SELECT COUNT(*) FROM pragma_table_info('delivery_queue') WHERE name='process_instance_id')");
+        if (instanceColumns != 3 || ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='startup_udp_placeholders'") != 1)
+            throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing process-instance identity storage.");
         if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('delivery_state') WHERE name='delivery_enabled'") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing the delivery opt-in state.");
         if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('delivery_queue') WHERE name='remote_hostname'") != 1)
@@ -1373,13 +1473,13 @@ public sealed partial class ObservationStore : IDisposable
             {
                 const string sql = """
                     INSERT INTO observations(observed_at,flow_id,remote_address,remote_port,
-                      bytes_sent,bytes_received,layer,source,process_name,remote_hostname)
-                    VALUES(?,?,?,?,?,?,?,?,?,?)
+                      bytes_sent,bytes_received,layer,source,process_name,remote_hostname,process_instance_id)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?)
                     """;
                 const string flowSql = """
                     INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,
-                      process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name,remote_hostname)
-                    VALUES(?,?,?,?,?,?,?,?,?,'etw',?,?,?,?,?,?)
+                      process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name,remote_hostname,process_instance_id)
+                    VALUES(?,?,?,?,?,?,?,?,?,'etw',?,?,?,?,?,?,?)
                     ON CONFLICT(flow_key) DO UPDATE SET
                       -- The earliest and the latest, not the latest arrival.
                       -- Observations do not reach here in time order, and
@@ -1405,7 +1505,8 @@ public sealed partial class ObservationStore : IDisposable
                     {
                         // The flow goes first now, because the observation
                         // needs the id it hands back.
-                        Bind(flowStatement, 1, StartupSnapshot.FlowKey(item.Protocol, item.LocalAddress, item.LocalPort, item.RemoteAddress, item.RemotePort, item.ProcessId));
+                        var instanceId = item.ProcessInstanceId ?? $"legacy:pid:{item.ProcessId}:name:{item.ProcessName ?? "unknown"}";
+                        Bind(flowStatement, 1, StartupSnapshot.FlowKey(item.Protocol, item.LocalAddress, item.LocalPort, item.RemoteAddress, item.RemotePort, item.ProcessId, instanceId));
                         Bind(flowStatement, 2, item.Protocol); Bind(flowStatement, 3, item.LocalAddress);
                         Check(WinSqlite.BindInt64(flowStatement, 4, item.LocalPort)); Bind(flowStatement, 5, item.RemoteAddress);
                         Check(WinSqlite.BindInt64(flowStatement, 6, item.RemotePort)); Check(WinSqlite.BindInt64(flowStatement, 7, item.ProcessId));
@@ -1414,6 +1515,7 @@ public sealed partial class ObservationStore : IDisposable
                         Bind(flowStatement, 12, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport"); BindNullable(flowStatement, 13, item.InterfaceId);
                         BindNullable(flowStatement, 14, item.ProcessName);
                         BindNullable(flowStatement, 15, NormalizeDomain(item.RemoteHostname));
+                        Bind(flowStatement, 16, instanceId);
                         CheckQueryRow(WinSqlite.Step(flowStatement));
                         var flowId = WinSqlite.ColumnInt64(flowStatement, 0);
                         CheckDone(WinSqlite.Step(flowStatement));
@@ -1428,6 +1530,7 @@ public sealed partial class ObservationStore : IDisposable
                         Bind(statement, 8, item.Source);
                         BindNullable(statement, 9, item.ProcessName);
                         BindNullable(statement, 10, NormalizeDomain(item.RemoteHostname));
+                        Bind(statement, 11, instanceId);
                         CheckDone(WinSqlite.Step(statement));
                         Check(WinSqlite.Reset(statement));
                         Check(WinSqlite.ClearBindings(statement));
@@ -1537,7 +1640,7 @@ public sealed partial class ObservationStore : IDisposable
         if (offset is < 0 or > 10_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
         lock (gate)
         {
-            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code)";
+            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code),f.process_instance_id";
             var cutoff = before is null ? string.Empty : $"WHERE f.last_seen<'{Sql(before.Value.ToUniversalTime().ToString("O"))}'";
             var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address LEFT JOIN local_country_cache lc ON lc.ip=f.remote_address {cutoff} ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
@@ -1689,14 +1792,20 @@ public sealed partial class ObservationStore : IDisposable
                 // last heartbeat is the last instant we can honestly claim;
                 // never extend that abandoned session to this new start.
                 Execute("UPDATE coverage_sessions SET ended_at=COALESCE(confirmed_at,started_at),interrupted=1 WHERE ended_at IS NULL");
-                foreach (var flow in snapshot)
-                {
-                    var key = StartupSnapshot.FlowKey(flow.Protocol, flow.LocalAddress, flow.LocalPort, flow.RemoteAddress, flow.RemotePort, flow.ProcessId).Replace("'", "''", StringComparison.Ordinal);
-                    var processName = flow.ProcessName is null ? "NULL" : $"'{Sql(flow.ProcessName)}'";
-                    Execute($"INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name,remote_hostname) VALUES('{key}','{flow.Protocol}','{flow.LocalAddress}',{flow.LocalPort},'{flow.RemoteAddress}',{flow.RemotePort},{flow.ProcessId},'{startedAt:O}','{startedAt:O}','snapshot',NULL,NULL,'logical',NULL,{processName},NULL) ON CONFLICT(flow_key) DO NOTHING");
-                }
                 Execute($"INSERT INTO coverage_sessions(started_at,confirmed_at,snapshot_count) VALUES('{startedAt:O}','{startedAt:O}',{snapshot.Count})");
                 var id = ScalarInt64("SELECT last_insert_rowid()");
+                foreach (var flow in snapshot)
+                {
+                    var instanceId = flow.ProcessInstanceId ?? $"legacy:pid:{flow.ProcessId}:name:{flow.ProcessName ?? "unknown"}";
+                    var processName = flow.ProcessName is null ? "NULL" : $"'{Sql(flow.ProcessName)}'";
+                    if (flow.Protocol == "UDP" && string.IsNullOrEmpty(flow.RemoteAddress))
+                    {
+                        Execute($"INSERT INTO startup_udp_placeholders(coverage_id,local_address,local_port,process_id,process_name,process_instance_id) VALUES({id},'{Sql(flow.LocalAddress)}',{flow.LocalPort},{flow.ProcessId},{processName},'{Sql(instanceId)}')");
+                        continue;
+                    }
+                    var key = StartupSnapshot.FlowKey(flow.Protocol, flow.LocalAddress, flow.LocalPort, flow.RemoteAddress, flow.RemotePort, flow.ProcessId, instanceId).Replace("'", "''", StringComparison.Ordinal);
+                    Execute($"INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name,remote_hostname,process_instance_id) VALUES('{key}','{flow.Protocol}','{flow.LocalAddress}',{flow.LocalPort},'{flow.RemoteAddress}',{flow.RemotePort},{flow.ProcessId},'{startedAt:O}','{startedAt:O}','snapshot',NULL,NULL,'logical',NULL,{processName},NULL,'{Sql(instanceId)}') ON CONFLICT(flow_key) DO NOTHING");
+                }
                 Execute("COMMIT");
                 return id;
             }
@@ -2307,7 +2416,7 @@ public sealed partial class ObservationStore : IDisposable
         if (offset is < 0 or > 1_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
         lock (gate)
         {
-            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code)";
+            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code),f.process_instance_id";
             var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address LEFT JOIN local_country_cache lc ON lc.ip=f.remote_address ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
         }
@@ -2334,7 +2443,7 @@ public sealed partial class ObservationStore : IDisposable
             // No hostname column here -- enrichment lands on the flow, not on
             // the event, so this reads as unresolved rather than as wrong.
             const string columns = "o.observed_at,o.observed_at,fl.protocol,fl.local_address,fl.local_port,o.remote_address," +
-                "o.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code)";
+                "o.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),o.process_instance_id";
             var sql = $"SELECT {columns} FROM observations o JOIN flows fl ON fl.rowid=o.flow_id LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"ORDER BY o.observed_at DESC,o.id DESC LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
@@ -2370,7 +2479,7 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate)
         {
             const string columns = "o.observed_at,o.observed_at,fl.protocol,fl.local_address,fl.local_port,o.remote_address," +
-                "o.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code)";
+                "o.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),o.process_instance_id";
             var sql = $"SELECT {columns},o.id FROM observations o JOIN flows fl ON fl.rowid=o.flow_id LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"WHERE o.id>{afterId} ORDER BY o.id LIMIT {limit}";
             var rows = ReadRecentFlowQuery(sql, out var lastId);
@@ -2412,8 +2521,9 @@ public sealed partial class ObservationStore : IDisposable
                     Text(statement, 5), (int)WinSqlite.ColumnInt64(statement, 6), (int)WinSqlite.ColumnInt64(statement, 7),
                     NullableTextValue(statement, 8), NullableInt64(statement, 9), NullableInt64(statement, 10),
                     Text(statement, 11) == "vpn_transport" ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
-                    NullableTextValue(statement, 12), Text(statement, 13), NullableTextValue(statement, 14), NullableTextValue(statement, 15)));
-                if (WinSqlite.ColumnCount(statement) > 16) lastId = WinSqlite.ColumnInt64(statement, 16);
+                    NullableTextValue(statement, 12), Text(statement, 13), NullableTextValue(statement, 14), NullableTextValue(statement, 15),
+                    NullableTextValue(statement, 16)));
+                if (WinSqlite.ColumnCount(statement) > 17) lastId = WinSqlite.ColumnInt64(statement, 17);
             }
         }
         finally { WinSqlite.Finalize(statement); }
