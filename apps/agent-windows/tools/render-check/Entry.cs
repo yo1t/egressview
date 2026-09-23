@@ -181,7 +181,39 @@ internal static class Entry
             if (!flagged) throw new InvalidOperationException("a stopped migration does not read as stopped");
             if (failed == migrating)
                 throw new InvalidOperationException("and it says the same thing as one still running");
-            Console.WriteLine("unavailable text: a migration is not a broken service, and a stopped one is not a running one");
+
+            // A migration whose writer is gone. On 2026-09-23 the service was
+            // stopped mid-migration and the tray said "updating" for as long
+            // as anyone looked. A heartbeat older than StaleAfter is how the
+            // window knows, whoever holds the PID now.
+            var now = DateTimeOffset.UtcNow;
+            MigrationProgress.Write(db, new(28, 29, MigrationProgress.MovingRows, 31_647_027, now.AddMinutes(-26),
+                6, 8, Environment.ProcessId, now - MigrationProgress.StaleAfter - TimeSpan.FromSeconds(5)));
+            var interrupted = MigrationDisplay.Describe();
+            MigrationProgress.Clear(db);
+            if (interrupted?.State != MigrationState.Interrupted)
+                throw new InvalidOperationException($"a migration with no heartbeat for a minute reads as {interrupted?.State}, not interrupted");
+            if (interrupted.Text == migrating || interrupted.Text == failed)
+                throw new InvalidOperationException("and it says the same thing as a running or a failed one");
+
+            // And one that is running says where it is. "Step 6 of 8, 26
+            // minutes" beside steps that took a minute each is what would have
+            // told a stuck migration from a slow one.
+            MigrationProgress.Write(db, new(28, 29, MigrationProgress.MovingRows, 31_647_027, now.AddMinutes(-26),
+                6, 8, Environment.ProcessId, now));
+            var positioned = MigrationDisplay.Describe();
+            MigrationProgress.Write(db, new(28, 29, MigrationProgress.MovingRows, 31_647_027, now.AddMinutes(-26)));
+            var unpositioned = MigrationDisplay.Describe();
+            MigrationProgress.Clear(db);
+            if (positioned?.State != MigrationState.Running)
+                throw new InvalidOperationException($"a migration that beat just now reads as {positioned?.State}");
+            if (positioned.Text == unpositioned?.Text
+                || !positioned.Text.Contains('6') || !positioned.Text.Contains('8')
+                || !positioned.Text.Contains(MainWindow.FormatDuration(26 * 60), StringComparison.Ordinal))
+                throw new InvalidOperationException($"and it does not say which step of how many, or for how long: \"{positioned.Text}\"");
+            Console.WriteLine("unavailable text: a migration is not a broken service, a stopped one is not a running one, and an abandoned one is neither");
+            Console.WriteLine($"  running:     {positioned.Text}");
+            Console.WriteLine($"  interrupted: {interrupted.Text}");
         }
 
         var timelineStart = new DateTimeOffset(2026, 9, 6, 10, 0, 0, TimeSpan.FromHours(9));

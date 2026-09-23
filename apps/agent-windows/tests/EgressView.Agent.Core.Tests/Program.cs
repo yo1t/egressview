@@ -1064,12 +1064,13 @@ try
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
         var movingSteps = reported.Where(step => step.Phase == MigrationProgress.MovingRows).ToArray();
-        Assert(movingSteps.Length == 4,
-            $"each phase that takes time says so before it starts, not {movingSteps.Length} of them");
+        var movingVersions = movingSteps.Select(step => step.ToVersion).Distinct().Count();
+        Assert(movingVersions == 4,
+            $"each migration that takes time says so before it starts, not {movingVersions} of them");
         // The one that moves the observations. v28 rewrites the folded hours,
         // of which this fixture has none, so taking "the last" asked the
         // wrong migration how much work it had.
-        var moving = movingSteps.Single(step => step.ToVersion == 27);
+        var moving = movingSteps.Single(step => step.ToVersion == 27 && step.Step == 2);
         Assert(moving is not null, "the phase that takes the time says so before it starts");
         // Four, because the fixture has four. A report of zero reads as "this
         // will be quick" for a wait that is anything but, and a number nobody
@@ -1086,6 +1087,112 @@ try
             "a finished migration leaves nothing behind for the window to misread as ongoing");
         Assert(!File.Exists(MigrationProgress.PathFor(watched)),
             "and the file itself is gone");
+
+        // Where it is, not only what it is doing (P3-165). On 2026-09-23 a
+        // migration that could not finish and one that was merely slow read
+        // the same for twenty-five minutes, because the file said "moving
+        // rows" and nothing else.
+        foreach (var (version, length) in new[] { (26, 4), (27, 3), (28, 3), (29, 8) })
+        {
+            var steps = reported.Where(step => step.ToVersion == version).ToArray();
+            var positions = steps.Select(step => step.Step).ToArray();
+            Assert(positions.SequenceEqual(Enumerable.Range(1, length)),
+                $"v{version} reports every step once and in order, not [{string.Join(",", positions)}]");
+            Assert(steps.All(step => step.Steps == length),
+                $"and every report of v{version} says how many steps there are");
+            // The clock a reader wants is "how long has this been going", so
+            // it is the start of the migration, not of the step.
+            Assert(steps.Select(step => step.At).Distinct().Count() == 1,
+                $"and v{version} keeps one start time across its steps");
+            Assert(steps.All(step => step.ProcessId == Environment.ProcessId && step.Heartbeat is not null),
+                $"and every report of v{version} says who wrote it and when they were last alive");
+        }
+        // The copy is step one; the rewriting of 31 million rows is not
+        // described as still making it. It used to be, for 43 seconds.
+        var v29 = reported.Where(step => step.ToVersion == 29).ToArray();
+        Assert(v29[0].Phase == MigrationProgress.BackingUp && v29[1].Phase == MigrationProgress.MovingRows,
+            "v29 says it is moving rows before the first rewrite, not after it");
+        Assert(v29[^1].Phase == MigrationProgress.Finishing,
+            "and says it is finishing while it swaps the tables and commits");
+    }
+
+    // Whether what the file describes is still going on (P3-166). On
+    // 2026-09-23 the service was stopped mid-migration and the tray went on
+    // saying "updating" for as long as anyone looked, about a migration
+    // nothing was running.
+    {
+        var now = DateTimeOffset.UtcNow;
+        bool Alive(int _) => true;
+        bool Gone(int _) => false;
+        var fresh = new MigrationProgress(28, 29, MigrationProgress.MovingRows, 31_647_027, now.AddMinutes(-4),
+            5, 8, 4242, now.AddSeconds(-2));
+
+        Assert(fresh.StateAt(now, Alive) == MigrationState.Running,
+            "a writer that is there and beat two seconds ago is running");
+        Assert(fresh.StateAt(now, Gone) == MigrationState.Interrupted,
+            "a writer whose process is gone is interrupted at once, whatever its last beat says");
+        // The PID is reused; a new process that happens to get it must not
+        // keep a dead migration looking alive. The heartbeat is what catches
+        // that.
+        var stale = fresh with { Heartbeat = now - MigrationProgress.StaleAfter - TimeSpan.FromSeconds(1) };
+        Assert(stale.StateAt(now, Alive) == MigrationState.Interrupted,
+            "a heartbeat older than StaleAfter is interrupted even when some process holds the PID");
+        var justInside = fresh with { Heartbeat = now - MigrationProgress.StaleAfter + TimeSpan.FromSeconds(1) };
+        Assert(justInside.StateAt(now, Alive) == MigrationState.Running,
+            "and one just inside it is not");
+        Assert((fresh with { Phase = MigrationProgress.Failed }).StateAt(now, Gone) == MigrationState.Failed,
+            "a migration that said it failed is failed, not interrupted, whatever happened to its writer");
+        // Written by a version from before any of this: taken at its word,
+        // which is what the window did before.
+        var legacy = new MigrationProgress(25, 26, MigrationProgress.MovingRows, 10, now.AddHours(-3));
+        Assert(legacy.StateAt(now, Gone) == MigrationState.Running,
+            "a file with no heartbeat cannot be judged and is described as it says");
+
+        // The new fields survive the file, and the old five-field line still
+        // reads.
+        var roundTrip = Path.Combine(directory, "round-trip.db");
+        MigrationProgress.Write(roundTrip, fresh);
+        var back = MigrationProgress.Read(roundTrip);
+        Assert(back is { Step: 5, Steps: 8, ProcessId: 4242 } && back.Heartbeat == fresh.Heartbeat && back.At == fresh.At,
+            $"the position, the writer and the heartbeat survive the file, not {back}");
+        File.WriteAllText(MigrationProgress.PathFor(roundTrip),
+            string.Join('\t', "25", "26", MigrationProgress.MovingRows, "10", now.ToString("O")));
+        var old = MigrationProgress.Read(roundTrip);
+        Assert(old is { FromVersion: 25, ToVersion: 26, Rows: 10, Steps: 0, Heartbeat: null },
+            "a five-field file from before still reads");
+        MigrationProgress.Clear(roundTrip);
+
+        // This process is running; a PID that no process can have is not.
+        Assert(MigrationProgress.ProcessIsRunning(Environment.ProcessId),
+            "the running process is found");
+        Assert(!MigrationProgress.ProcessIsRunning(int.MaxValue),
+            "and one that cannot exist is not");
+    }
+
+    // The heartbeat beats on its own, and stops for good. A statement of the
+    // v29 migration took 134 seconds; a heartbeat that waited for it would
+    // make a working migration look dead.
+    {
+        var beating = Path.Combine(directory, "beating.db");
+        var reporter = new MigrationReporter(beating, TimeSpan.FromMilliseconds(40));
+        var first = reporter.Report(28, 29, MigrationProgress.MovingRows, 100, 6, 8);
+        Thread.Sleep(400);
+        var later = MigrationProgress.Read(beating);
+        Assert(later is not null && later.Heartbeat > first.Heartbeat,
+            "the heartbeat moves while nothing else does");
+        Assert(later!.Step == 6 && later.At == first.At,
+            "and it repeats the step it was given rather than inventing one");
+
+        reporter.Stop();
+        var stoppedAt = MigrationProgress.Read(beating)!.Heartbeat;
+        Thread.Sleep(300);
+        Assert(MigrationProgress.Read(beating)!.Heartbeat == stoppedAt,
+            "once stopped it does not beat again");
+        MigrationProgress.Clear(beating);
+        Thread.Sleep(200);
+        Assert(!File.Exists(MigrationProgress.PathFor(beating)),
+            "and a finished migration's file, once cleared, is not written back by a late beat");
+        reporter.Dispose();
     }
 
     // A migration that stops has to say so. Left alone, the file keeps the
@@ -1108,6 +1215,12 @@ try
         // Twenty-six, not the newest: the fixture is rigged to fail there,
         // and what the report has to carry is the step that stopped.
         Assert(left.ToVersion == 26, "and which version it was trying to reach");
+        // And where in it: step one of four, the copy, because the table the
+        // fixture planted makes the schema change after it fail.
+        Assert(left.Step == 1 && left.Steps == 4,
+            $"and how far it got, not step {left.Step} of {left.Steps}");
+        Assert(left.StateAt(DateTimeOffset.UtcNow) == MigrationState.Failed,
+            "and it reads as failed, not as interrupted, now that its writer has moved on");
     }
 
     // The window is headed "outbound traffic from this PC" and its

@@ -195,6 +195,9 @@ public partial class App : System.Windows.Application
             diagnosticsItem is null || aboutItem is null || checkUpdatesItem is null || installUpdateItem is null || exitItem is null) return;
         var ja = LocalizationManager.EffectiveLanguage == "ja";
         var state = MonitoringStatus.Current;
+        // Read once for both lines below, so the status and its tooltip
+        // cannot describe the same file two different ways.
+        var migration = state.Kind == MonitoringPresentationKind.Unavailable ? MigrationDisplay.Describe() : null;
         trayStatus.Text = state.Kind switch
         {
             MonitoringPresentationKind.Monitoring => ja ? "状態: 監視中" : "Status: Monitoring",
@@ -205,10 +208,16 @@ public partial class App : System.Windows.Application
             // migration is two minutes of unreachable that nobody needs to do
             // anything about, filed under the same words as a service that
             // died.
-            MonitoringPresentationKind.Unavailable when MigrationDisplay.Text() is not null =>
-                MigrationDisplay.Failed()
-                    ? (ja ? "状態: 更新に失敗" : "Status: Update failed")
-                    : (ja ? "状態: 更新中" : "Status: Updating"),
+            //
+            // And a migration whose service has been stopped is neither. It
+            // said "updating" for as long as anyone looked on 2026-09-23,
+            // about a migration nothing was running.
+            MonitoringPresentationKind.Unavailable when migration is not null => migration.State switch
+            {
+                MigrationState.Failed => ja ? "状態: 更新に失敗" : "Status: Update failed",
+                MigrationState.Interrupted => ja ? "状態: 更新が中断" : "Status: Update interrupted",
+                _ => ja ? "状態: 更新中" : "Status: Updating",
+            },
             MonitoringPresentationKind.Unavailable => state.LastConfirmedAt is { } at
                 ? $"{(ja ? "状態取得不可" : "Status unavailable")} · {at.ToLocalTime():g}"
                 : (ja ? "状態取得不可" : "Status unavailable"),
@@ -218,7 +227,7 @@ public partial class App : System.Windows.Application
         {
             MonitoringPresentationKind.NeedsAttention when !string.IsNullOrWhiteSpace(state.IssueCode) =>
                 $"{state.IssueCode}{(string.IsNullOrWhiteSpace(state.IssueAction) ? string.Empty : $": {state.IssueAction}")}",
-            MonitoringPresentationKind.Unavailable when MigrationDisplay.Text() is { } migrating => migrating,
+            MonitoringPresentationKind.Unavailable when migration is not null => migration.Text,
             MonitoringPresentationKind.Unavailable when state.LastConfirmedAt is { } at =>
                 $"{(ja ? "最終確認" : "Last confirmed")} {at.ToLocalTime():g}",
             _ => string.Empty,
