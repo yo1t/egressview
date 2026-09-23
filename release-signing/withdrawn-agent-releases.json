@@ -1,0 +1,24 @@
+{
+  "//": "Agent versions that were built or published and must not be installed or published again, recorded rather than deleted. This is not the Hub's unsigned-releases.json: agent versions are published to dl.egressview.com by publish-agent-release.js, not as GitHub releases, and they carry their own version line per platform. Every entry names what supersedes it, because a withdrawal with nothing to move to is an instruction nobody can follow. The publisher refuses to publish a version listed here.",
+  "schemaVersion": 1,
+  "releases": [
+    {
+      "platform": "windows",
+      "version": "0.1.117",
+      "kind": "published-and-withdrawn",
+      "publishedAt": "2026-09-23",
+      "supersededBy": "0.1.120",
+      "reason": "The v28 to v29 migration scans observations once per flow, because observations.flow_id has no index. On a database of 31,647,027 observations and 664,572 flows it ran for twenty-five minutes without writing a byte and was not going to finish. A machine that installs this and has a database of any size stops recording and does not start again. Fixed in 0.1.120 by PR #639; the migration then takes 8m49s on the same data.",
+      "recordedAt": "2026-09-23"
+    },
+    {
+      "platform": "windows",
+      "version": "0.1.118",
+      "kind": "ambiguous-build",
+      "publishedAt": null,
+      "supersededBy": "0.1.120",
+      "reason": "Never published. Two different builds carry this number: one with the unindexed migration and one with the fix. Installing the second over the first changed nothing, because Windows Installer skips payloads whose version has not moved, and msiexec returned 0 while replacing no files. The number cannot identify a build and must not be used to name one.",
+      "recordedAt": "2026-09-23"
+    }
+  ]
+}
