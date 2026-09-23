@@ -13,6 +13,7 @@ const {
   takeCleanShutdownMarker,
   chooseStartupCheck,
   writeCleanShutdownMarker,
+  openHandlesTo,
 } = require('../../src/db-startup-check');
 const { checkLiveDatabase } = require('../../src/db-restore');
 
@@ -142,7 +143,7 @@ describe('start, stop and start again', () => {
     history._initForTest(db);
     assert.equal(history.getStartupCheck().mode, 'full');
     history.closeDb();
-    assert.equal(history.markCleanShutdown(), true);
+    assert.equal(history.markCleanShutdown().written, true);
 
     history._initForTest(db);
     assert.equal(history.getStartupCheck().mode, 'quick');
@@ -164,7 +165,7 @@ describe('start, stop and start again', () => {
 
   it('refuses to record a clean stop while the database is still open', () => {
     history._initForTest(db);
-    assert.equal(history.markCleanShutdown(), false);
+    assert.equal(history.markCleanShutdown().written, false);
     assert.equal(fs.existsSync(markerPath(db)), false);
   });
 
@@ -185,5 +186,63 @@ describe('start, stop and start again', () => {
     writeCleanShutdownMarker(db, { lastFullCheckAt: Date.now() - FULL_CHECK_MAX_AGE_MS - DAY });
     history._initForTest(db);
     assert.equal(history.getStartupCheck().mode, 'full');
+  });
+});
+
+// Review finding: the first version wrote the marker after three of the
+// eleven connections to the database had closed. "Clean" now means the
+// process holds no descriptor on the database at all, whoever opened it.
+describe('handles still open at shutdown', () => {
+  // A stand-in for /proc/self/fd: one symlink per descriptor.
+  function fakeFdDir(targets) {
+    const fdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fds-'));
+    targets.forEach((target, i) => fs.symlinkSync(target, path.join(fdDir, String(i + 3))));
+    return fdDir;
+  }
+
+  it('finds the database, its -wal and -shm among the open descriptors', () => {
+    const fdDir = fakeFdDir([db, `${db}-wal`, `${db}-shm`, '/dev/null', path.join(dir, 'other.db')]);
+    try {
+      assert.deepEqual(openHandlesTo(db, { fdDir }).sort(), [db, `${db}-shm`, `${db}-wal`].sort());
+    } finally {
+      fs.rmSync(fdDir, { recursive: true, force: true });
+    }
+  });
+
+  it('finds nothing when only other files are open', () => {
+    const fdDir = fakeFdDir(['/dev/null', path.join(dir, 'other.db')]);
+    try {
+      assert.deepEqual(openHandlesTo(db, { fdDir }), []);
+    } finally {
+      fs.rmSync(fdDir, { recursive: true, force: true });
+    }
+  });
+
+  it('says it cannot tell where descriptors cannot be listed', () => {
+    assert.equal(openHandlesTo(db, { fdDir: path.join(dir, 'no-such-dir') }), null);
+  });
+
+  describe('recording the clean stop', () => {
+    const history = require('../../src/history');
+    const backup = require('../../src/backup');
+    beforeEach(() => backup._setPathsForTest(db, path.join(dir, 'backups')));
+    afterEach(() => history._initForTest());
+
+    it('refuses while another module still holds the database open', () => {
+      history._initForTest(db);
+      history.closeDb();
+      const result = history.markCleanShutdown({ openHandles: () => [db, `${db}-wal`] });
+      assert.equal(result.written, false);
+      assert.match(result.reason, /2 handle\(s\).*hub\.db/);
+      assert.equal(fs.existsSync(markerPath(db)), false, 'a marker was written with handles still open');
+    });
+
+    it('writes it once every handle is closed', () => {
+      history._initForTest(db);
+      history.closeDb();
+      const result = history.markCleanShutdown({ openHandles: () => [] });
+      assert.equal(result.written, true);
+      assert.equal(fs.existsSync(markerPath(db)), true);
+    });
   });
 });

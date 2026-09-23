@@ -11,7 +11,7 @@ const {
   checkLiveDatabase, isCorruptionError, restoreFromCandidates, DbRestoreFailClosedError,
 } = require('./db-restore');
 const {
-  takeCleanShutdownMarker, chooseStartupCheck, writeCleanShutdownMarker,
+  takeCleanShutdownMarker, chooseStartupCheck, writeCleanShutdownMarker, openHandlesTo,
 } = require('./db-startup-check');
 const { MIGRATED_IDS, expandSourceToRouterIds, routerKindForId } = require('./router-id');
 const { checkObservationConsistency: checkConsistency } = require('./observation-consistency');
@@ -802,14 +802,28 @@ function closeDb() {
 /**
  * Records that this run stopped in an orderly way, so the next start can use
  * the quick check. Called by the SIGTERM path after every database is closed,
- * and by nothing else. Refuses when this module's connection did not close
- * cleanly, or was never closed: a marker has to be earned.
+ * and by nothing else. A marker has to be earned:
+ *
+ *   - this module's connection closed cleanly, and
+ *   - the process holds no descriptor on the database, -wal, -shm or
+ *     -journal at all -- whichever module opened it.
+ *
+ * @returns {{ written: boolean, reason: string }}
  */
-function markCleanShutdown() {
-  if (!currentDbPath || currentDbPath === ':memory:') return false;
-  if (db || !closedCleanly) return false;
+function markCleanShutdown({ openHandles = openHandlesTo } = {}) {
+  if (!currentDbPath || currentDbPath === ':memory:') return { written: false, reason: 'no database file' };
+  if (db) return { written: false, reason: 'the database is still open' };
+  if (!closedCleanly) return { written: false, reason: 'the database did not close cleanly' };
+  const stillOpen = openHandles(currentDbPath);
+  if (stillOpen && stillOpen.length) {
+    return {
+      written: false,
+      reason: `${stillOpen.length} handle(s) to the database are still open: `
+        + [...new Set(stillOpen.map(file => path.basename(file)))].join(', '),
+    };
+  }
   writeCleanShutdownMarker(currentDbPath, { lastFullCheckAt });
-  return true;
+  return { written: true, reason: stillOpen ? 'every handle closed' : 'handles cannot be listed on this platform' };
 }
 
 /** What the startup check did: mode, reason, duration, result. */
