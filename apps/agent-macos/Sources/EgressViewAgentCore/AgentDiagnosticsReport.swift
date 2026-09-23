@@ -92,6 +92,14 @@ public struct AgentDiagnosticsReport: Sendable {
         public var abandonedCount: Int
         /// How many times a refused batch was halved. Not a loss.
         public var splitCount: Int
+        /// The schema the store is on, the copies taken before past
+        /// migrations, and whether the last migration finished (P3-161).
+        /// Nothing showed any of this, so a user asking why their disk is
+        /// full, or why the agent was silent after an update, sent a report
+        /// that could not answer either question.
+        public var schemaVersion: Int
+        public var migrationBackups: [MigrationBackup]
+        public var interruptedMigration: MigrationProgress?
         public var threatIntelSource: String
         /// What happened to the runs before this one. Empty on a Mac where the
         /// App Group container could not be opened, which the report says
@@ -112,6 +120,9 @@ public struct AgentDiagnosticsReport: Sendable {
             oldestPendingAt: Date?, lastAcknowledgedAt: Date?, unreadableStateResetAt: Date?,
             threatIntelSource: String, contractRejections: [String: Int] = [:],
             abandonedCount: Int = 0, splitCount: Int = 0,
+            schemaVersion: Int = 0,
+            migrationBackups: [MigrationBackup] = [],
+            interruptedMigration: MigrationProgress? = nil,
             runHistory: AgentRunHistory = AgentRunHistory(),
             installLog: InstallLog
         ) {
@@ -137,6 +148,9 @@ public struct AgentDiagnosticsReport: Sendable {
             self.contractRejections = contractRejections
             self.abandonedCount = abandonedCount
             self.splitCount = splitCount
+            self.schemaVersion = schemaVersion
+            self.migrationBackups = migrationBackups
+            self.interruptedMigration = interruptedMigration
             self.runHistory = runHistory
             self.installLog = installLog
         }
@@ -176,6 +190,59 @@ public struct AgentDiagnosticsReport: Sendable {
         let lines = text.split(whereSeparator: \.isNewline)
         let kept = lines.suffix(installLogLineLimit).joined(separator: "\n")
         return redactAccountNames(kept)
+    }
+
+    /// The schema the store is on, what the copies taken before past
+    /// migrations cost, and whether the last migration finished.
+    ///
+    /// Three questions this report could not answer before (P3-161): what
+    /// version the store is on, why there is a second database-sized file
+    /// beside it, and whether the silence after an update was a migration
+    /// that died halfway.
+    ///
+    /// The copies are listed individually rather than totalled, because one
+    /// per schema version is exactly the surprise: they are never replaced by
+    /// a newer one, so the list grows with every upgrade the agent has made.
+    static func renderMigrations(_ inputs: Inputs, when: (Date?) -> String) -> [String] {
+        func row(_ label: String, _ value: String) -> String {
+            let width = 21
+            let gap = label.count >= width ? " " : String(repeating: " ", count: width - label.count)
+            return "  " + label + gap + value
+        }
+        var lines = ["== Storage migrations"]
+        lines.append(row("schema version", inputs.schemaVersion > 0 ? "\(inputs.schemaVersion)" : "unknown"))
+
+        if let progress = inputs.interruptedMigration {
+            // Present at export time means the previous launch did not get
+            // through the migration. The next launch runs it again, so this is
+            // a fact about the last start, not a permanent fault.
+            lines.append(row(
+                "last migration",
+                "did not finish: v\(progress.fromVersion) -> v\(progress.toVersion), "
+                + "started \(when(progress.startedAt))"
+            ))
+        } else {
+            lines.append(row("last migration", "finished"))
+        }
+
+        guard !inputs.migrationBackups.isEmpty else {
+            lines.append(row("copies kept", "none"))
+            return lines
+        }
+        let total = inputs.migrationBackups.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        lines.append(row(
+            "copies kept",
+            "\(inputs.migrationBackups.count), \(Self.bytes(total)) in total"
+        ))
+        for backup in inputs.migrationBackups {
+            lines.append("    from v\(backup.fromVersion): \(Self.bytes(backup.sizeBytes)), "
+                + "\(when(backup.modifiedAt))  \(backup.url.lastPathComponent)")
+        }
+        return lines
+    }
+
+    static func bytes(_ value: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
     }
 
     /// The runs before this one, as counts and times.
@@ -302,6 +369,8 @@ public struct AgentDiagnosticsReport: Sendable {
             lines.append(row("given up on", "\(inputs.abandonedCount)"))
             lines.append(row("batches split", "\(inputs.splitCount)"))
         }
+        lines.append("")
+        lines.append(contentsOf: Self.renderMigrations(inputs, when: when))
         lines.append("")
         lines.append("== Previous runs")
         lines.append(contentsOf: Self.renderRuns(inputs.runHistory, when: when))

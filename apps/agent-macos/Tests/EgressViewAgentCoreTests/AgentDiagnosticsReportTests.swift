@@ -3,7 +3,10 @@ import XCTest
 
 final class AgentDiagnosticsReportTests: XCTestCase {
     private func inputs(
-        installLog: AgentDiagnosticsReport.InstallLog = .absent
+        installLog: AgentDiagnosticsReport.InstallLog = .absent,
+        schemaVersion: Int = 15,
+        migrationBackups: [MigrationBackup] = [],
+        interruptedMigration: MigrationProgress? = nil
     ) -> AgentDiagnosticsReport.Inputs {
         AgentDiagnosticsReport.Inputs(
             generatedAt: Date(timeIntervalSince1970: 1_770_000_000),
@@ -31,8 +34,57 @@ final class AgentDiagnosticsReportTests: XCTestCase {
             lastAcknowledgedAt: nil,
             unreadableStateResetAt: nil,
             threatIntelSource: "directDownload",
+            schemaVersion: schemaVersion,
+            migrationBackups: migrationBackups,
+            interruptedMigration: interruptedMigration,
             installLog: installLog
         )
+    }
+
+    // P3-161. A user whose agent went quiet after an update, or whose disk
+    // filled up, sent a report that mentioned neither the migration nor the
+    // database-sized copy sitting beside the store.
+    func test移行の状況が報告に出る() {
+        let report = AgentDiagnosticsReport(inputs(
+            schemaVersion: 15,
+            migrationBackups: [
+                MigrationBackup(
+                    fromVersion: 13, sizeBytes: 177_200_000,
+                    modifiedAt: Date(timeIntervalSince1970: 1_769_000_000),
+                    url: URL(fileURLWithPath: "/tmp/history.pre-v13.sqlite")
+                ),
+                MigrationBackup(
+                    fromVersion: 14, sizeBytes: 185_000_000,
+                    modifiedAt: Date(timeIntervalSince1970: 1_769_900_000),
+                    url: URL(fileURLWithPath: "/tmp/history.pre-v14.sqlite")
+                ),
+            ]
+        )).render()
+        XCTAssertTrue(report.contains("== Storage migrations"))
+        XCTAssertTrue(report.contains("schema version"), "the report cannot say what version the store is on")
+        XCTAssertTrue(report.contains("from v13"), "a copy the disk is carrying is not listed")
+        XCTAssertTrue(report.contains("from v14"))
+        // Listed one by one, not as a single total: one per version that is
+        // never replaced is exactly the surprise.
+        XCTAssertTrue(report.contains("2, "), "the count of copies is missing")
+    }
+
+    func test終わらなかった移行が報告に出る() {
+        let report = AgentDiagnosticsReport(inputs(
+            interruptedMigration: MigrationProgress(
+                stage: .migrating, fromVersion: 12, toVersion: 15, currentVersion: 13,
+                startedAt: Date(timeIntervalSince1970: 1_769_999_500)
+            )
+        )).render()
+        XCTAssertTrue(report.contains("did not finish"), "a migration that died is reported as finished")
+        XCTAssertTrue(report.contains("v12 -> v15"))
+    }
+
+    func test移行が終わっていれば終わったと言う() {
+        let report = AgentDiagnosticsReport(inputs()).render()
+        XCTAssertTrue(report.contains("last migration"))
+        XCTAssertFalse(report.contains("did not finish"))
+        XCTAssertTrue(report.contains("copies kept"))
     }
 
     func testReportCarriesNoTrafficOfTheUsers() {

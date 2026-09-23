@@ -304,6 +304,12 @@ public final class ObservationStore: @unchecked Sendable {
 
     deinit { sqlite3_close_v2(handle) }
 
+    /// The schema the open database is on. Read for the diagnostics report,
+    /// which could not say what version a store was (P3-161).
+    public func schemaVersion() -> Int {
+        lock.withLock { (try? scalar("PRAGMA user_version")) .flatMap { $0 } ?? 0 }
+    }
+
     public func setRetention(_ retention: ObservationRetention) {
         lock.withLock { self.retention = retention }
     }
