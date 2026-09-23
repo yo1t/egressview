@@ -10,6 +10,9 @@ const { runMigrations, SCHEMA_VERSION } = require('./db-migrate');
 const {
   checkLiveDatabase, isCorruptionError, restoreFromCandidates, DbRestoreFailClosedError,
 } = require('./db-restore');
+const {
+  takeCleanShutdownMarker, chooseStartupCheck, writeCleanShutdownMarker,
+} = require('./db-startup-check');
 const { MIGRATED_IDS, expandSourceToRouterIds, routerKindForId } = require('./router-id');
 const { checkObservationConsistency: checkConsistency } = require('./observation-consistency');
 const { createHistoryCache, DEFAULT_HOT_MAX_ENTRIES } = require('./history-cache');
@@ -162,6 +165,13 @@ function _openDb(p) {
 // that check with no tables at all.
 const RESTORE_REQUIRED_TABLES = ['connections'];
 
+// What the startup check did, and when the database was last checked in full.
+// Carried to the clean-shutdown marker, so the next start knows how old the
+// last full check is (db-startup-check.js).
+let startupCheck = null;
+let lastFullCheckAt = null;
+let closedCleanly = false;
+
 /** Backup files newest first, as paths. */
 function _backupCandidates() {
   const backup = require('./backup');  // lazy: backup.js has no dependency on history.js
@@ -181,6 +191,15 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
   // ran and found damage leads to a restore, and the restore never removes the
   // live file until a backup has been copied beside it and verified. Anything
   // else stops the start with the files as they were.
+  closedCleanly = false;
+  lastFullCheckAt = null;
+  let checkPlan = { mode: 'full', reason: 'in-memory database' };
+  if (actualPath !== ':memory:') {
+    const marker = takeCleanShutdownMarker(actualPath);
+    checkPlan = chooseStartupCheck(marker);
+    lastFullCheckAt = marker.lastFullCheckAt;
+  }
+
   let damaged = false;
   try {
     db = _openDb(actualPath);
@@ -196,7 +215,16 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
     damaged = true;
   }
   _secureDbFiles();
-  if (db && checkLiveDatabase(db) === 'corrupt') damaged = true;
+  const checkStartedAt = Date.now();
+  if (db && checkLiveDatabase(db, { mode: checkPlan.mode }) === 'corrupt') damaged = true;
+  startupCheck = {
+    ...checkPlan,
+    ms: Date.now() - checkStartedAt,
+    result: damaged ? 'damaged' : 'ok',
+  };
+  if (!damaged && checkPlan.mode === 'full') lastFullCheckAt = Date.now();
+  logger.info(`[history] Startup check: ${checkPlan.mode === 'quick' ? 'quick_check' : 'integrity_check'} `
+    + `(${checkPlan.reason}) -- ${startupCheck.result} in ${(startupCheck.ms / 1000).toFixed(1)} s`);
 
   if (damaged) {
     logger.error('[history] Database integrity check failed; looking for a backup that verifies');
@@ -214,6 +242,8 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
     });
     db = _openDb(actualPath);
     _secureDbFiles();
+    // The restored copy was verified in full before it was swapped in.
+    lastFullCheckAt = Date.now();
   }
 
   // Run versioned migrations (takes pre-migration backup if pending changes exist)
@@ -759,9 +789,32 @@ function setRetentionDays(days) {
 
 function closeDb() {
   if (db) {
-    try { db.close(); } catch {}
+    try {
+      db.close();
+      closedCleanly = true;
+    } catch {
+      closedCleanly = false;
+    }
     db = null;
   }
+}
+
+/**
+ * Records that this run stopped in an orderly way, so the next start can use
+ * the quick check. Called by the SIGTERM path after every database is closed,
+ * and by nothing else. Refuses when this module's connection did not close
+ * cleanly, or was never closed: a marker has to be earned.
+ */
+function markCleanShutdown() {
+  if (!currentDbPath || currentDbPath === ':memory:') return false;
+  if (db || !closedCleanly) return false;
+  writeCleanShutdownMarker(currentDbPath, { lastFullCheckAt });
+  return true;
+}
+
+/** What the startup check did: mode, reason, duration, result. */
+function getStartupCheck() {
+  return startupCheck ? { ...startupCheck, lastFullCheckAt } : null;
 }
 
 // ─── Test helper ─────────────────────────────────────────────────────────────
@@ -832,6 +885,8 @@ module.exports = {
   queryNewNodes,
   setRetentionDays,
   closeDb,
+  markCleanShutdown,
+  getStartupCheck,
   checkObservationConsistency,
   // An agent has no router identity, so it contributes no router observation.
   // Without this it fell through to the legacy placeholder and a machine
