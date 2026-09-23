@@ -938,6 +938,20 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    /// Flows that no observation refers to, carried across unchanged.
+    ///
+    /// Held here rather than inline so the plan check above and the statement
+    /// that runs are the same text: a gate on a copy of a query is a gate on
+    /// nothing.
+    private const string FlowsWithoutObservations = """
+                INSERT INTO flows_v29
+                SELECT f.protocol||'|'||f.local_address||'|'||f.local_port||'|'||f.remote_address||'|'||f.remote_port||'|'||f.process_id||'|'||f.process_instance_id,
+                       f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,
+                       f.first_seen,f.last_seen,f.origin,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,
+                       f.process_name,f.remote_hostname,f.process_instance_id
+                FROM flows f WHERE NOT EXISTS(SELECT 1 FROM observations o WHERE o.flow_id=f.rowid)
+                """;
+
     private void MigrateVersion28To29()
     {
         CreateMigrationBackup(29);
@@ -970,6 +984,32 @@ public sealed partial class ObservationStore : IDisposable
                   source TEXT NOT NULL CHECK(source IN ('etw','snapshot')), process_name TEXT,
                   remote_hostname TEXT, process_instance_id TEXT NOT NULL);
                 """);
+            // observations.flow_id has never been indexed -- the only index
+            // on the table is on observed_at -- and the anti-join below asks
+            // "has this flow no observations?" once per flow. Without this
+            // index that is a full scan of observations per row of flows.
+            //
+            // Measured on the machine this was written for: 650,325 flows
+            // against 31,647,027 observations sat for 25 minutes reading
+            // 1.2 TB, one core saturated, having written nothing since the
+            // first statement. It was not slow. It was not going to finish.
+            //
+            // The index costs one sort of the table and is dropped with it
+            // below, so nothing carries it into the new schema.
+            Execute("CREATE INDEX IF NOT EXISTS observations_flow_id ON observations(flow_id)");
+            // And a gate, because "too slow" is invisible in a test and
+            // catastrophic on real data: refuse to run rather than discover
+            // it on someone's machine after twenty-five minutes.
+            //
+            // Stated as "the index is used", not as "nothing is scanned".
+            // The first attempt looked for "SCAN observations", which cannot
+            // appear -- the table is aliased, so the plan says "SCAN o" -- and
+            // a mutation run removed the index with the gate still passing.
+            var plan = QueryPlan(FlowsWithoutObservations);
+            if (!plan.Contains("observations_flow_id", StringComparison.Ordinal))
+                throw new ObservationStoreException(StoreFailureKind.SchemaInvalid,
+                    $"Finding flows without observations would not use the index: {plan}");
+
             // Raw observations still know UDP's real peer and the process
             // name at that instant. Split those rows instead of carrying the
             // old socket-only identity into the new schema.
@@ -985,12 +1025,9 @@ public sealed partial class ObservationStore : IDisposable
                 FROM observations o JOIN flows f ON f.rowid=o.flow_id
                 GROUP BY f.protocol,f.local_address,f.local_port,o.remote_address,o.remote_port,
                          f.process_id,o.process_instance_id,COALESCE(o.process_name,f.process_name);
-                INSERT INTO flows_v29
-                SELECT f.protocol||'|'||f.local_address||'|'||f.local_port||'|'||f.remote_address||'|'||f.remote_port||'|'||f.process_id||'|'||f.process_instance_id,
-                       f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,
-                       f.first_seen,f.last_seen,f.origin,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,
-                       f.process_name,f.remote_hostname,f.process_instance_id
-                FROM flows f WHERE NOT EXISTS(SELECT 1 FROM observations o WHERE o.flow_id=f.rowid);
+                """);
+            Execute(FlowsWithoutObservations);
+            Execute("""
                 INSERT INTO observations_v29(id,observed_at,flow_id,remote_address,remote_port,bytes_sent,
                   bytes_received,layer,source,process_name,remote_hostname,process_instance_id)
                 SELECT o.id,o.observed_at,n.rowid,o.remote_address,o.remote_port,o.bytes_sent,o.bytes_received,
@@ -3387,6 +3424,20 @@ public sealed partial class ObservationStore : IDisposable
     {
         CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
         try { CheckQueryRow(WinSqlite.Step(statement)); return NullableTextValue(statement, 0); }
+        finally { WinSqlite.Finalize(statement); }
+    }
+
+    /// The detail column of EXPLAIN QUERY PLAN, joined, for asserting on.
+    private string QueryPlan(string sql)
+    {
+        CheckOperation(WinSqlite.Prepare(db, "EXPLAIN QUERY PLAN " + sql, -1, out var statement, 0));
+        try
+        {
+            var lines = new List<string>();
+            while (WinSqlite.Step(statement) == WinSqlite.Row)
+                lines.Add(Marshal.PtrToStringUTF8(WinSqlite.ColumnText(statement, 3)) ?? string.Empty);
+            return string.Join("; ", lines);
+        }
         finally { WinSqlite.Finalize(statement); }
     }
 
