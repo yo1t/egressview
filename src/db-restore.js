@@ -129,9 +129,10 @@ const SIDECARS = ['', '-wal', '-shm'];
  * back on failure; the test for a refused rename showed that the rename back
  * fails for the same reason, stranding the original under another name.)
  *
- * The damaged database's -wal and -shm are removed from beside the restored
- * file afterwards: SQLite would otherwise replay the damaged database's pages
- * into it. They survive under the preserved name.
+ * The damaged database's -wal and -shm are removed before the swap, so the
+ * restored file is never beside them, however the start stops: SQLite would
+ * otherwise replay the damaged database's pages into it. They survive under
+ * the preserved name, and are put back if the swap fails.
  *
  * @param {{
  *   targetPath: string,
@@ -190,33 +191,57 @@ function restoreFromCandidates({
       );
     }
 
-    // The one step that changes the live database, and it is atomic.
+    // The damaged database's -wal and -shm leave before the swap, not after.
+    // Removing them afterwards left a window, found in review: if the removal
+    // failed and the process stopped, the restart found the restored file
+    // with the damaged database's -wal beside it, and SQLite replays a -wal
+    // into whatever main file it sits next to. Their content is kept under
+    // the preserved name by the hard links above.
+    const removed = [];
+    const putBack = () => {
+      const unrestored = [];
+      for (const suffix of removed) {
+        try { fsImpl.linkSync(preserved + suffix, targetPath + suffix); } catch {
+          unrestored.push(preserved + suffix);
+        }
+      }
+      return unrestored;
+    };
     try {
-      fsImpl.renameSync(temporary, targetPath);
+      for (const suffix of ['-wal', '-shm']) {
+        if (!fsImpl.existsSync(targetPath + suffix)) continue;
+        fsImpl.unlinkSync(targetPath + suffix);
+        removed.push(suffix);
+      }
     } catch (error) {
-      linked.forEach(suffix => discard(preserved + suffix));
+      const unrestored = putBack();
+      linked.forEach(suffix => { if (!unrestored.includes(preserved + suffix)) discard(preserved + suffix); });
       discard(temporary);
       throw new DbRestoreFailClosedError(
-        `Could not swap in the verified backup ${path.basename(candidate)} (${error.message}). `
-        + 'The original database has been left where it was.',
+        `Could not move the damaged database's -wal/-shm out of the way (${error.message}). `
+        + (unrestored.length
+          ? `Its files are kept at: ${unrestored.join(', ')}.`
+          : 'The original database has been left where it was.'),
         { cause: error }
       );
     }
 
-    for (const suffix of ['-wal', '-shm']) {
-      if (!fsImpl.existsSync(targetPath + suffix)) continue;
-      try {
-        fsImpl.unlinkSync(targetPath + suffix);
-      } catch (error) {
-        throw new DbRestoreFailClosedError(
-          `Restored from ${path.basename(candidate)}, but ${path.basename(targetPath + suffix)} `
-          + `belongs to the damaged database and could not be removed (${error.message}). `
-          + 'Delete it before starting, or SQLite will replay it into the restored file. '
-          + `The damaged database is kept at ${path.basename(preserved)}.`,
-          { cause: error }
-        );
-      }
+    // The one step that changes the live database, and it is atomic.
+    try {
+      fsImpl.renameSync(temporary, targetPath);
+    } catch (error) {
+      const unrestored = putBack();
+      linked.forEach(suffix => { if (!unrestored.includes(preserved + suffix)) discard(preserved + suffix); });
+      discard(temporary);
+      throw new DbRestoreFailClosedError(
+        `Could not swap in the verified backup ${path.basename(candidate)} (${error.message}). `
+        + (unrestored.length
+          ? `The original database's -wal/-shm could not be put back and are kept at: ${unrestored.join(', ')}.`
+          : 'The original database has been left where it was.'),
+        { cause: error }
+      );
     }
+
     logger.info?.(`[history] Restored from ${path.basename(candidate)} (${verdict.reason}); `
       + `the damaged database is kept at ${path.basename(preserved)}`);
     return { restoredFrom: candidate, preservedAs: preserved };

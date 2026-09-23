@@ -279,12 +279,54 @@ describe('restoring a damaged database', () => {
     });
   });
 
-  // After the swap, the damaged database's -wal must go: left beside the
-  // restored file, SQLite would replay it. If it cannot be removed the start
-  // must stop and say which file to delete -- and the damaged database must
-  // still exist under the preserved name.
-  it('stops, and names the file, when the old -wal cannot be removed', () => {
-    fs.writeFileSync(`${live}-wal`, 'wal of the damaged database');
+  // Leaves `live` as a crash leaves a WAL database: a row in the main file and
+  // a row that exists only in the -wal. Reopening shows both; the main file on
+  // its own shows only the first.
+  function crashWithWalOnlyRow() {
+    for (const suffix of ['', '-wal', '-shm']) { try { fs.unlinkSync(live + suffix); } catch {} }
+    const scratch = path.join(dir, 'crashing.db');
+    const db = new Database(scratch);
+    db.pragma('journal_mode = WAL');
+    db.pragma('wal_autocheckpoint = 0');
+    db.exec('CREATE TABLE connections (dst TEXT, lastSeen INTEGER)');
+    db.pragma('user_version = 31');
+    db.prepare('INSERT INTO connections VALUES (?, ?)').run('original', 1);
+    db.pragma('wal_checkpoint(TRUNCATE)');
+    db.prepare('INSERT INTO connections VALUES (?, ?)').run('only-in-wal', 2);
+    for (const suffix of ['', '-wal', '-shm']) {
+      if (fs.existsSync(scratch + suffix)) fs.copyFileSync(scratch + suffix, live + suffix);
+    }
+    db.close();
+  }
+
+  function liveRows() {
+    const db = new Database(live);
+    try { return db.prepare('SELECT dst FROM connections ORDER BY lastSeen').all().map(r => r.dst); } finally { db.close(); }
+  }
+
+  // The review finding: removing the damaged database's -wal *after* the swap
+  // left a window in which the restored file sat beside it. If the start
+  // stopped there, the restart replayed the damaged pages into the restored
+  // database. The -wal now leaves first.
+  it('never puts the restored file beside the damaged database\'s -wal', () => {
+    crashWithWalOnlyRow();
+    const good = path.join(dir, 'good.db');
+    makeDb(good, { dst: 'from-backup' });
+    let walPresentAtSwap = null;
+    const fsImpl = {
+      ...fs,
+      renameSync(from, to) {
+        if (to === live) walPresentAtSwap = fs.existsSync(`${live}-wal`);
+        return fs.renameSync(from, to);
+      },
+    };
+    restore([good], { fsImpl });
+    assert.equal(walPresentAtSwap, false, 'the damaged -wal was still beside the file being swapped in');
+    assert.deepEqual(liveRows(), ['from-backup'], 'the damaged database was replayed into the restored one');
+  });
+
+  it('leaves the original, -wal included, when its -wal cannot be moved', () => {
+    crashWithWalOnlyRow();
     const good = path.join(dir, 'good.db');
     makeDb(good, { dst: 'from-backup' });
     const fsImpl = {
@@ -294,10 +336,22 @@ describe('restoring a damaged database', () => {
         return fs.unlinkSync(file);
       },
     };
-    assert.throws(() => restore([good], { fsImpl }), /live\.db-wal.*could not be removed/);
-    const preserved = fs.readdirSync(dir).find(name => /^live\.db\.damaged-[^.]*$/.test(name));
-    assert.ok(preserved, 'the damaged database was not kept');
-    const kept = new Database(path.join(dir, preserved), { readonly: true });
-    try { assert.equal(kept.prepare('SELECT dst FROM connections').get().dst, 'original'); } finally { kept.close(); }
+    assert.throws(() => restore([good], { fsImpl }), /could not move the damaged database's -wal/i);
+    assert.deepEqual(liveRows(), ['original', 'only-in-wal'], 'the original, reopened, lost what was in its -wal');
+  });
+
+  it('puts the -wal back when the swap fails, so reopening shows the original whole', () => {
+    crashWithWalOnlyRow();
+    const good = path.join(dir, 'good.db');
+    makeDb(good, { dst: 'from-backup' });
+    const fsImpl = {
+      ...fs,
+      renameSync(from, to) {
+        if (to === live) throw Object.assign(new Error('rename refused'), { code: 'EPERM' });
+        return fs.renameSync(from, to);
+      },
+    };
+    assert.throws(() => restore([good], { fsImpl }), DbRestoreFailClosedError);
+    assert.deepEqual(liveRows(), ['original', 'only-in-wal'], 'the original, reopened, lost what was in its -wal');
   });
 });
