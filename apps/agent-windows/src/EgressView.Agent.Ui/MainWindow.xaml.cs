@@ -391,27 +391,21 @@ public partial class MainWindow : Window
         var visibleNotes = new[]
         {
             (Full: deliveryNote, Short: deliveryNote.Length == 0 ? string.Empty :
-                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DeliveryBackedUpShort"),
-                    FormatDuration((DateTimeOffset.UtcNow - deliveryOldestPendingAt!.Value).TotalSeconds), deliveryPending)),
+                LocalizationManager.Text("DeliveryBackedUpShort")),
             (Full: coverageNote, Short: coverageNote.Length == 0 ? string.Empty :
-                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("PartialCoverageShort"),
-                    Math.Min(data.CoverageRatio, 0.999))),
+                LocalizationManager.Text("PartialCoverageShort")),
             (Full: unmeasuredNote, Short: unmeasuredNote.Length == 0 ? string.Empty :
-                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("UnmeasuredReasonShort"),
-                    data.ConnectionsWithoutBytes)),
+                LocalizationManager.Text("UnmeasuredReasonShort")),
             (Full: localNote, Short: localNote.Length == 0 ? string.Empty :
-                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LocalTrafficExcludedShort"),
-                    data.LocalConnections)),
+                LocalizationManager.Text("LocalTrafficExcludedShort")),
             (Full: unseparatedNote, Short: unseparatedNote.Length == 0 ? string.Empty :
                 LocalizationManager.Text("UnseparatedHoursShort")),
             (Full: nameNote, Short: nameNote.Length == 0 ? string.Empty :
                 readsHostnames
-                    ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DestinationNamesShort"),
-                        data.NamedDestinations, data.Destinations)
+                    ? LocalizationManager.Text("DestinationNamesShort")
                     : LocalizationManager.Text("DestinationNamesOffDetail")),
             (Full: sleepNote, Short: sleepNote.Length == 0 ? string.Empty :
-                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SleepCoverageShort"),
-                    FormatDuration(data.SleepSeconds)))
+                LocalizationManager.Text("SleepCoverageShort"))
         }.Where(note => note.Full.Length > 0).ToArray();
         CoverageNote.Text = string.Join(Environment.NewLine, visibleNotes.Take(2).Select(note => note.Short));
         var fullNotes = string.Join(Environment.NewLine, visibleNotes.Select(note => note.Full));
