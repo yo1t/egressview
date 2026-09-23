@@ -158,6 +158,20 @@ public sealed record PeriodAnalysis(
     /// reader comparing the card to the chart would find them disagreeing.
     public int NamedDestinations { get; init; }
 
+    /// How many of the connections went somewhere with a name.
+    ///
+    /// The same question as NamedDestinations, counted over connections
+    /// instead of addresses, and the answers differ enormously: 93% against
+    /// 11% on the machine this was written for. Destinations that resolve are
+    /// the majority; the ones that do not -- LAN hosts, broadcast, multicast,
+    /// CGNAT -- carry almost all of the traffic.
+    ///
+    /// Both are shown because the chart below the card is sorted by
+    /// connections. A reader told only the first number sees 93% above a
+    /// picture that is nearly all addresses, and has been handed a second
+    /// contradiction in place of the first.
+    public long NamedConnections { get; init; }
+
     /// Whether any hour in this period was folded before the Agent could
     /// tell the two apart.
     ///
