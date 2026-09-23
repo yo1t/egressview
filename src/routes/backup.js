@@ -10,13 +10,17 @@ const { Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 const { parseRequest } = require('../http-validation');
 const logger = require('../logger');
+const { MAX_INTERVAL_HOURS } = require('../backup');
 
 const crypto = require('crypto');
 
 const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
 const backupNameSchema = z.object({ name: z.string().min(1).max(255) }).strict();
 const backupConfigSchema = z.object({
-  intervalHours: z.coerce.number().int().positive().optional(),
+  // Above this a timer cannot hold the delay and Node runs it every 1 ms
+  // instead (backup.js explains what that did on 2026-09-23). Refused here so
+  // the settings screen says so, rather than accepting a value it will ignore.
+  intervalHours: z.coerce.number().int().positive().max(MAX_INTERVAL_HOURS).optional(),
   maxGenerations: z.coerce.number().int().min(2).optional(),
   maxBackupBytes: z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   autoPrune: z.boolean().optional(),

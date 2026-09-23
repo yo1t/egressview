@@ -205,7 +205,11 @@ describe('corrupt DB recovery', () => {
     }
   });
 
-  it('falls back to an empty DB when no backup exists', () => {
+  // It used to start on a fresh, empty database here. That is data loss that
+  // looks like success: the damaged file was deleted, the Hub came up, and
+  // nothing said that months of history were gone. Now it stops, and the file
+  // stays for whoever has to recover it.
+  it('stops, leaving the damaged file, when no backup exists', () => {
     const tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-history-recovery-'));
     const dbPath    = path.join(tmpDir, 'test.db');
     const emptyDir  = path.join(tmpDir, 'backups-empty');
@@ -213,9 +217,8 @@ describe('corrupt DB recovery', () => {
       backup._setPathsForTest(dbPath, emptyDir);
       fs.writeFileSync(dbPath, 'garbage');
 
-      history._initForTest(dbPath);   // integrity fails → no backup → empty DB
-
-      assert.equal(history.queryByTimeRange(null, null).length, 0);
+      assert.throws(() => history._initForTest(dbPath), /no backup verified/);
+      assert.equal(fs.readFileSync(dbPath, 'utf8'), 'garbage', 'the damaged file was changed');
     } finally {
       history._initForTest();
       fs.rmSync(tmpDir, { recursive: true, force: true });

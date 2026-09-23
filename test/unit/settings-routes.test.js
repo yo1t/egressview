@@ -326,6 +326,25 @@ describe('backup configuration route', () => {
       intervalHours: 12, maxGenerations: 3, maxBackupBytes: 4294967296, autoPrune: true,
     });
   });
+  // 8,760 hours is above what a Node timer can hold; the Hub ran its backup
+  // every millisecond on 2026-09-23 because a value like this was accepted.
+  // The screen has to be told no, not have the value quietly ignored.
+  it('refuses a backup interval a timer cannot hold', async () => {
+    let config = { intervalHours: 24, maxGenerations: 7 };
+    const backup = {
+      getConfig: () => ({ ...config }),
+      configure: updates => { config = { ...config, ...updates }; },
+      stopPeriodicBackup() {}, startPeriodicBackup() {},
+    };
+    const app = mount(backupRoutes({ requireAdmin, backup, saveConfig() {}, appRoot: process.cwd() }));
+    const refused = await request(app, 'POST', '/api/backup/config', { intervalHours: 8760 });
+    assert.equal(refused.status, 400);
+    assert.equal(config.intervalHours, 24, 'the refused value was applied');
+    const accepted = await request(app, 'POST', '/api/backup/config', { intervalHours: 596 });
+    assert.equal(accepted.status, 200);
+    assert.equal(config.intervalHours, 596);
+  });
+
   it('rolls back backup scheduling when persistence fails', async () => {
     let config = { intervalHours: 24, maxGenerations: 7 };
     let starts = 0;

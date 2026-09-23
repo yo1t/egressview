@@ -962,6 +962,16 @@ function shutdown(exitCode = 0) {
   try { history.closeDb();         } catch {}
   try { agentIdentities.closeDb(); } catch {}
   try { agentIngest.closeDb();     } catch {}
+  // Only an orderly stop earns the quick check at the next start. exitCode 1
+  // is the uncaught-exception path, where state may be damaged; the watchdog
+  // and the OOM killer never reach this function at all (db-startup-check.js).
+  if (exitCode === 0) {
+    try {
+      if (history.markCleanShutdown()) logger.info('[shutdown] Stopped cleanly; the next start can use the quick check');
+    } catch (error) {
+      logger.warn('[shutdown] Could not record the clean stop; the next start will check in full:', error.message);
+    }
+  }
   try { dnsmasqLog.stop();         } catch {}
   try { inspectSyslog.stop();      } catch {}
   try { dhcpdSyslog.stop();        } catch {}
