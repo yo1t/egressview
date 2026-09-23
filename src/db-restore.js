@@ -46,13 +46,18 @@ function isCorruptionError(error) {
 /**
  * Checks the live database.
  *
+ * `mode` is 'full' for `integrity_check` or 'quick' for `quick_check`
+ * (db-startup-check.js decides which). Either way, only a check that ran and
+ * found damage says "corrupt"; a check that could not run stops the start.
+ *
  * @returns {'ok'|'corrupt'}
  * @throws {DbRestoreFailClosedError} when the check itself could not run.
  */
-function checkLiveDatabase(db) {
+function checkLiveDatabase(db, { mode = 'full' } = {}) {
+  const pragma = mode === 'quick' ? 'quick_check' : 'integrity_check';
   let rows;
   try {
-    rows = db.pragma('integrity_check');
+    rows = db.pragma(pragma);
   } catch (error) {
     if (isCorruptionError(error)) return 'corrupt';
     throw new DbRestoreFailClosedError(
@@ -61,7 +66,7 @@ function checkLiveDatabase(db) {
       { cause: error }
     );
   }
-  return rows.length === 1 && rows[0]?.integrity_check === 'ok' ? 'ok' : 'corrupt';
+  return rows.length === 1 && rows[0]?.[pragma] === 'ok' ? 'ok' : 'corrupt';
 }
 
 /**
