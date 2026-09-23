@@ -20,7 +20,8 @@ public sealed record NetworkObservation(
     string? InterfaceId,
     string Source,
     string? ProcessName = null,
-    string? RemoteHostname = null);
+    string? RemoteHostname = null,
+    string? ProcessInstanceId = null);
 
 public sealed record StartupFlow(
     string Protocol,
@@ -29,7 +30,8 @@ public sealed record StartupFlow(
     string RemoteAddress,
     int RemotePort,
     int ProcessId,
-    string? ProcessName = null);
+    string? ProcessName = null,
+    string? ProcessInstanceId = null);
 
 public sealed record HourlySummary(
     DateTimeOffset BucketStart,
@@ -56,7 +58,8 @@ public sealed record RecentFlow(
     string? InterfaceId,
     string Origin,
     string? RemoteHostname = null,
-    string? CountryCode = null);
+    string? CountryCode = null,
+    string? ProcessInstanceId = null);
 
 public enum RunComponent { Service, Ui }
 
@@ -150,6 +153,28 @@ public sealed record PeriodAnalysis(
     /// -- traffic that went somewhere -- and these are the rest, said in the
     /// same card so that leaving them out of the total is a disclosure rather
     /// than a quiet subtraction.
+    /// How many of the destinations arrived with a name.
+    ///
+    /// The denominator is Destinations, from the same query, so the card and
+    /// the chart under it count the same addresses. Not a count of DNS events:
+    /// those answer a different question about a different population, and a
+    /// reader comparing the card to the chart would find them disagreeing.
+    public int NamedDestinations { get; init; }
+
+    /// How many of the connections went somewhere with a name.
+    ///
+    /// The same question as NamedDestinations, counted over connections
+    /// instead of addresses, and the answers differ enormously: 93% against
+    /// 11% on the machine this was written for. Destinations that resolve are
+    /// the majority; the ones that do not -- LAN hosts, broadcast, multicast,
+    /// CGNAT -- carry almost all of the traffic.
+    ///
+    /// Both are shown because the chart below the card is sorted by
+    /// connections. A reader told only the first number sees 93% above a
+    /// picture that is nearly all addresses, and has been handed a second
+    /// contradiction in place of the first.
+    public long NamedConnections { get; init; }
+
     /// Whether any hour in this period was folded before the Agent could
     /// tell the two apart.
     ///

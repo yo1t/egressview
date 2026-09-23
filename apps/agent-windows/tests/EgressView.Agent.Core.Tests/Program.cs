@@ -651,12 +651,12 @@ try
 
     var dnsNames = new DnsNameCache(TimeSpan.FromMinutes(10), capacity: 4);
     var dnsAt = DateTimeOffset.UtcNow;
-    dnsNames.Observe(42, "API.Bücher.Example.", "203.0.113.8;::ffff:203.0.113.9;", dnsAt);
-    Assert(dnsNames.Resolve(42, "203.0.113.8", dnsAt.AddSeconds(1)) == "api.xn--bcher-kva.example" &&
-        dnsNames.Resolve(42, "203.0.113.9", dnsAt.AddSeconds(1)) == "api.xn--bcher-kva.example",
+    dnsNames.Observe("pid:42:start:1", "API.Bücher.Example.", "203.0.113.8;::ffff:203.0.113.9;", dnsAt);
+    Assert(dnsNames.Resolve("pid:42:start:1", "203.0.113.8", dnsAt.AddSeconds(1)) == "api.xn--bcher-kva.example" &&
+        dnsNames.Resolve("pid:42:start:1", "203.0.113.9", dnsAt.AddSeconds(1)) == "api.xn--bcher-kva.example",
         "DNS metadata is normalized with IDNA and IPv4-mapped addresses before bounded PID/IP correlation");
-    Assert(dnsNames.Resolve(43, "203.0.113.8", dnsAt.AddSeconds(1)) is null &&
-        dnsNames.Resolve(42, "203.0.113.8", dnsAt.AddMinutes(11)) is null,
+    Assert(dnsNames.Resolve("pid:42:start:2", "203.0.113.8", dnsAt.AddSeconds(1)) is null &&
+        dnsNames.Resolve("pid:42:start:1", "203.0.113.8", dnsAt.AddMinutes(11)) is null,
         "hostname correlation does not cross process identity or its bounded lifetime");
 
     Assert(EgressView.Agent.Service.Program.CommandLineFailureMessage(new UnauthorizedAccessException()) ==
@@ -895,21 +895,43 @@ try
         Assert(reopenedDrops.ReadCounters().GetValueOrDefault("queue-full") > 0, "drop reason survives restart");
     }
 
+    using (var identityStore = new ObservationStore(Path.Combine(directory, "process-instances.db")))
+    {
+        var at = DateTimeOffset.UtcNow;
+        identityStore.WriteBatch([
+            new NetworkObservation(at, 77, "UDP", "10.0.0.1", 5353, "203.0.113.1", 5353,
+                10, 1, ObservationLayer.Logical, null, "etw", "Browser", ProcessInstanceId: "pid:77:start:1"),
+            new NetworkObservation(at.AddSeconds(1), 77, "UDP", "10.0.0.1", 5353, "203.0.113.2", 5353,
+                20, 2, ObservationLayer.Logical, null, "etw", "Browser", ProcessInstanceId: "pid:77:start:1"),
+            new NetworkObservation(at.AddSeconds(2), 77, "UDP", "10.0.0.1", 5353, "203.0.113.1", 5353,
+                30, 3, ObservationLayer.Logical, null, "etw", "Agent", ProcessInstanceId: "pid:77:start:2"),
+        ]);
+        var identities = identityStore.ReadRecentFlows(50);
+        Assert(identities.Count == 3 && identities.Select(row => row.ProcessInstanceId).Distinct().Count() == 2,
+            "UDP peers and a reused PID are stored as three immutable flow identities");
+
+        identityStore.BeginCoverage([
+            new StartupFlow("UDP", "0.0.0.0", 5353, "", 0, 77, "Agent", "pid:77:start:2")
+        ], at.AddSeconds(3));
+        Assert(identityStore.ReadRecentFlows(50).Count == 3,
+            "a startup UDP socket with no peer remains a coverage placeholder and not a product flow");
+    }
+
     var coverageDatabase = Path.Combine(directory, "coverage.db");
     using (var coverageStore = new ObservationStore(coverageDatabase))
     {
         var started = DateTimeOffset.UtcNow;
         var snapshot = new[]
         {
-            new StartupFlow("TCP", "10.0.0.1", 50000, "10.0.0.2", 443, 99, "SnapshotApp"),
-            new StartupFlow("TCP", "10.0.0.1", 50001, "10.0.0.3", 443, 99, "SnapshotApp"),
+            new StartupFlow("TCP", "10.0.0.1", 50000, "10.0.0.2", 443, 99, "SnapshotApp", "pid:99:start:1"),
+            new StartupFlow("TCP", "10.0.0.1", 50001, "10.0.0.3", 443, 99, "SnapshotApp", "pid:99:start:1"),
         };
         var firstCoverage = coverageStore.BeginCoverage(snapshot, started);
         await using (var flowPipeline = new ObservationPipeline(coverageStore))
         {
             Assert(flowPipeline.TrySubmit(new NetworkObservation(started.AddSeconds(1), 99, "TCP",
                 "10.0.0.1", 50000, "10.0.0.2", 443, 128, 0,
-                ObservationLayer.Logical, "test", "etw", "EtwApp")), "ETW flow accepted");
+                ObservationLayer.Logical, "test", "etw", "EtwApp", ProcessInstanceId: "pid:99:start:1")), "ETW flow accepted");
         }
         var flowStats = coverageStore.ReadFlowStats();
         Assert(flowStats.Total == 2 && flowStats.Both == 1 && flowStats.Snapshot == 1, "snapshot and ETW upsert to one flow");
@@ -1037,12 +1059,12 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 28, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 29, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
         var movingSteps = reported.Where(step => step.Phase == MigrationProgress.MovingRows).ToArray();
-        Assert(movingSteps.Length == 3,
+        Assert(movingSteps.Length == 4,
             $"each phase that takes time says so before it starts, not {movingSteps.Length} of them");
         // The one that moves the observations. v28 rewrites the folded hours,
         // of which this fixture has none, so taking "the last" asked the
@@ -1126,6 +1148,59 @@ try
             $"and what stayed inside is counted, not dropped: {scoped.LocalConnections}/{scoped.LocalDestinations}");
         Assert(scoped.Links.All(link => link.Destination != "127.0.0.1"),
             "and the destination chart agrees with the number above it");
+
+        // How many destinations arrived with a name (P3-162). A reader turned
+        // the setting on, saw addresses in the chart, and concluded it had not
+        // worked -- Secure DNS and direct addresses leave nothing to read, and
+        // there was no way to tell that apart from a broken setting.
+        //
+        // Counted from the rows the chart is built from, so the card and the
+        // chart cannot be describing different populations. Not from DNS
+        // events: those answer a different question about a different set.
+        Assert(scoped.NamedDestinations == 0 && scoped.Destinations == 2,
+            $"with nothing resolved, none of the destinations are named: {scoped.NamedDestinations}/{scoped.Destinations}");
+
+        var namedAt = scopeAt.AddSeconds(1);
+        scopeStore.WriteBatch([
+            new NetworkObservation(namedAt, 12, "TCP", "10.1.1.1", 4010, "93.184.216.34", 443, 10, 10,
+                ObservationLayer.Logical, null, "etw", "outward", "example.com"),
+            // The address written out again is what the chart falls back to,
+            // and it must not be counted as a name. NormalizeDomain is where
+            // that is decided -- it returns null for anything that parses as
+            // an address -- so this row proves the invariant holds end to
+            // end rather than that a second check in SQL catches it.
+            new NetworkObservation(namedAt, 13, "TCP", "10.1.1.1", 4011, "198.51.100.7", 443, 10, 10,
+                ObservationLayer.Logical, null, "etw", "outward", "198.51.100.7"),
+            // A second connection to a destination already counted once. With
+            // one connection each, counting connections and counting distinct
+            // addresses give the same answer, and a mutation that counted the
+            // wrong one survived -- it did. Here the two answers are 2 and 1.
+            new NetworkObservation(namedAt, 14, "TCP", "10.1.1.1", 4012, "93.184.216.34", 8443, 10, 10,
+                ObservationLayer.Logical, null, "etw", "outward", "example.com"),
+        ]);
+        var withNames = scopeStore.ReadPeriodAnalysis(scopeAt.AddMinutes(-1), DateTimeOffset.UtcNow);
+        Assert(withNames.Destinations == 3 && withNames.NamedDestinations == 1,
+            $"only the destination that actually resolved is named: {withNames.NamedDestinations}/{withNames.Destinations}");
+        Assert(withNames.NamedDestinations <= withNames.Destinations,
+            "and the share can never exceed one");
+        // The chart's own population, counted independently: the card's
+        // denominator has to be the same addresses, or the two disagree on
+        // screen while both look right on their own.
+        Assert(withNames.Links.Select(link => link.Destination).Distinct().Count() == withNames.Destinations,
+            "the card counts the destinations the chart draws, not a different set");
+
+        // The same question over connections, which is a different answer.
+        // On the machine this was written for the two were 93% and 11%: the
+        // destinations that resolve are the majority, and the ones that do
+        // not carry almost all the traffic. A reader shown only the first
+        // sees a high percentage above a chart that is nearly all addresses.
+        Assert(withNames.NamedConnections == 2 && withNames.Connections == 5,
+            $"connections are counted too, not {withNames.NamedConnections}/{withNames.Connections}");
+        // Two connections, one address: counting the wrong one shows here.
+        Assert(withNames.NamedConnections != withNames.NamedDestinations,
+            "counted over connections, not over addresses a second time");
+        Assert(withNames.NamedConnections <= withNames.Connections,
+            "and that share can never exceed one either");
         // And so does the chart under them. Before v28 the timeline read
         // chart_hourly, which folds by application and has no destination to
         // filter on, so the tiles said one thing and the picture below said
@@ -1198,7 +1273,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 28, "v1 database migrates through v2-v28");
+        Assert(migrated.SchemaVersion == 29, "v1 database migrates through v2-v29");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -1220,6 +1295,12 @@ try
             "a rebuilt TCP flow keeps the local end, the remote end and the process it belonged to");
         Assert(udp.Length == 2 && udp.Select(flow => flow.RemoteAddress).Distinct().Count() == 2,
             "and one UDP socket keeps both of the peers it spoke to, which only the observation rows know");
+        var migratedFlows = migrated.ReadRecentFlows(50);
+        Assert(migratedFlows.Count == 3 && migratedFlows.Count(flow => flow.Protocol == "UDP") == 2,
+            "v29 separates legacy UDP peers into destination flows");
+        Assert(migratedFlows.Sum(flow => flow.BytesSent ?? 0) == carried.Sum(flow => flow.BytesSent ?? 0) &&
+               migratedFlows.All(flow => flow.ProcessInstanceId?.StartsWith("legacy:", StringComparison.Ordinal) == true),
+            "migration preserves observed bytes and marks unrecoverable ownership as legacy rather than inventing a start time");
         Assert(carried.All(flow => flow.InterfaceId == "iface-1"),
             "the interface comes back through the flow it was moved to");
 
@@ -1241,10 +1322,10 @@ try
             $"and at the instant it was recorded, not only the fraction of it: {carried.Min(flow => flow.FirstSeen):O}");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v28.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v29.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 28, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 29, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -1618,10 +1699,8 @@ try
         Assert(folded.Timeline.Sum(item => item.Bytes) == 7,
             "and still remembers every byte those rows carried");
 
-        // StartupSnapshot.FlowKey identifies a UDP connection by its local
-        // socket because the Windows snapshot has no remote endpoint for UDP.
-        // The chart must use that same identity or its total disagrees with
-        // the summary above it when one socket talks to several peers.
+        // UDP identity includes its peer. The startup table cannot supply one,
+        // so those entries are coverage placeholders rather than flows.
         chartStore.WriteBatch([
             new NetworkObservation(from.AddHours(2).AddMinutes(1), 8, "UDP", "10.0.0.1", 5353,
                 "203.0.113.8", 5353, 1, 0, ObservationLayer.Logical, null, "etw", "Responder"),
@@ -1629,8 +1708,8 @@ try
                 "203.0.113.9", 5353, 1, 0, ObservationLayer.Logical, null, "etw", "Responder"),
         ]);
         var udp = chartStore.ReadPeriodAnalysis(from.AddHours(2), from.AddHours(3), bucketCount: 12);
-        Assert(udp.Connections == 1 && udp.Timeline.Sum(item => item.Connections) == 1,
-            "one UDP socket is one connection in both the summary and the chart even when it reaches several peers");
+        Assert(udp.Connections == 2 && udp.Timeline.Sum(item => item.Connections) == 2,
+            "two UDP peers are two connections in both the summary and the chart");
     }
 
     using (var geoStore = new ObservationStore(Path.Combine(directory, "geo.db")))
@@ -2194,10 +2273,23 @@ try
         Assert(backlogResolver.Resolve(4444, now) == "first", "the original PID owner is cached");
         owner = new ProcessNameResolver.LiveProcess("second", now.AddSeconds(1));
         probeNow = probeNow.AddSeconds(2);
-        Assert(backlogResolver.Resolve(4444, now.AddMilliseconds(500)) == "first",
+        var oldIdentity = backlogResolver.ResolveIdentity(4444, now.AddMilliseconds(500));
+        Assert(oldIdentity.Name == "first",
             "a delayed event is not relabelled with the PID's new owner");
-        Assert(backlogResolver.Resolve(4444, now.AddSeconds(2)) == "second",
+        var newIdentity = backlogResolver.ResolveIdentity(4444, now.AddSeconds(2));
+        Assert(newIdentity.Name == "second",
             "after reuse, current traffic takes the new owner from the in-memory cache");
+        Assert(oldIdentity.InstanceId != newIdentity.InstanceId && oldIdentity.Name == "first" && newIdentity.Name == "second",
+            "PID reuse produces distinct process-instance identities while delayed events retain their owner");
+
+        var unreadable = new ProcessNameResolver(TimeSpan.FromMinutes(2),
+            _ => new ProcessNameResolver.LiveProcess("protected", null));
+        var unreadableFirst = unreadable.ResolveIdentity(4555, now);
+        unreadable.BeginProcessInstance(4555);
+        var unreadableSecond = unreadable.ResolveIdentity(4555, now.AddSeconds(1));
+        Assert(unreadableFirst.InstanceId != unreadableSecond.InstanceId &&
+               unreadableFirst.InstanceId.StartsWith("session:", StringComparison.Ordinal),
+            "an unreadable start time fails closed to a collector-session generation rather than merging owners");
 
         // A PID handed to a different process must not inherit the old name.
         // A wrong name is worse than none: a missing name is visibly missing,
@@ -3199,6 +3291,12 @@ try
             Assert(rows.Count == 3 && rows.Sum(row => row.BytesSent) == 15,
                 "a second boundary and a different local port each start their own row, and nothing is lost");
 
+            var instances = new ObservationCoalescer();
+            instances.Add(Packet(start, 1, 0) with { ProcessInstanceId = "pid:42:start:1" });
+            instances.Add(Packet(start, 2, 0) with { ProcessInstanceId = "pid:42:start:2" });
+            Assert(instances.Drain().Count() == 2,
+                "the same PID and endpoints from different process instances never coalesce");
+
             // An unmeasured packet must not be turned into a measured zero:
             // the store and the screen both distinguish "we do not know" from
             // "none", and the period totals count the first separately.
@@ -3488,7 +3586,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 28 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 29 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
@@ -3544,8 +3642,8 @@ try
 
         await using (var pipeline = new ObservationPipeline(streaming, capacity: 64, batchSize: 4))
         {
-            // Two peers over UDP from one local socket, which the store keeps
-            // as a single conversation, plus a TCP pair it keeps apart.
+            // Two peers over UDP from one local socket are distinct
+            // conversations, just like distinct TCP endpoints.
             for (var index = 0; index < 4; index++)
                 Assert(pipeline.TrySubmit(new NetworkObservation(
                     start.AddSeconds(index), 91, "UDP", "100.64.0.5", 5353,
@@ -3568,12 +3666,12 @@ try
         var stored = streaming.ReadRecentFlows(50);
         Assert(folded.Count == stored.Count,
             "folding the stream on the client yields the conversations the store recorded");
-        Assert(stored.Count == 4, "one UDP socket is one conversation and three TCP ports are three");
+        Assert(stored.Count == 5, "two UDP peers and three TCP ports are five conversations");
         foreach (var row in folded)
         {
             var match = stored.Single(other =>
-                StartupSnapshot.FlowKey(other.Protocol, other.LocalAddress, other.LocalPort, other.RemoteAddress, other.RemotePort, other.ProcessId) ==
-                StartupSnapshot.FlowKey(row.Protocol, row.LocalAddress, row.LocalPort, row.RemoteAddress, row.RemotePort, row.ProcessId));
+                StartupSnapshot.FlowKey(other.Protocol, other.LocalAddress, other.LocalPort, other.RemoteAddress, other.RemotePort, other.ProcessId, other.ProcessInstanceId) ==
+                StartupSnapshot.FlowKey(row.Protocol, row.LocalAddress, row.LocalPort, row.RemoteAddress, row.RemotePort, row.ProcessId, row.ProcessInstanceId));
             Assert(match.BytesSent == row.BytesSent && match.BytesReceived == row.BytesReceived,
                 "the client fold accounts for the same bytes as the store");
             Assert(match.FirstSeen == row.FirstSeen && match.LastSeen == row.LastSeen,

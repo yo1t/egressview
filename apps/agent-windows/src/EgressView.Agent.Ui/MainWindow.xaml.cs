@@ -352,6 +352,14 @@ public partial class MainWindow : Window
                 FormatDuration((DateTimeOffset.UtcNow - stuckSince).TotalSeconds), deliveryPending)
             : string.Empty;
 
+        RenderDestinationNames(data);
+        // Why the two shares differ, said once and at full width. The chart is
+        // sorted by connections, and the destinations without names -- LAN
+        // hosts, broadcast, multicast -- are the ones with enormous connection
+        // counts, so a high share by destination sits above a picture that is
+        // mostly addresses.
+        var nameNote = DestinationNamesNote(data);
+
         // Hours folded before the Agent could tell outbound from local are
         // still counted, and saying nothing about them would present a mixed
         // figure as a clean one. They age out; the sentence goes with them.
@@ -366,7 +374,7 @@ public partial class MainWindow : Window
                 data.LocalConnections, data.LocalDestinations)
             : string.Empty;
         CoverageNote.Text = string.Join(Environment.NewLine,
-            new[] { coverageNote, sleepNote, unmeasuredNote, localNote, unseparatedNote, deliveryNote }
+            new[] { coverageNote, sleepNote, unmeasuredNote, localNote, unseparatedNote, nameNote, deliveryNote }
                 .Where(value => value.Length > 0));
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
@@ -387,6 +395,53 @@ public partial class MainWindow : Window
     }
 
     /// Public because the render check asserts on it; it is a pure formatter.
+    /// How many destinations arrived with a name, and how many did not.
+    ///
+    /// Written because a reader turned the setting on, saw addresses in the
+    /// chart, and concluded it had not worked. Names come from DNS the PC
+    /// already made -- Secure DNS, an address typed in directly, or a
+    /// connection older than the monitoring all leave nothing to read, and
+    /// falling back to the address is correct. What was missing was any way
+    /// to tell that apart from a broken setting.
+    ///
+    /// So a low share is shown in the ordinary colour. It is a fact about the
+    /// traffic, not a fault, and colouring it as one would teach the reader
+    /// to ignore the colour.
+    private void RenderDestinationNames(PeriodAnalysis data)
+    {
+        if (DestinationNameShare is null) return;
+        DestinationNameShare.Text = !readsHostnames
+            ? LocalizationManager.Text("DestinationNamesOff")
+            // An em dash, not 0%: nothing was asked of the resolver, so
+            // nothing failed. Zero over zero is not zero.
+            : data.Destinations == 0
+                ? "—"
+                : ((double)data.NamedDestinations / data.Destinations).ToString("P0", CultureInfo.CurrentCulture);
+    }
+
+    /// The counts behind the tile, and why the chart can disagree with it.
+    ///
+    /// In the note rather than under the figure, because a tile a fifth of the
+    /// card wide holds a number and nothing else -- the first attempt put a
+    /// wrapping sentence in one and it grew the row until it covered the text
+    /// beneath. Every other tile here is a label and a value, and this one is
+    /// now the same shape and the same size as the rest.
+    private string DestinationNamesNote(PeriodAnalysis data)
+    {
+        if (!readsHostnames) return LocalizationManager.Text("DestinationNamesOffDetail");
+        if (data.Destinations == 0) return string.Empty;
+        // Both shares, because the chart below is sorted by connections and
+        // the two are nothing like each other: 85% and 11% on this machine.
+        // The destinations that resolve are the majority, and the ones that
+        // do not carry almost all the traffic.
+        var byConnections = data.Connections == 0
+            ? string.Empty
+            : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DestinationNamesByConnections"),
+                ((double)data.NamedConnections / data.Connections).ToString("P0", CultureInfo.CurrentCulture));
+        return string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DestinationNamesDetail"),
+            data.NamedDestinations, data.Destinations) + byConnections;
+    }
+
     public static string FormatDuration(double seconds)
     {
         // Under a minute, say seconds.
