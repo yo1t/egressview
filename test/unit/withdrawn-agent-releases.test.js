@@ -71,9 +71,10 @@ describe('withdrawn agent releases', () => {
       '--dry-run',
     ], { encoding: 'utf8' });
     assert.notEqual(result.status, 0, 'publishing a withdrawn version succeeded');
-    assert.match(
-      `${result.stdout}${result.stderr}`,
-      new RegExp(`${withdrawn.platform} ${withdrawn.version.replace(/\./g, '\.')} is withdrawn`)
+    assert.ok(
+      `${result.stdout}${result.stderr}`.includes(
+        `${withdrawn.platform} ${withdrawn.version} is withdrawn`),
+      'the refusal does not name the version it refused'
     );
   });
 
