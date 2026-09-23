@@ -57,6 +57,41 @@ final class MigrationBackupTests: XCTestCase {
             .filter { $0.hasPrefix(prefix) && $0.contains("pre-v") }
     }
 
+    // The copies are named after the version they were taken before, so one
+    // survives per schema version the agent has ever upgraded from -- they are
+    // never replaced by a newer one. Nothing listed them, so a user asking
+    // where their disk went got a report that did not mention them (P3-161).
+    func test隣にある複製を版ごとに数える() throws {
+        let directory = url.deletingLastPathComponent()
+        let stem = url.deletingPathExtension().lastPathComponent
+        for (version, bytes) in [(13, 1_000), (11, 2_000)] {
+            let file = directory.appendingPathComponent("\(stem).pre-v\(version).sqlite")
+            try Data(repeating: 0, count: bytes).write(to: file)
+        }
+        // Not a backup: a vacuum writes this on its way and moves it.
+        try Data().write(to: directory.appendingPathComponent("\(stem).pre-v9.sqlite.partial"))
+        // Not this database's.
+        try Data().write(to: directory.appendingPathComponent("other.pre-v12.sqlite"))
+
+        let backups = MigrationInventory.backups(forDatabaseAt: url)
+        XCTAssertEqual(backups.map(\.fromVersion), [11, 13], "not listed oldest schema first")
+        XCTAssertEqual(backups.map(\.sizeBytes), [2_000, 1_000])
+    }
+
+    func test複製が無ければ空を返す() {
+        XCTAssertEqual(MigrationInventory.backups(forDatabaseAt: url).count, 0)
+    }
+
+    func test終わらなかった移行は次の起動から見える() throws {
+        XCTAssertNil(MigrationInventory.interrupted(forDatabaseAt: url))
+        MigrationProgressFile.write(
+            MigrationProgress(stage: .migrating, fromVersion: 9, toVersion: 15),
+            forDatabaseAt: url
+        )
+        defer { MigrationProgressFile.clear(forDatabaseAt: url) }
+        XCTAssertEqual(MigrationInventory.interrupted(forDatabaseAt: url)?.fromVersion, 9)
+    }
+
     func test移行の前に複製を作る() throws {
         let store = try ObservationStore(fileURL: url)
         try observe(store, at: Date(timeIntervalSince1970: 1_700_000_000))

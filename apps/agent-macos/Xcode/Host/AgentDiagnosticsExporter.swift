@@ -115,6 +115,7 @@ final class AgentDiagnosticsExporter {
         // second handle while the sender holds it would fail exactly when the
         // agent is already in the state this export exists to explain.
         let queue = hubDelivery.latestQueueStatus
+        let databaseURL = try? ObservationStore.defaultFileURL()
         let info = Bundle.main.infoDictionary ?? [:]
 
         return AgentDiagnosticsReport.Inputs(
@@ -144,6 +145,12 @@ final class AgentDiagnosticsExporter {
             contractRejections: queue?.contractRejectionReasons ?? [:],
             abandonedCount: queue?.abandonedCount ?? 0,
             splitCount: queue?.splitCount ?? 0,
+            // Read from the file system, not held: the copies beside the
+            // database are what the user's disk is carrying right now, and a
+            // list taken at launch would miss one made since.
+            schemaVersion: store?.schemaVersion() ?? 0,
+            migrationBackups: databaseURL.map { MigrationInventory.backups(forDatabaseAt: $0) } ?? [],
+            interruptedMigration: databaseURL.flatMap { MigrationInventory.interrupted(forDatabaseAt: $0) },
             // Read fresh rather than held: the export exists to describe a
             // fault, and a copy taken at launch would predate it.
             runHistory: AgentRunRecorder.inAppGroup()?.snapshot() ?? AgentRunHistory(),
