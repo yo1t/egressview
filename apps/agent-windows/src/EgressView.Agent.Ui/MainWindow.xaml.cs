@@ -254,6 +254,8 @@ public partial class MainWindow : Window
                 };
                 MonitoringStatus.Text = LocalizationManager.Text(chip);
                 CoverageNote.Text = migration.Text;
+                ToolTipService.SetToolTip(CoverageNote, migration.Text);
+                AutomationProperties.SetHelpText(CoverageNote, migration.Text);
                 NetworkLastUpdated.Text = LocalizationManager.Text(chip);
                 LogStatus.Text = migration.Text;
                 return;
@@ -382,9 +384,39 @@ public partial class MainWindow : Window
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LocalTrafficExcluded"),
                 data.LocalConnections, data.LocalDestinations)
             : string.Empty;
-        CoverageNote.Text = string.Join(Environment.NewLine,
-            new[] { coverageNote, sleepNote, unmeasuredNote, localNote, unseparatedNote, nameNote, deliveryNote }
-                .Where(value => value.Length > 0));
+        // Keep the card scannable even when every caveat applies. The two
+        // highest-priority facts are visible; the full wording stays available
+        // on hover and to screen readers. The two-line height cap in XAML
+        // also covers narrow windows and unexpectedly long localized numbers.
+        var visibleNotes = new[]
+        {
+            (Full: deliveryNote, Short: deliveryNote.Length == 0 ? string.Empty :
+                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DeliveryBackedUpShort"),
+                    FormatDuration((DateTimeOffset.UtcNow - deliveryOldestPendingAt!.Value).TotalSeconds), deliveryPending)),
+            (Full: coverageNote, Short: coverageNote.Length == 0 ? string.Empty :
+                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("PartialCoverageShort"),
+                    Math.Min(data.CoverageRatio, 0.999))),
+            (Full: unmeasuredNote, Short: unmeasuredNote.Length == 0 ? string.Empty :
+                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("UnmeasuredReasonShort"),
+                    data.ConnectionsWithoutBytes)),
+            (Full: localNote, Short: localNote.Length == 0 ? string.Empty :
+                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LocalTrafficExcludedShort"),
+                    data.LocalConnections)),
+            (Full: unseparatedNote, Short: unseparatedNote.Length == 0 ? string.Empty :
+                LocalizationManager.Text("UnseparatedHoursShort")),
+            (Full: nameNote, Short: nameNote.Length == 0 ? string.Empty :
+                readsHostnames
+                    ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DestinationNamesShort"),
+                        data.NamedDestinations, data.Destinations)
+                    : LocalizationManager.Text("DestinationNamesOffDetail")),
+            (Full: sleepNote, Short: sleepNote.Length == 0 ? string.Empty :
+                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SleepCoverageShort"),
+                    FormatDuration(data.SleepSeconds)))
+        }.Where(note => note.Full.Length > 0).ToArray();
+        CoverageNote.Text = string.Join(Environment.NewLine, visibleNotes.Take(2).Select(note => note.Short));
+        var fullNotes = string.Join(Environment.NewLine, visibleNotes.Select(note => note.Full));
+        ToolTipService.SetToolTip(CoverageNote, fullNotes.Length == 0 ? null : fullNotes);
+        AutomationProperties.SetHelpText(CoverageNote, fullNotes);
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
         Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods, data.BucketCount, data.MonitoringGaps);
