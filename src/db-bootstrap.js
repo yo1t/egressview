@@ -19,12 +19,16 @@
  * }} deps
  */
 function runDbBootstrap({
-  dbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons, authAudit,
+  dbPath, sourceRouterMap, onProgress, history, sessions, devices, enrichment, beacons, authAudit,
   apiIdentities, agentIdentities, agentIngest, threatIntel,
 }) {
   // 1. history first: runs the versioned migrations (with the P2-33
   //    fail-closed backup). Throws on failure — nothing below runs.
-  history.loadConnectionHistory(dbPath, sourceRouterMap ? { sourceRouterMap } : {});
+  history.loadConnectionHistory(dbPath, {
+    ...(sourceRouterMap ? { sourceRouterMap } : {}),
+    ...(onProgress ? { onProgress } : {}),
+  });
+  onProgress?.('initializing');
 
   // 2. The remaining modules attach only after the schema is final.
   sessions.initDb(dbPath);

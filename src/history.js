@@ -182,7 +182,7 @@ function _backupCandidates() {
     .filter(Boolean);
 }
 
-function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
+function initDb(dbPath, { sourceRouterMap: mapOverride, onProgress } = {}) {
   if (mapOverride) sourceRouterMap = mapOverride;
   ensuredRouterIds = new Set();
   const actualPath = dbPath === ':memory:' ? ':memory:' : (dbPath ? path.resolve(dbPath) : DEFAULT_DB_PATH);
@@ -247,7 +247,8 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
   }
 
   // Run versioned migrations (takes pre-migration backup if pending changes exist)
-  runMigrations(db, actualPath, { sourceRouterMap });
+  runMigrations(db, actualPath, { sourceRouterMap, onProgress });
+  onProgress?.('initializing');
 
   // Create tables for fresh databases (idempotent — skipped if already exist)
   db.exec(CONNECTIONS_SQL);

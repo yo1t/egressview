@@ -33,6 +33,18 @@ function openDb(p) {
 }
 
 describe('db-migrate: fresh database', () => {
+  it('reports migration only when schema work is pending', () => {
+    const db = openDb(':memory:');
+    const phases = [];
+    try {
+      runMigrations(db, ':memory:', { onProgress: phase => phases.push(phase) });
+      runMigrations(db, ':memory:', { onProgress: phase => phases.push(phase) });
+      assert.deepEqual(phases, ['migration']);
+    } finally {
+      db.close();
+    }
+  });
+
   it('sets user_version to SCHEMA_VERSION on a fresh DB', () => {
     const p = tmpDb('fresh');
     const db = openDb(p);

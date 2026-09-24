@@ -51,6 +51,14 @@ describe('db-bootstrap', () => {
     assert.deepEqual(spies.calls[0].opts, { sourceRouterMap: map });
   });
 
+  it('reports initialization after history has completed', () => {
+    const spies = makeSpies();
+    const phases = [];
+    runDbBootstrap({ dbPath: ':memory:', onProgress: phase => phases.push(phase), ...spies });
+    assert.deepEqual(phases, ['initializing']);
+    assert.equal(typeof spies.calls[0].opts.onProgress, 'function');
+  });
+
   it('a history/migration failure stops the bootstrap before any other module attaches', () => {
     const spies = makeSpies({ historyThrows: true });
     assert.throws(() => runDbBootstrap({ dbPath: ':memory:', ...spies }), /migration failed/);
