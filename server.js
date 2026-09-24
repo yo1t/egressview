@@ -64,6 +64,7 @@ const oidcModule = require('./src/oidc-google');
 const { createGoogleOidc } = oidcModule;
 const { createOfflinePolicy } = require('./src/offline-mode');
 const { startEventLoopWatchdog } = require('./src/event-loop-watchdog');
+const { startStartupListener } = require('./src/startup-listener');
 const { runDbBootstrap }    = require('./src/db-bootstrap');
 const { sourceRouterIdMap } = require('./src/router-id');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
@@ -588,9 +589,9 @@ dhcpdSyslog.configure({
 // via HOST=127.0.0.1.
 const HOST = process.env.HOST || undefined;
 
-server.listen(PORT, HOST, () => {
+startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).then(async startup => {
   runtimeProfiler.start({ logger });
-  logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
+  logger.info(`[startup] Progress page listening on ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
   try {
     loadConfig();
     const configuredAi = aiProvider.getPublicConfig();
@@ -620,8 +621,7 @@ server.listen(PORT, HOST, () => {
     }
   } catch (err) {
     logger.error('[startup] Failed to load config; refusing to continue:', err.message);
-    server.close(() => process.exit(1));
-    return;
+    throw err;
   }
   const configuredDbPath = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB || '';
   const productionDbPath = configuredDbPath
@@ -694,9 +694,11 @@ server.listen(PORT, HOST, () => {
   });
   authAudit.setHashKey(appState.adminToken);
   agentIdentities.setPepper(appState.agentTokenPepper);
+  startup.setPhase('database');
   const { staleEnrichmentIps } = runDbBootstrap({
     dbPath: runtimeDbPath,
     sourceRouterMap,
+    onProgress: phase => startup.setPhase(phase),
     history,
     sessions,
     devices,
@@ -939,13 +941,28 @@ server.listen(PORT, HOST, () => {
   if (!DEMO_MODE) beaconScanRunner.scheduleBeaconScan();
 
   backup.startPeriodicBackup();
+
+  // Hand over the same port only after synchronous bootstrap has finished.
+  // The temporary worker can answer while the main thread is in SQLite.
+  await startup.stop();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(PORT, HOST, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
   healthState.markReady();
+  logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
 
   // Defense-in-depth: force a restart if a synchronous operation ever wedges
   // the event loop, so a single slow query can no longer freeze the server
   // indefinitely (P2-87). Started after readiness so slow startup/migration
   // work never trips it.
   startEventLoopWatchdog();
+}).catch(error => {
+  logger.error('[startup] Hub could not start:', error.stack || error.message);
+  process.exit(1);
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
