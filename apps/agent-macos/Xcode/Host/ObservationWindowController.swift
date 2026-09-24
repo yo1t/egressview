@@ -103,10 +103,24 @@ struct AgentMainView: View {
         .onChange(of: model.selection) { selection = $0 }
     }
 
+    /// The app's own icon, read from its bundle.
+    ///
+    /// Not `NSApplication.shared.applicationIconImage`: that asks Launch
+    /// Services, and the installer opens the app the moment it has replaced
+    /// the bundle -- before Launch Services has registered the new one. The
+    /// answer at that moment was the "cannot open" placeholder, a circle with
+    /// a line through it, and the window kept showing it for as long as the
+    /// app ran. Seen on 0.5.87 after an update, while Finder showed the right
+    /// icon for the same bundle.
+    private static let appIcon: NSImage =
+        NSImage(named: "AppIcon")
+        ?? Bundle.main.image(forResource: "AppIcon")
+        ?? NSApplication.shared.applicationIconImage
+
     private var header: some View {
         VStack(spacing: 12) {
             HStack(spacing: 18) {
-                Image(nsImage: NSApplication.shared.applicationIconImage)
+                Image(nsImage: Self.appIcon)
                     .resizable()
                     .interpolation(.high)
                     .frame(width: 34, height: 34)
