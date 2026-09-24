@@ -199,6 +199,90 @@ try
             "a timed-out or disconnected UI ends only its IPC connection and the listener accepts the next client");
     }
 
+    // More than one caller at a time (P3-140). The 30-day analysis takes 8.8 s
+    // on a real machine, and a status request made during it could not even
+    // connect: the server served one caller and had no pipe open meanwhile.
+    //
+    // The count alone was not the fix. A second instance of a pipe can only be
+    // created by someone the first instance's rules allow to, and those rules
+    // did not name the service's own account. Measured: a second instance was
+    // refused with UnauthorizedAccessException.
+    {
+        // One would make everything below pass while serving one caller.
+        Assert(EgressView.Agent.Service.AgentIpcServer.Listeners >= 2,
+            $"more than one caller at a time, not {EgressView.Agent.Service.AgentIpcServer.Listeners}");
+        var pipeName = "egressview-agent-test-" + Guid.NewGuid().ToString("N")[..8];
+        var mine = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+        var servers = new List<System.IO.Pipes.NamedPipeServerStream>();
+        Exception? refused = null;
+        try
+        {
+            for (var i = 0; i < EgressView.Agent.Service.AgentIpcServer.Listeners; i++)
+                servers.Add(System.IO.Pipes.NamedPipeServerStreamAcl.Create(pipeName, System.IO.Pipes.PipeDirection.InOut,
+                    EgressView.Agent.Service.AgentIpcServer.Listeners, System.IO.Pipes.PipeTransmissionMode.Byte,
+                    System.IO.Pipes.PipeOptions.Asynchronous, 4096, 4096,
+                    EgressView.Agent.Service.AgentIpcServer.BuildSecurity(mine)));
+        }
+        catch (Exception exception) { refused = exception; }
+        Assert(refused is null && servers.Count == EgressView.Agent.Service.AgentIpcServer.Listeners,
+            $"every listener's instance can be created under the server's own rules, not {servers.Count} ({refused?.GetType().Name})");
+
+        // And every one of them takes a caller at the same time: one busy
+        // request no longer leaves the next with nothing to connect to.
+        var accepted = servers.Select(server => server.WaitForConnectionAsync()).ToArray();
+        var clients = servers.Select(_ => new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut,
+            System.IO.Pipes.PipeOptions.Asynchronous)).ToList();
+        foreach (var client in clients) await client.ConnectAsync(2_000);
+        Assert(Task.WaitAll(accepted, 2_000), "all of them are connected at once");
+        foreach (var client in clients) client.Dispose();
+        foreach (var server in servers) server.Dispose();
+    }
+
+    // A status request does not wait behind a long one, and does not lie for
+    // long either.
+    {
+        var clock = DateTimeOffset.UtcNow;
+        var statusFallback = new EgressView.Agent.Service.StatusFallback(TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(60), () => clock);
+        var first = statusFallback.Get(() => """{"monitoring":"running"}""");
+        Assert(first == """{"monitoring":"running"}""", "a status that is ready in time is the status");
+
+        // The store is busy: the build is still waiting for its lock.
+        // Released by a timer, not after the call returns: an implementation
+        // that always waited would otherwise wait for ever, and a hung test
+        // is a worse way to find out than a failed one.
+        var release = new ManualResetEventSlim();
+        _ = Task.Delay(1_500).ContinueWith(_ => release.Set());
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var busy = statusFallback.Get(() => { release.Wait(); return """{"monitoring":"new"}"""; });
+        watch.Stop();
+        Assert(watch.ElapsedMilliseconds < 1_000, $"it does not wait for the lock, not {watch.ElapsedMilliseconds} ms");
+        using (var busyDocument = JsonDocument.Parse(busy))
+        {
+            var busyRoot = busyDocument.RootElement;
+            Assert(busyRoot.GetProperty("monitoring").GetString() == "running"
+                   && busyRoot.GetProperty("servedWhileBusy").GetBoolean()
+                   && busyRoot.GetProperty("statusAt").GetDateTimeOffset() == clock,
+                $"it answers with the last status, saying so and saying when: {busy}");
+        }
+        release.Set();
+
+        // Once the last one is too old, it waits for the real answer rather
+        // than keep saying "monitoring" about a service that may be stuck.
+        clock = clock.AddSeconds(61);
+        var stale = new ManualResetEventSlim();
+        var waited = Task.Run(() => statusFallback.Get(() => { stale.Wait(); return """{"monitoring":"real"}"""; }));
+        Assert(!waited.Wait(400), "with nothing recent enough to stand in, it waits");
+        stale.Set();
+        Assert(waited.Wait(2_000) && waited.Result == """{"monitoring":"real"}""",
+            "and answers with the real status when it comes");
+
+        // And a status that fails, fails: the cache does not hide an error.
+        Exception? failure = null;
+        try { statusFallback.Get(() => throw new InvalidOperationException("store failed")); }
+        catch (Exception exception) { failure = exception; }
+        Assert(failure is InvalidOperationException, $"a failing status still fails, not {failure?.GetType().Name}");
+    }
+
     using (var statusStore = new ObservationStore(Path.Combine(directory, "status.db")))
     {
         var statusCoverage = statusStore.BeginCoverage(StartupSnapshot.Capture(), healthConfirmedAt);
