@@ -392,8 +392,12 @@
 "Measured" = "Measured";
 "The measure sizes the marks on the charts. The log lists every connection either way." = "The measure sizes the marks on the charts. The log lists every connection either way.";
 "Whether the charts are sized by connection count or by data volume" = "Whether the charts are sized by connection count or by data volume";
-"The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@." = "The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@.";
-"The last update stopped while changing how records are stored. It will be tried again now." = "The last update stopped while changing how records are stored. It will be tried again now.";
+"The last update stopped at step %lld of %lld while changing how records are stored." = "The last update stopped at step %lld of %lld while changing how records are stored.";
+"The last update stopped while copying the records before changing how they are stored." = "The last update stopped while copying the records before changing how they are stored.";
+"It was run again at this launch and finished." = "It was run again at this launch and finished.";
+"It was run again at this launch and did not finish." = "It was run again at this launch and did not finish.";
+"A copy from before it started is kept at %@." = "A copy from before it started is kept at %@.";
+"Dismiss" = "Dismiss";
 "Shaded: the Mac was asleep. Traffic during sleep is not recorded." = "Shaded: the Mac was asleep. Traffic during sleep is not recorded.";
 "Hatched: nothing was recorded here. Traffic in that time is unknown." = "Hatched: nothing was recorded here. Traffic in that time is unknown.";
 "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring." = "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring.";
