@@ -5,7 +5,6 @@ const logger = require('./logger');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const Database = require('better-sqlite3');
 const { Worker } = require('worker_threads');
 const backupInventory = require('./backup-inventory');
 const { BackupPruneRunner, DEFAULT_TIMEOUT_MS } = require('./backup-prune-runner');
@@ -93,16 +92,19 @@ function ensureBackupDir() {
   }
 }
 
-function verifyDbFile(filePath) {
-  let candidate = null;
-  try {
-    candidate = new Database(filePath, { readonly: true, fileMustExist: true });
-    const result = candidate.pragma('integrity_check')[0]?.integrity_check;
-    if (result !== 'ok') throw new Error(`integrity_check returned '${result}'`);
-  } catch (err) {
-    throw new Error(`Database integrity check failed for ${path.basename(filePath)}: ${err.message}`, { cause: err });
-  } finally {
-    if (candidate) { try { candidate.close(); } catch {} }
+/**
+ * Checks a database file on a worker thread and rejects if it is not whole.
+ *
+ * A restore used to run this check on the main thread, three times: on the
+ * file chosen, on the copy made of it, and on the database after the swap.
+ * integrity_check on the production database takes 171-283 s, and the
+ * watchdog kills the process at 120 s -- so a restore from the settings
+ * screen stopped the Hub partway through, with its connections closed.
+ */
+async function verifyDbFile(filePath) {
+  const result = await verifyImpl(filePath);
+  if (!result.ok) {
+    throw new Error(`Database integrity check failed for ${path.basename(filePath)}: ${result.error}`);
   }
 }
 
@@ -114,7 +116,7 @@ function removeSidecars(dbPath) {
   }
 }
 
-function replaceDbAtomically(sourcePath) {
+async function replaceDbAtomically(sourcePath) {
   const id = crypto.randomBytes(6).toString('hex');
   const tempPath = `${DB_PATH}.restore-${id}.tmp`;
   // The replaced database's -wal and -shm leave *before* the swap. Removed
@@ -124,9 +126,11 @@ function replaceDbAtomically(sourcePath) {
   const asidePrefix = `${DB_PATH}.replaced-${id}`;
   const movedAside = [];
   try {
-    fs.copyFileSync(sourcePath, tempPath);
+    // Not copyFileSync: 3.6 GB copied synchronously holds the main thread for
+    // as long as the disk takes.
+    await fs.promises.copyFile(sourcePath, tempPath);
     fs.chmodSync(tempPath, 0o600);
-    verifyDbFile(tempPath);
+    await verifyDbFile(tempPath);
     for (const suffix of ['-wal', '-shm']) {
       if (!fs.existsSync(DB_PATH + suffix)) continue;
       fs.renameSync(DB_PATH + suffix, asidePrefix + suffix);
@@ -149,7 +153,7 @@ function replaceDbAtomically(sourcePath) {
   for (const suffix of movedAside) {
     try { fs.unlinkSync(asidePrefix + suffix); } catch {}
   }
-  verifyDbFile(DB_PATH);
+  await verifyDbFile(DB_PATH);
   removeSidecars(DB_PATH);
 }
 
@@ -159,7 +163,15 @@ function replaceDbAtomically(sourcePath) {
 // the main DB file.
 //
 // Only one runs at a time: a second caller gets the run already in progress.
-function createBackup(options) {
+function createBackup(options = {}) {
+  // While a restore is replacing the database, a backup would read a file
+  // that is being swapped -- and nothing stopped one starting, once the
+  // restore no longer held the main thread. The restore's own safety backup
+  // is the one exception.
+  if (restoreInFlight && !options.forRestore) {
+    logger.info('[backup] A restore is running; not starting a backup');
+    return Promise.resolve(null);
+  }
   if (backupInFlight) {
     logger.info('[backup] A backup is already running; not starting another');
     return backupInFlight;
@@ -187,6 +199,19 @@ const BACKUP_COPY_TIMEOUT_MS = 60 * 60 * 1000;
  * @returns {Promise<{ ok: boolean, error?: string, bytes?: number, copiedMs?: number, verifiedMs?: number }>}
  */
 function copyOnWorker(source, destination, { timeoutMs = BACKUP_COPY_TIMEOUT_MS } = {}) {
+  return runOnWorker({ source, destination }, timeoutMs, 'copy');
+}
+
+/**
+ * Runs integrity_check on a worker thread.
+ *
+ * @returns {Promise<{ ok: boolean, error?: string }>}
+ */
+function verifyOnWorker(filePath, { timeoutMs = BACKUP_COPY_TIMEOUT_MS } = {}) {
+  return runOnWorker({ mode: 'verify', path: filePath }, timeoutMs, 'check');
+}
+
+function runOnWorker(workerData, timeoutMs, what) {
   return new Promise(resolve => {
     let settled = false;
     const finish = result => {
@@ -195,20 +220,19 @@ function copyOnWorker(source, destination, { timeoutMs = BACKUP_COPY_TIMEOUT_MS 
       clearTimeout(timer);
       resolve(result);
     };
-    const worker = new Worker(path.join(__dirname, 'backup-copy-worker.js'), {
-      workerData: { source, destination },
-    });
+    const worker = new Worker(path.join(__dirname, 'backup-copy-worker.js'), { workerData });
     const timer = setTimeout(() => {
-      finish({ ok: false, error: `the copy did not finish within ${Math.round(timeoutMs / 60000)} minutes` });
+      finish({ ok: false, error: `the ${what} did not finish within ${Math.round(timeoutMs / 60000)} minutes` });
       worker.terminate().catch(() => {});
     }, timeoutMs);
     worker.once('message', finish);
     worker.once('error', error => finish({ ok: false, error: error.message }));
-    worker.once('exit', code => finish({ ok: false, error: `the copy worker exited with code ${code}` }));
+    worker.once('exit', code => finish({ ok: false, error: `the ${what} worker exited with code ${code}` }));
   });
 }
 
 let copyImpl = copyOnWorker;
+let verifyImpl = verifyOnWorker;
 
 async function runBackup({ capacityPruned = false } = {}) {
   if (!fs.existsSync(DB_PATH)) {
@@ -292,8 +316,24 @@ function getBackupPath(name) {
   return p;
 }
 
+// One restore at a time. Two used to be impossible only because the first
+// held the main thread until it finished; with the checks off it, a second
+// request -- a double click, or an upload beside a generation restore -- would
+// swap the database under the first.
+let restoreInFlight = false;
+
 // Restore from a backup file (replaces current DB)
-async function restoreFromFile(sourcePath, {
+async function restoreFromFile(sourcePath, options = {}) {
+  if (restoreInFlight) throw new Error('A restore is already running');
+  restoreInFlight = true;
+  try {
+    return await restoreFromFileOnce(sourcePath, options);
+  } finally {
+    restoreInFlight = false;
+  }
+}
+
+async function restoreFromFileOnce(sourcePath, {
   beforeReplace,
   afterReplace,
   beforeRollback,
@@ -303,13 +343,13 @@ async function restoreFromFile(sourcePath, {
   if (!fs.existsSync(sourcePath)) {
     throw new Error('Backup file not found');
   }
-  verifyDbFile(sourcePath);
+  await verifyDbFile(sourcePath);
 
   // A restore is destructive, so an existing DB is never replaced unless a
   // verified safety backup has been created successfully first.
   let safetyPath = null;
   if (fs.existsSync(DB_PATH)) {
-    const safetyName = await createBackup();
+    const safetyName = await createBackup({ forRestore: true });
     if (!safetyName) throw new Error('Safety backup failed; restore aborted');
     safetyPath = getBackupPath(safetyName);
     if (!safetyPath) throw new Error('Safety backup verification failed; restore aborted');
@@ -323,7 +363,7 @@ async function restoreFromFile(sourcePath, {
       await beforeReplace();
     }
     replacementStarted = true;
-    replaceDb(sourcePath);
+    await replaceDb(sourcePath);
     if (afterReplace) await afterReplace();
   } catch (restoreErr) {
     try {
@@ -333,7 +373,7 @@ async function restoreFromFile(sourcePath, {
       }
       if (beforeRollback) await beforeRollback();
       if (safetyPath) {
-        replaceDb(safetyPath);
+        await replaceDb(safetyPath);
         logger.warn('[backup] Restore failed; original database recovered from safety backup');
       } else {
         try { fs.unlinkSync(DB_PATH); } catch {}
@@ -497,6 +537,10 @@ function _setCopyForTest(fn) {
   copyImpl = fn || copyOnWorker;
 }
 
+function _setVerifyForTest(fn) {
+  verifyImpl = fn || verifyOnWorker;
+}
+
 function _setFreeBytesForTest(value) {
   freeBytesOverride = value;
 }
@@ -523,6 +567,8 @@ module.exports = {
   _setPathsForTest,
   _setFreeBytesForTest,
   _setCopyForTest,
+  _setVerifyForTest,
+  _verifyOnWorker: verifyOnWorker,
   _copyOnWorker: copyOnWorker,
   _replaceDbAtomically: replaceDbAtomically,
   _verifyDbFile: verifyDbFile,

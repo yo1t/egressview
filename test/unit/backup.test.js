@@ -610,7 +610,7 @@ describe('replacing the database during a restore', () => {
     try { return d.prepare('SELECT val FROM marks').all().map(r => r.val); } finally { d.close(); }
   }
 
-  it('never puts the restored file beside the replaced database\'s -wal', () => {
+  it('never puts the restored file beside the replaced database\'s -wal', async () => {
     backup._setPathsForTest(fakeDb, backupDir);
     crashWithWalOnlyRow(fakeDb);
     const source = path.join(tmpDir, 'restore-me.db');
@@ -622,7 +622,7 @@ describe('replacing the database during a restore', () => {
       return original(from, to);
     };
     try {
-      backup._replaceDbAtomically(source);
+      await backup._replaceDbAtomically(source);
     } finally {
       fs.renameSync = original;
     }
@@ -630,7 +630,7 @@ describe('replacing the database during a restore', () => {
     assert.deepEqual(marks(fakeDb), ['restored'], 'the replaced database was replayed into the restored one');
   });
 
-  it('puts the -wal back when the swap fails, so reopening shows the original whole', () => {
+  it('puts the -wal back when the swap fails, so reopening shows the original whole', async () => {
     backup._setPathsForTest(fakeDb, backupDir);
     crashWithWalOnlyRow(fakeDb);
     const source = path.join(tmpDir, 'restore-me-2.db');
@@ -641,11 +641,142 @@ describe('replacing the database during a restore', () => {
       return original(from, to);
     };
     try {
-      assert.throws(() => backup._replaceDbAtomically(source), /rename refused/);
+      await assert.rejects(() => backup._replaceDbAtomically(source), /rename refused/);
     } finally {
       fs.renameSync = original;
     }
     assert.deepEqual(marks(fakeDb).sort(), ['only-in-wal', 'original'], 'the original, reopened, lost what was in its -wal');
     makeRealDb(fakeDb, 'fake-db-content');
+  });
+});
+
+// ─── restore off the main thread ──────────────────────────────────────────────
+//
+// A restore ran integrity_check on the main thread three times. On the
+// production database each takes 171-283 s and the watchdog kills the process
+// at 120 s, so a restore from the settings screen stopped the Hub partway.
+
+describe('restore does not hold the main thread', () => {
+  beforeEach(() => {
+    setup();
+  });
+  after(() => {
+    backup._setVerifyForTest(null);
+    backup._setCopyForTest(null);
+    teardown();
+  });
+
+  function slowVerify(ms, calls, failFor = () => false) {
+    return filePath => new Promise(resolve => {
+      calls.push(filePath);
+      setTimeout(() => resolve(failFor(filePath)
+        ? { ok: false, error: 'refused by the test' }
+        : { ok: true }), ms);
+    });
+  }
+
+  it('keeps serving while every check runs, and checks the file, the copy and the result', async () => {
+    const src = path.join(tmpDir, 'slow-restore.db');
+    makeRealDb(src, 'restored-while-serving');
+    const calls = [];
+    backup._setVerifyForTest(slowVerify(150, calls));
+    let ticks = 0;
+    const timer = setInterval(() => { ticks++; }, 10);
+    try {
+      await backup.restoreFromFile(src);
+    } finally {
+      clearInterval(timer);
+      backup._setVerifyForTest(null);
+    }
+    assert.equal(calls.length, 3, `checked ${calls.length} times`);
+    assert.equal(calls[0], src);
+    assert.match(path.basename(calls[1]), /\.restore-[0-9a-f]+\.tmp$/);
+    assert.equal(calls[2], fakeDb);
+    // Three checks of 150 ms each: a main thread held for them would not tick.
+    assert.ok(ticks >= 20, `the main thread ticked only ${ticks} times during the restore`);
+    assert.equal(readMark(fakeDb), 'restored-while-serving');
+  });
+
+  it('does not swap in a copy whose check fails', async () => {
+    const src = path.join(tmpDir, 'copy-fails.db');
+    makeRealDb(src, 'never-swapped-in');
+    const before = readMark(fakeDb);
+    const calls = [];
+    backup._setVerifyForTest(slowVerify(5, calls, file => file.endsWith('.tmp')));
+    try {
+      await assert.rejects(() => backup.restoreFromFile(src), /integrity check failed/i);
+    } finally {
+      backup._setVerifyForTest(null);
+    }
+    assert.equal(readMark(fakeDb), before);
+  });
+
+  // Before anything destructive: a file that fails its check must not cost a
+  // safety backup of the whole database or close the Hub's connections.
+  it('refuses a file that fails its check before the safety backup or closing anything', async () => {
+    const src = path.join(tmpDir, 'refused-early.db');
+    makeRealDb(src, 'refused');
+    const before = backup.listBackups().length;
+    let closed = false;
+    backup._setVerifyForTest(slowVerify(5, [], file => file === src));
+    try {
+      await assert.rejects(
+        () => backup.restoreFromFile(src, { beforeReplace: () => { closed = true; } }),
+        /integrity check failed/i
+      );
+    } finally {
+      backup._setVerifyForTest(null);
+    }
+    assert.equal(closed, false, 'connections were closed for a file that was going to be refused');
+    assert.equal(backup.listBackups().length, before, 'a safety backup was taken for a file that was going to be refused');
+  });
+
+  it('refuses a second restore while one is running', async () => {
+    const src = path.join(tmpDir, 'first.db');
+    makeRealDb(src, 'first-restore');
+    const other = path.join(tmpDir, 'second.db');
+    makeRealDb(other, 'second-restore');
+    backup._setVerifyForTest(slowVerify(100, []));
+    try {
+      const first = backup.restoreFromFile(src);
+      await assert.rejects(() => backup.restoreFromFile(other), /already running/);
+      await first;
+    } finally {
+      backup._setVerifyForTest(null);
+    }
+    assert.equal(readMark(fakeDb), 'first-restore');
+  });
+
+  it('starts no other backup while a restore replaces the database', async () => {
+    const src = path.join(tmpDir, 'no-backup-during.db');
+    makeRealDb(src, 'restored');
+    let duringRestore;
+    backup._setVerifyForTest(async file => {
+      // Asked while the restore is in its checks, as a periodic tick would be.
+      if (file.endsWith('.tmp') && duringRestore === undefined) duringRestore = await backup.createBackup();
+      return { ok: true };
+    });
+    try {
+      await backup.restoreFromFile(src);
+    } finally {
+      backup._setVerifyForTest(null);
+    }
+    assert.equal(duringRestore, null, 'a backup was started in the middle of the swap');
+    const names = backup.listBackups().map(b => b.name);
+    assert.equal(names.length, 1, `expected only the safety backup, found ${names.join(', ')}`);
+  });
+
+  it('the real check runs on a worker and refuses a file cut short', async () => {
+    const whole = path.join(tmpDir, 'whole.db');
+    makeRealDb(whole, 'whole');
+    const d = new Database(whole); d.pragma('journal_mode = DELETE'); d.close();
+    assert.deepEqual(await backup._verifyOnWorker(whole), { ok: true });
+
+    const cut = path.join(tmpDir, 'cut.db');
+    const bytes = fs.readFileSync(whole);
+    fs.writeFileSync(cut, bytes.subarray(0, bytes.length - 512));
+    const result = await backup._verifyOnWorker(cut);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /declares|malformed|corrupt|integrity/i);
   });
 });

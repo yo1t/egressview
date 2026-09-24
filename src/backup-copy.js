@@ -91,4 +91,30 @@ function copyAndVerify(Database, { source, destination, now = Date.now }) {
   return { bytes, copiedMs: copied - started, verifiedMs: now() - copied };
 }
 
-module.exports = { verifyCopy, copyAndVerify };
+/**
+ * Whether a file is a whole, sound SQLite database, for a restore.
+ *
+ * Less than `verifyCopy` asks, on purpose: a file being restored may come from
+ * an older schema, so its version and tables are not compared with anything.
+ * What is kept is the full integrity_check -- a restore replaces the live
+ * database, so the cheaper quick_check is not enough -- and the length check,
+ * which catches a file cut short in transfer before integrity_check has to.
+ *
+ * @throws {Error} naming what is wrong.
+ */
+function verifyIntegrity(Database, filePath) {
+  const size = fs.statSync(filePath).size;
+  const db = new Database(filePath, { readonly: true, fileMustExist: true });
+  try {
+    const declared = db.pragma('page_size', { simple: true }) * db.pragma('page_count', { simple: true });
+    if (declared !== size) throw new Error(`the file is ${size} bytes but declares ${declared}`);
+    const rows = db.pragma('integrity_check');
+    if (!(rows.length === 1 && rows[0]?.integrity_check === 'ok')) {
+      throw new Error(`integrity_check returned '${rows[0]?.integrity_check}'`);
+    }
+  } finally {
+    db.close();
+  }
+}
+
+module.exports = { verifyCopy, copyAndVerify, verifyIntegrity };
