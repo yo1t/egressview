@@ -482,6 +482,9 @@ public sealed partial class ObservationStore : IDisposable
     private readonly string path;
     private string lastVerifiedIntegrity = "ok";
 
+    /// The database file, for the reports that need what sits beside it.
+    public string DatabasePath => path;
+
     public long SchemaVersion { get { lock (gate) return ScalarInt64("SELECT version FROM schema_version"); } }
 
     /// How long opening this database took, and how much of that was the
