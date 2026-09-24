@@ -72,7 +72,10 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            report = DiagnosticsReport.CreateFallback(DiagnosticsReport.CurrentVersion, exception.GetType().Name);
+            // Opening it again failed too; say so, and also what the service
+            // recorded when it failed, which is usually the more useful half.
+            report = DiagnosticsReport.CreateFallback(DiagnosticsReport.CurrentVersion, exception.GetType().Name,
+                Path.GetDirectoryName(Path.GetFullPath(database)));
         }
         DiagnosticsBundle.Create(destination, report);
         return 0;
@@ -121,6 +124,9 @@ internal sealed class AgentWindowsService : ServiceBase
     private Task? worker;
     private ObservationStore? activeStore;
     private long activeRunId;
+    private ServiceStart? thisStart;
+
+    private static string DataDirectory => Path.Combine(AppContext.BaseDirectory, "data");
 
     public AgentWindowsService()
     {
@@ -133,6 +139,23 @@ internal sealed class AgentWindowsService : ServiceBase
 
     protected override void OnStart(string[] args)
     {
+        // Before anything that can fail. run_history is in the database, and a
+        // start that dies opening it leaves no row there; this file needs no
+        // database, and the next start that reaches one files what it finds
+        // (P3-133).
+        thisStart = ServiceStarts.Record(DataDirectory, DiagnosticsReport.CurrentVersion, DateTimeOffset.UtcNow);
+        // And an exception on any thread, from here on. The handler that marks
+        // the run faulted is registered only once there is a run to mark,
+        // which left the first seconds -- opening a multi-gigabyte database,
+        // the window in which an upgraded service died on 2026-09-18 --
+        // writing nothing at all: startup-error.txt was not touched.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is not Exception exception) return;
+            WriteStartupFailure(exception);
+            ServiceFailure.Append(DataDirectory,
+                ServiceFailure.From(exception, Path.Combine(DataDirectory, "egressview-agent.db"), DateTimeOffset.UtcNow));
+        };
         stop = new CancellationTokenSource();
         worker = Task.Run(async () =>
         {
@@ -149,6 +172,12 @@ internal sealed class AgentWindowsService : ServiceBase
             catch (Exception ex)
             {
                 WriteStartupFailure(ex);
+                // The part of it a diagnostics bundle may carry. Not for the
+                // slow shutdown above: that service stopped as asked, and a
+                // bundle listing it among failures would say otherwise.
+                var data = Path.Combine(AppContext.BaseDirectory, "data");
+                ServiceFailure.Append(data,
+                    ServiceFailure.From(ex, Path.Combine(data, "egressview-agent.db"), DateTimeOffset.UtcNow));
                 WriteEventLogFailure(ex);
                 Environment.Exit(1);
             }
@@ -203,10 +232,22 @@ internal sealed class AgentWindowsService : ServiceBase
         // A hibernate/update sequence can restart the service instead of
         // delivering Resume. Startup is the conservative end of that sleep.
         store.EndSleepPeriod(DateTimeOffset.UtcNow);
+        // Starts before this one that never got this far. Filed first, so the
+        // history reads in the order things happened, and cleared only after
+        // this run is open: a start that dies in between is recognised next
+        // time by its start time and not filed twice.
+        var unreached = ServiceStarts.Read(root).Where(start => start.Token != thisStart?.Token);
+        var filed = false;
+        try { store.RecordUnreachedStarts(unreached); filed = true; }
+        catch { /* Filing the past must never be what stops the present. */ }
         // Opened before anything else can fail, and closed last. A run that is
         // still marked open when the next one starts is how a process that was
         // killed gets to say so, since it cannot say anything itself.
-        var runId = store.BeginRun(RunComponent.Service, DiagnosticsReport.CurrentVersion);
+        var runId = store.BeginRun(RunComponent.Service, DiagnosticsReport.CurrentVersion, thisStart?.At);
+        // Kept if they could not be filed, for the next start to try again.
+        // This start's own entry is left with them and is harmless: the run
+        // just opened carries the same start time, so it will be skipped.
+        if (filed) ServiceStarts.Clear(root);
         Interlocked.Exchange(ref activeRunId, runId);
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {

@@ -155,6 +155,9 @@ global_settings:
     - path: 'server.js'
       rule_id: 'javascript.express.security.audit.express-path-join-resolve-traversal.express-path-join-resolve-traversal'
       reason: 'filename validated by ^[A-Za-z0-9._-]+\.js$ (no path separators) plus an explicit basename containment check before fs.readFile'
+    - path: 'apps/agent-windows/src/EgressView.Agent.Core/ServiceStarts.cs'
+      rule_id: 'csharp.lang.security.filesystem.unsafe-path-combine.unsafe-path-combine'
+      reason: 'Combines a directory with a constant file name (service-starts.json). The only caller outside tests passes the service''s own data directory, AppContext.BaseDirectory\data under Program Files; tests pass a temporary directory. No user input reaches it, and there is no user-supplied file name for Path.GetFileName to sanitise.'
 
   # Inline pragmas also used for detect-secrets:
   # server.js: // pragma: allowlist secret

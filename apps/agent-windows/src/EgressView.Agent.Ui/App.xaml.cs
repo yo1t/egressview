@@ -395,7 +395,11 @@ public partial class App : System.Windows.Application
             catch (Exception exception)
             {
                 serviceReport = false;
-                report = DiagnosticsReport.CreateFallback(DiagnosticsReport.CurrentVersion, exception.GetType().Name);
+                // The window's own exception is why it could not ask. Why the
+                // service is not answering is beside the service's database,
+                // where the window can read it without the service.
+                report = DiagnosticsReport.CreateFallback(DiagnosticsReport.CurrentVersion, exception.GetType().Name,
+                    System.IO.Path.GetDirectoryName(MigrationProgress.ServiceDatabaseFrom(AppContext.BaseDirectory)));
             }
             DiagnosticsBundle.Create(dialog.FileName, report);
             var message = serviceReport

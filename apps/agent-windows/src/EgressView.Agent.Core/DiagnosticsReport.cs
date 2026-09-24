@@ -93,20 +93,51 @@ public static class DiagnosticsReport
             delivery = new { pending = delivery.Pending, contractRejected = delivery.ContractRejected, queueOverflow = delivery.QueueOverflow, oldestPendingAt = delivery.OldestPendingAt, lastAcknowledgedAt = delivery.LastAcknowledgedAt, capability = capabilityStatus, runtime = SafeDeliveryRuntime(deliveryRuntime) },
             deliveryEnabled = store.DeliveryEnabled,
             ipc = new { reportChannel },
+            // The service's own earlier failures. A report taken from a
+            // service that is running again is exactly when someone asks why
+            // the start before it did not.
+            serviceFailures = SafeServiceFailures(Path.GetDirectoryName(store.DatabasePath)),
             installer = ReadInstallerState(),
             privacy = new { includesEndpoints = false, includesHostnames = false, includesProcessNames = false, includesCredentials = false, includesHubEndpoint = false, includesRawObservations = false, includesDatabase = false },
         }, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    public static string CreateFallback(string version, string failureCode) => JsonSerializer.Serialize(new
+    /// The report written when the service cannot be asked.
+    ///
+    /// failureCode is why the caller could not reach it -- for the window,
+    /// its own pipe timeout. That is not why the service is down, and until
+    /// dataDirectory was passed it was the only failure a bundle carried: a
+    /// migration that failed at step 6 of 8 was reported as "TimeoutException".
+    public static string CreateFallback(string version, string failureCode, string? dataDirectory = null) => JsonSerializer.Serialize(new
     {
         schemaVersion = 1,
         generatedAt = DateTimeOffset.UtcNow,
         build = new { version, informationalVersion = InformationalVersion(), osVersion = Environment.OSVersion.VersionString, architecture = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant() },
         service = new { reachable = false, failure = SafeCode(failureCode) },
+        serviceFailures = SafeServiceFailures(dataDirectory),
         installer = ReadInstallerState(),
         privacy = new { includesEndpoints = false, includesHostnames = false, includesProcessNames = false, includesCredentials = false, includesHubEndpoint = false, includesRawObservations = false, includesDatabase = false },
     }, new JsonSerializerOptions { WriteIndented = true });
+
+    /// The recorded failures, in the bundle's shape.
+    ///
+    /// Only fields ServiceFailure defines, which are all values the Agent
+    /// chose -- a type name, an enum name, version and step numbers, a time.
+    /// Nothing here is read from the machine, so nothing here can be a path
+    /// or a host.
+    private static object[] SafeServiceFailures(string? dataDirectory)
+    {
+        if (string.IsNullOrEmpty(dataDirectory)) return [];
+        return ServiceFailure.Read(dataDirectory).Select(failure => (object)new
+        {
+            at = failure.At,
+            exceptionType = SafeCode(failure.ExceptionType),
+            storeFailure = failure.StoreFailure is null ? null : SafeCode(failure.StoreFailure),
+            migration = failure.Migration is { } m
+                ? new { fromVersion = m.FromVersion, toVersion = m.ToVersion, step = m.Step, steps = m.Steps }
+                : null,
+        }).ToArray();
+    }
 
     /// How the recorded runs ended, counted by kind and by component.
     ///
@@ -138,6 +169,11 @@ public static class DiagnosticsReport
             systemShutdown = mine.Count(run => run.Ending == "system-shutdown"),
             unexpected = mine.Count(run => run.Ending == "unexpected"),
             faulted = mine.Count(run => run.Ending == "faulted"),
+            // Of the unexpected ones, those that died before they could open
+            // a run at all -- counted apart, because "it crashed while
+            // running" and "it never got as far as running" point at
+            // different places (P3-133).
+            stoppedBeforeRecording = mine.Count(run => run.Fault == ServiceStarts.StoppedBeforeRecording),
         };
     }
 
