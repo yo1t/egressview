@@ -225,6 +225,9 @@ final class AgentMainViewModel: ObservableObject {
     @Published private(set) var storage: ObservationStoreStatistics?
     @Published private(set) var monitoringStatus = L("Monitoring paused")
     @Published private(set) var errorMessage: String?
+    /// Something the user is owed about the last launch. Not cleared by a
+    /// refresh, which is what happened to it while it shared `errorMessage`.
+    @Published private(set) var storageNotice: String?
     @Published private(set) var isRefreshing = false
     /// Set after a successful export so the screen can confirm it happened.
     /// A save that produces no visible change is indistinguishable from one
@@ -289,6 +292,14 @@ final class AgentMainViewModel: ObservableObject {
 
     func showStorageError(_ message: String) {
         errorMessage = message
+    }
+
+    func showStorageNotice(_ message: String) {
+        storageNotice = message
+    }
+
+    func dismissStorageNotice() {
+        storageNotice = nil
     }
 
     /// Writes the selected period to a CSV file the user picks.

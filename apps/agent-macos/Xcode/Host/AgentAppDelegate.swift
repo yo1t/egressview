@@ -26,6 +26,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private var observationWindow: ObservationWindowController?
     private var settingsWindow: SettingsWindowController?
     private var pendingStorageError: String?
+    /// Kept apart from `pendingStorageError`: an error is replaced by the next
+    /// refresh that succeeds, and this is a fact about the last launch that
+    /// stays true until the user has read it.
+    private var pendingStorageNotice: String?
     private var threatAvailabilityObserver: AnyCancellable?
     private var updateAvailabilityObserver: AnyCancellable?
     private let chartFoldTimer = PeriodicWork()
@@ -213,11 +217,17 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // owed the fact that it failed once, because the alternative is that
         // an update quietly eats their records and nobody ever says so
         // (P3-161).
-        reportInterruptedMigrationIfAny()
+        let interruptedMigration = readInterruptedMigration()
         applyMenuBarIcon(for: .paused)
         _ = hubDelivery
         installApplicationMenu()
         render(.paused)
+        // Only now, with the store opened, is there an outcome to report: the
+        // same migration has just been run again, and the user's question is
+        // whether it finished this time.
+        if let interruptedMigration {
+            reportInterruptedMigration(interruptedMigration)
+        }
         if case .failure(let error) = storageResult {
             recordStorageError(error.localizedDescription)
         } else if case .success(let context) = storageResult,
@@ -352,6 +362,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
             controller.showStorageError(pendingStorageError)
             self.pendingStorageError = nil
         }
+        if let pendingStorageNotice {
+            controller.showStorageNotice(pendingStorageNotice)
+            self.pendingStorageNotice = nil
+        }
         observationWindow = controller
         return controller
     }
@@ -383,25 +397,56 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         return controller
     }
 
-    /// Says when the previous launch died while changing the database's shape.
+    /// Reads what the previous launch left behind if it died while changing
+    /// the database's shape.
     ///
-    /// Read before the store is opened, because opening it clears the file. The
-    /// copy taken before that migration is named in the message: it is the
-    /// thing the user would need if this keeps happening, and it is no use to
-    /// them if they do not know it exists.
-    private func reportInterruptedMigrationIfAny() {
+    /// Read before the store is opened, because opening it clears the file.
+    /// Unlike Windows, nothing here can mistake a dead migration for a live
+    /// one: the window and the store are one process, so by the time anyone
+    /// reads this file its writer has exited (P3-166).
+    private func readInterruptedMigration() -> (progress: MigrationProgress, databaseURL: URL)? {
         guard let databaseURL = try? ObservationStore.defaultFileURL(),
-              let progress = MigrationProgressFile.read(forDatabaseAt: databaseURL) else { return }
-        let backup = databaseURL.deletingPathExtension()
+              let progress = MigrationProgressFile.read(forDatabaseAt: databaseURL) else { return nil }
+        return (progress, databaseURL)
+    }
+
+    /// Says that the previous launch died while changing the database's shape,
+    /// where it had got to, and how the retry at this launch ended.
+    ///
+    /// It used to say only "it will be tried again now", in the same slot as
+    /// refresh errors -- and the first refresh that succeeded cleared it, so
+    /// the window showed it for a moment or not at all. It now stays until it
+    /// is dismissed, and it says the part the user is left wondering about:
+    /// whether it worked the second time (P3-165).
+    ///
+    /// The copy taken before that migration is named: it is what the user
+    /// would need if this keeps happening, and it is no use to them if they do
+    /// not know it exists.
+    private func reportInterruptedMigration(_ interrupted: (progress: MigrationProgress, databaseURL: URL)) {
+        let progress = interrupted.progress
+        let backup = interrupted.databaseURL.deletingPathExtension()
             .appendingPathExtension("pre-v\(progress.fromVersion).sqlite")
-        let hasBackup = FileManager.default.fileExists(atPath: backup.path)
-        recordStorageError(hasBackup
-            ? L(
-                "The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@.",
-                backup.path
+        let whereItStopped: String
+        if let step = progress.step {
+            whereItStopped = L(
+                "The last update stopped at step %lld of %lld while changing how records are stored.",
+                step.current, step.total
             )
-            : L("The last update stopped while changing how records are stored. It will be tried again now.")
-        )
+        } else {
+            whereItStopped = L("The last update stopped while copying the records before changing how they are stored.")
+        }
+        let outcome: String
+        if case .success = storageResult {
+            outcome = L("It was run again at this launch and finished.")
+        } else {
+            outcome = L("It was run again at this launch and did not finish.")
+        }
+        var message = whereItStopped + " " + outcome
+        if FileManager.default.fileExists(atPath: backup.path) {
+            message += " " + L("A copy from before it started is kept at %@.", backup.path)
+        }
+        pendingStorageNotice = message
+        observationWindow?.showStorageNotice(message)
     }
 
     private func recordStorageError(_ message: String) {

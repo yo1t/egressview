@@ -442,6 +442,22 @@ struct AgentMainView: View {
 
     @ViewBuilder
     private var errorBanner: some View {
+        if let notice = model.storageNotice {
+            HStack(alignment: .top, spacing: 8) {
+                Label(notice, systemImage: "exclamationmark.circle.fill")
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button(L("Dismiss")) { model.dismissStorageNotice() }
+                    .controlSize(.small)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
+        }
         if let error = model.errorMessage {
             Label(error, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
@@ -1109,6 +1125,10 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     @MainActor
     func showStorageError(_ message: String) {
         model.showStorageError(message)
+    }
+
+    func showStorageNotice(_ message: String) {
+        model.showStorageNotice(message)
     }
 
     @MainActor

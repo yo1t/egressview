@@ -392,8 +392,12 @@
 "Measured" = "計測済み";
 "The measure sizes the marks on the charts. The log lists every connection either way." = "指標はグラフの大きさを決めるものです。通信ログはどちらを選んでも全件を表示します。";
 "Whether the charts are sized by connection count or by data volume" = "グラフの大きさを接続数で決めるか、データ転送量で決めるか";
-"The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@." = "この更新は、記録の保存方法を変えている途中で止まりました。もう一度やり直します。開始前の複製が %@ にあります。";
-"The last update stopped while changing how records are stored. It will be tried again now." = "この更新は、記録の保存方法を変えている途中で止まりました。もう一度やり直します。";
+"The last update stopped at step %lld of %lld while changing how records are stored." = "前回の更新は、記録の保存方法を変える途中（%lld/%lld段階目）で止まりました。";
+"The last update stopped while copying the records before changing how they are stored." = "前回の更新は、記録の保存方法を変える前の複製を作っている途中で止まりました。";
+"It was run again at this launch and finished." = "今回の起動でやり直し、完了しました。";
+"It was run again at this launch and did not finish." = "今回の起動でやり直しましたが、完了しませんでした。";
+"A copy from before it started is kept at %@." = "開始前の複製が %@ にあります。";
+"Dismiss" = "閉じる";
 "Shaded: the Mac was asleep. macOS still wakes it for a few seconds now and then, and traffic in those seconds is recorded." = "網掛け: Macがスリープしていた時間。スリープ中もmacOSが数秒ずつ起きることがあり、その間の通信は記録されます。";
 "While a Mac sleeps, macOS may wake it for a few seconds at a time without turning on the screen, for example for Power Nap or maintenance. Apps can use the network in those seconds, so bars can stand inside the shaded band." = "スリープ中でも、macOSは画面を点けずにMacを数秒ずつ起こすことがあります（Power Napやメンテナンスなど）。その間はアプリも通信できるため、網掛けの中にも棒が立ちます。";
 "Hatched: nothing was recorded here. Traffic in that time is unknown." = "斜線: この時間は記録がありません。通信があったかどうかは分かりません。";
