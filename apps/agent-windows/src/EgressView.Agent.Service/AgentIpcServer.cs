@@ -34,34 +34,66 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     private Task[] loops = [];
     private readonly AgentUninstallClient uninstallClient = new();
 
-    public void Start() => loops = Enumerable.Range(0, Listeners).Select(_ => Task.Run(ServeAsync)).ToArray();
+    /// NT SERVICE\EgressViewAgent -- the one identity allowed to add
+    /// instances of this pipe. See BuildSecurity.
+    private readonly SecurityIdentifier serviceSid = ServiceIdentity.Sid();
+
+    /// How many listeners actually run: four when this process carries the
+    /// service's own SID, one when it does not.
+    ///
+    /// Without that SID no listener after the first can create its instance,
+    /// and 0.1.125 showed what happens then: three listeners failing ten
+    /// times a second each, every failure a counter written to the database,
+    /// for as long as the service ran. A service installed before the SID
+    /// type was set, or by the development script, serves one caller at a
+    /// time as it always did, and says so once.
+    public int ActiveListeners { get; private set; }
+
+    public void Start()
+    {
+        ActiveListeners = ServiceIdentity.CarriesOwnSid(serviceSid) ? Listeners : 1;
+        if (ActiveListeners == 1)
+            try { store.SetCounter("ipc-single-listener-no-service-sid", 1); } catch { }
+        loops = Enumerable.Range(0, ActiveListeners).Select(_ => Task.Run(ServeAsync)).ToArray();
+    }
 
     /// <param name="server">
-    /// Who creates the pipe; the running process when omitted.
+    /// The identity that creates the pipe's instances: the service's own SID.
     ///
-    /// It has to be named. A second instance of a pipe can only be created by
-    /// someone the first instance's rules allow to, and these rules named
-    /// LocalSystem, the window's user and NETWORK -- not LocalService, which
-    /// is what the service runs as. Measured: under them, a second instance is
-    /// refused with UnauthorizedAccessException. So raising the count alone
-    /// would have made every listener after the first fail on each attempt,
-    /// counted as connection failures and changing nothing. This is the
-    /// reason P3-140 asked for before anyone changed the number.
+    /// It has to be named. Creating a second instance of a pipe opens the
+    /// first one -- for reading and writing, not only with CreateNewInstance
+    /// -- so the creator needs all three on the first instance's rules.
+    /// Measured, with the window's rule on a SID the creator is certainly not:
+    /// CreateNewInstance alone is refused, CreateNewInstance with read, write
+    /// and synchronize is not.
     ///
-    /// Only CreateNewInstance. And it narrows who can stand in for this
-    /// server rather than widening it: with one listener there was no pipe at
-    /// all while a request was being served, and anyone could create one of
-    /// this name in that gap. With four there is always an instance, and
-    /// adding one takes this right, which only LocalSystem and the service's
-    /// own account have.
+    /// 0.1.125 granted CreateNewInstance alone, to the account the process ran
+    /// as. Its test gave the window's rule and the server's the same SID, so
+    /// the window's read and write covered the server too, the test passed,
+    /// and the installed service failed every listener after the first.
+    ///
+    /// Not LocalService, which is what the service runs as. Read and write on
+    /// this pipe is the whole IPC -- history export, enrolment, deleting
+    /// history -- and LocalService is shared by other Windows services; giving
+    /// it that would have widened who can talk to the Agent from the signed-in
+    /// user to every LocalService process. NT SERVICE\EgressViewAgent is in
+    /// this service's token and no other, once the installer sets its SID
+    /// type to unrestricted.
+    ///
+    /// And it narrows who can stand in for this server rather than widening
+    /// it: with one listener there was no pipe at all while a request was
+    /// being served, and anyone could create one of this name in that gap.
+    /// With several there is always an instance, and adding one takes these
+    /// rights, which only LocalSystem and this service have.
     /// </param>
-    internal static PipeSecurity BuildSecurity(string allowedSid, SecurityIdentifier? server = null)
+    internal static PipeSecurity BuildSecurity(string allowedSid, SecurityIdentifier server)
     {
         var security = new PipeSecurity();
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.NetworkSid, null), PipeAccessRights.FullControl, AccessControlType.Deny));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(allowedSid), PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize, AccessControlType.Allow));
-        security.AddAccessRule(new PipeAccessRule(server ?? WindowsIdentity.GetCurrent().User!, PipeAccessRights.CreateNewInstance, AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(server,
+            PipeAccessRights.CreateNewInstance | PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize, AccessControlType.Allow));
         return security;
     }
 
@@ -92,7 +124,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     private async Task ServeOneAsync(CancellationToken cancellationToken)
     {
         await using var pipe = NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, Listeners, PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous, 4096, 4096, BuildSecurity(allowedSid));
+            PipeOptions.Asynchronous, 4096, 4096, BuildSecurity(allowedSid, serviceSid));
         await pipe.WaitForConnectionAsync(cancellationToken);
         using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, true);
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
@@ -127,11 +159,13 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     internal static async Task RunResilientLoopAsync(Func<CancellationToken, Task> serveOne, Action connectionFailed,
         CancellationToken cancellationToken, TimeSpan? retryDelay = null)
     {
+        var consecutiveFailures = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
                 await serveOne(cancellationToken);
+                consecutiveFailures = 0;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch (Exception)
@@ -140,10 +174,27 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
                 // during sign-in while a large database is warming up). A broken read
                 // or write must end only that connection, never the permanent listener.
                 try { connectionFailed(); } catch { }
-                try { await Task.Delay(retryDelay ?? TimeSpan.FromMilliseconds(100), cancellationToken); }
+                consecutiveFailures++;
+                try { await Task.Delay(RetryDelay(retryDelay ?? TimeSpan.FromMilliseconds(100), consecutiveFailures), cancellationToken); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             }
         }
+    }
+
+    /// Longer each time the same listener fails again, up to half a minute.
+    ///
+    /// One client that disappears is one failure, retried at once. A listener
+    /// that can never succeed -- 0.1.125's, unable to create its instance --
+    /// failed ten times a second for as long as the service ran, and wrote a
+    /// counter to the database each time. Backing off bounds any such cause,
+    /// including ones nobody has found yet, to one failure per half minute.
+    internal static TimeSpan RetryDelay(TimeSpan first, int consecutiveFailures)
+    {
+        var cap = TimeSpan.FromSeconds(30);
+        if (consecutiveFailures <= 1 || first <= TimeSpan.Zero) return first < cap ? first : cap;
+        var doublings = Math.Min(consecutiveFailures - 1, 16);
+        var delay = first * Math.Pow(2, doublings);
+        return delay < cap ? delay : cap;
     }
 
     private readonly StatusFallback statusFallback = new();

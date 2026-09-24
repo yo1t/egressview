@@ -212,7 +212,19 @@ try
         Assert(EgressView.Agent.Service.AgentIpcServer.Listeners >= 2,
             $"more than one caller at a time, not {EgressView.Agent.Service.AgentIpcServer.Listeners}");
         var pipeName = "egressview-agent-test-" + Guid.NewGuid().ToString("N")[..8];
-        var mine = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+        // The window's user and the server are different identities in
+        // production -- a signed-in user and NT SERVICE\EgressViewAgent -- and
+        // this test has to keep them apart. 0.1.125's version used this
+        // process's SID for both, so the window's read/write grant covered the
+        // server too: the test passed while the installed service failed every
+        // listener after the first, thirty times a second. The next attempt
+        // put the window on BUILTIN\Users, which this process is a member of,
+        // and passed for the same reason. The window here is LocalService,
+        // which this process is certainly not, so only the server's own rule
+        // can let it add instances. This process stands in for the service.
+        var mine = new System.Security.Principal.SecurityIdentifier(
+            System.Security.Principal.WellKnownSidType.LocalServiceSid, null).Value;
+        var serverSid = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
         var servers = new List<System.IO.Pipes.NamedPipeServerStream>();
         Exception? refused = null;
         try
@@ -221,7 +233,7 @@ try
                 servers.Add(System.IO.Pipes.NamedPipeServerStreamAcl.Create(pipeName, System.IO.Pipes.PipeDirection.InOut,
                     EgressView.Agent.Service.AgentIpcServer.Listeners, System.IO.Pipes.PipeTransmissionMode.Byte,
                     System.IO.Pipes.PipeOptions.Asynchronous, 4096, 4096,
-                    EgressView.Agent.Service.AgentIpcServer.BuildSecurity(mine)));
+                    EgressView.Agent.Service.AgentIpcServer.BuildSecurity(mine, serverSid)));
         }
         catch (Exception exception) { refused = exception; }
         Assert(refused is null && servers.Count == EgressView.Agent.Service.AgentIpcServer.Listeners,
@@ -236,6 +248,30 @@ try
         Assert(Task.WaitAll(accepted, 2_000), "all of them are connected at once");
         foreach (var client in clients) client.Dispose();
         foreach (var server in servers) server.Dispose();
+    }
+
+    // The service's own SID, computed from its name, is the one Windows gives
+    // it: checked against `sc showsid EgressViewAgent` on the machine this was
+    // written on. And this test process is not the service.
+    {
+        var computed = EgressView.Agent.Service.ServiceIdentity.Sid().Value;
+        Assert(computed == "S-1-5-80-3647343375-3317903249-2886918786-2439003730-1861424852",
+            $"the service SID is the one Windows derives, not {computed}");
+        Assert(!EgressView.Agent.Service.ServiceIdentity.CarriesOwnSid(EgressView.Agent.Service.ServiceIdentity.Sid()),
+            "a process that is not the service does not carry its SID, and would run one listener");
+    }
+
+    // A listener that keeps failing backs off, up to half a minute. 0.1.125's
+    // failed ten times a second each, for as long as the service ran.
+    {
+        var firstDelay = TimeSpan.FromMilliseconds(100);
+        Assert(EgressView.Agent.Service.AgentIpcServer.RetryDelay(firstDelay, 1) == firstDelay,
+            "one failure is retried at the usual pace");
+        Assert(EgressView.Agent.Service.AgentIpcServer.RetryDelay(firstDelay, 2) == TimeSpan.FromMilliseconds(200)
+               && EgressView.Agent.Service.AgentIpcServer.RetryDelay(firstDelay, 4) == TimeSpan.FromMilliseconds(800),
+            "and each further one waits twice as long");
+        Assert(EgressView.Agent.Service.AgentIpcServer.RetryDelay(firstDelay, 50) == TimeSpan.FromSeconds(30),
+            "up to half a minute, however many there are");
     }
 
     // A status request does not wait behind a long one, and does not lie for
