@@ -211,7 +211,7 @@ public actor AgentIngestSender {
                 publish(.authorizationRequired)
                 return
             }
-            await askCapabilities(credential: credential)
+            let askedThisAttempt = await askCapabilities(credential: credential)
             let outcome = AgentCapabilityNegotiation.decide(capabilities: hubCapabilities)
             let schemaVersion: Int
             switch outcome {
@@ -265,7 +265,33 @@ public actor AgentIngestSender {
                 if response.statusCode >= 500 {
                     scheduleRetry()
                 } else if Self.refusesThePayload(response.statusCode) {
-                    try handleRefusal(of: envelope, statusCode: response.statusCode)
+                    if Self.refusesTheVersion(data) {
+                        // Not about any observation, so nothing is cut. The
+                        // next attempt asks the Hub what it takes; if the
+                        // answer shares no version, that path tells the user.
+                        forgetCapabilities()
+                        logger.notice("delivery-version-refused: asking the Hub again before retrying")
+                        scheduleRetry()
+                    } else if !askedThisAttempt {
+                        // The payload was shaped by an answer kept from
+                        // earlier, and the Hub may no longer be the one that
+                        // gave it: restored from a backup, rolled back,
+                        // replaced. The answer was kept for the whole run, so
+                        // the agent went on sending a field that Hub had never
+                        // heard of, every batch was refused and halved, and
+                        // every observation was given up on in turn -- a
+                        // batch of one on the first refusal. So the Hub is
+                        // asked again and the same batch sent in the shape it
+                        // now takes. Only a refusal of a payload shaped by a
+                        // fresh answer is about the observations, and only
+                        // that one cuts.
+                        forgetCapabilities()
+                        logger.notice("delivery-refused: asking the Hub again before cutting the batch")
+                        failureCount = 0
+                        scheduleRetry(minimumDelay: 1)
+                    } else {
+                        try handleRefusal(of: envelope, statusCode: response.statusCode)
+                    }
                 } else {
                     sendTask = nil
                     publish(.failed("Hub rejected the pending batch (HTTP \(response.statusCode))"))
@@ -313,16 +339,20 @@ public actor AgentIngestSender {
     /// spot that cost two nights on P3-84. `.notice` because `.info` is not
     /// kept in the log store, and `privacy: .public` because a status code and
     /// a field name are not the user's data.
-    private func askCapabilities(credential: AgentCredential) async {
+    /// - Returns: whether the Hub was asked just now, whatever it answered.
+    ///   False when an earlier answer, or an earlier failure to get one, was
+    ///   reused.
+    @discardableResult
+    private func askCapabilities(credential: AgentCredential) async -> Bool {
         if let askedAt = capabilitiesAskedAt,
            hubCapabilities != nil || now().timeIntervalSince(askedAt) < Self.capabilitiesRefreshInterval {
-            return
+            return false
         }
         capabilitiesAskedAt = now()
 
         guard AgentEnrollmentService.isAllowedHubURL(credential.hubURL) else {
             logger.notice("hub-capabilities: refused=hub-url-not-allowed")
-            return
+            return true
         }
         var request = URLRequest(url: credential.hubURL.appendingPathComponent("api/agent/capabilities"))
         request.httpMethod = "GET"
@@ -334,15 +364,15 @@ public actor AgentIngestSender {
             result = try await transport.send(request)
         } catch {
             logger.notice("hub-capabilities: request failed, will ask again within the hour")
-            return
+            return true
         }
         guard result.1.statusCode == 200 else {
             logger.notice("hub-capabilities: status=\(result.1.statusCode, privacy: .public)")
-            return
+            return true
         }
         guard let decoded = try? JSONDecoder().decode(AgentHubCapabilities.self, from: result.0) else {
             logger.notice("hub-capabilities: status=200 but the answer would not decode")
-            return
+            return true
         }
         hubCapabilities = decoded
         let fields = decoded.observationFields?.joined(separator: ",") ?? "(none)"
@@ -350,6 +380,7 @@ public actor AgentIngestSender {
         logger.notice(
             "hub-capabilities: status=200 versions=\(versions, privacy: .public) fields=\(fields, privacy: .public)"
         )
+        return true
     }
 
     private func makeRequest(
@@ -378,6 +409,20 @@ public actor AgentIngestSender {
     /// batches at a time over a misconfigured URL.
     static func refusesThePayload(_ statusCode: Int) -> Bool {
         statusCode == 400 || statusCode == 422
+    }
+
+    /// Whether a refusal is about the schema version rather than about what
+    /// was in the batch. The Hub says so by name, and checks it before it
+    /// reads a single observation (P3-7).
+    static func refusesTheVersion(_ body: Data) -> Bool {
+        struct Refusal: Decodable { let error: String? }
+        return (try? JSONDecoder().decode(Refusal.self, from: body))?.error == "unsupported_schema_version"
+    }
+
+    /// Drops what the Hub said it accepts, so the next attempt asks again.
+    private func forgetCapabilities() {
+        hubCapabilities = nil
+        capabilitiesAskedAt = nil
     }
 
     /// Halve the refused batch and try again promptly.
