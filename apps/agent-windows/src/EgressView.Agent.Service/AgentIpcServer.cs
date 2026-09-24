@@ -12,18 +12,56 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     DeliveryController delivery, EnrichmentController enrichment) : IAsyncDisposable
 {
     public const string PipeName = "egressview-agent-v1";
+
+    /// How many callers can be connected at once (P3-140).
+    ///
+    /// It was one, and not by decision: the first version of this server was
+    /// a loop that created a pipe, served one request, closed it and made the
+    /// next, and the one was that loop's shape. Nothing recorded a reason. The
+    /// cost was measured on 2026-09-24: the 30-day analysis takes 8.8 seconds,
+    /// and a status request made during it could not even connect -- it
+    /// failed after five seconds, and the window, which asks every five,
+    /// showed "cannot read state" whenever someone looked at a week or a
+    /// month. The Agent was not broken; it was busy, and said so in the words
+    /// for broken.
+    ///
+    /// Four, because the window asks for a handful of things at once when a
+    /// view opens -- the status, the analysis, the globe, the log -- and more
+    /// than that would only queue on the store's lock anyway.
+    public const int Listeners = 4;
+
     private readonly CancellationTokenSource stop = new();
-    private Task? loop;
+    private Task[] loops = [];
     private readonly AgentUninstallClient uninstallClient = new();
 
-    public void Start() => loop = Task.Run(ServeAsync);
+    public void Start() => loops = Enumerable.Range(0, Listeners).Select(_ => Task.Run(ServeAsync)).ToArray();
 
-    internal static PipeSecurity BuildSecurity(string allowedSid)
+    /// <param name="server">
+    /// Who creates the pipe; the running process when omitted.
+    ///
+    /// It has to be named. A second instance of a pipe can only be created by
+    /// someone the first instance's rules allow to, and these rules named
+    /// LocalSystem, the window's user and NETWORK -- not LocalService, which
+    /// is what the service runs as. Measured: under them, a second instance is
+    /// refused with UnauthorizedAccessException. So raising the count alone
+    /// would have made every listener after the first fail on each attempt,
+    /// counted as connection failures and changing nothing. This is the
+    /// reason P3-140 asked for before anyone changed the number.
+    ///
+    /// Only CreateNewInstance. And it narrows who can stand in for this
+    /// server rather than widening it: with one listener there was no pipe at
+    /// all while a request was being served, and anyone could create one of
+    /// this name in that gap. With four there is always an instance, and
+    /// adding one takes this right, which only LocalSystem and the service's
+    /// own account have.
+    /// </param>
+    internal static PipeSecurity BuildSecurity(string allowedSid, SecurityIdentifier? server = null)
     {
         var security = new PipeSecurity();
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.NetworkSid, null), PipeAccessRights.FullControl, AccessControlType.Deny));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(allowedSid), PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize, AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(server ?? WindowsIdentity.GetCurrent().User!, PipeAccessRights.CreateNewInstance, AccessControlType.Allow));
         return security;
     }
 
@@ -34,20 +72,26 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
 
     /// The window's run id, held here because the window cannot hold one.
     private long uiRunId;
+    // Requests are served concurrently now; the window's begin and end can
+    // arrive on different listeners.
+    private readonly object uiRunGate = new();
 
     private void RecordUiRun(string stage, string? fault)
     {
-        switch (stage)
+        lock (uiRunGate)
         {
-            case "begin": uiRunId = store.BeginRun(RunComponent.Ui, DiagnosticsReport.CurrentVersion); break;
-            case "end" when uiRunId != 0: store.EndRun(uiRunId); uiRunId = 0; break;
-            case "fault" when uiRunId != 0: store.FaultRun(uiRunId, fault ?? "Unknown"); uiRunId = 0; break;
+            switch (stage)
+            {
+                case "begin": uiRunId = store.BeginRun(RunComponent.Ui, DiagnosticsReport.CurrentVersion); break;
+                case "end" when uiRunId != 0: store.EndRun(uiRunId); uiRunId = 0; break;
+                case "fault" when uiRunId != 0: store.FaultRun(uiRunId, fault ?? "Unknown"); uiRunId = 0; break;
+            }
         }
     }
 
     private async Task ServeOneAsync(CancellationToken cancellationToken)
     {
-        await using var pipe = NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+        await using var pipe = NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, Listeners, PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous, 4096, 4096, BuildSecurity(allowedSid));
         await pipe.WaitForConnectionAsync(cancellationToken);
         using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, true);
@@ -102,7 +146,10 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         }
     }
 
-    private string Status() => DiagnosticsReport.CreateStatus(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), readsHostnames());
+    private readonly StatusFallback statusFallback = new();
+
+    private string Status() => statusFallback.Get(() =>
+        DiagnosticsReport.CreateStatus(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), readsHostnames()));
     /// Reports the last full read rather than performing one. Performing it
     /// here held the lock for thirty seconds and the pipe serves one caller at
     /// a time, so saving a bundle made the window show "status unavailable"
@@ -179,7 +226,8 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     public async ValueTask DisposeAsync()
     {
         stop.Cancel();
-        if (loop is not null) try { await loop; } catch (OperationCanceledException) { }
+        foreach (var loop in loops)
+            try { await loop; } catch (OperationCanceledException) { }
         uninstallClient.Dispose();
         stop.Dispose();
     }
