@@ -969,6 +969,11 @@ struct AgentOverviewPanel: View {
     /// Windows machine this card was first built for. The destinations that
     /// resolve are the majority; the ones that do not -- devices on the local
     /// network, broadcast, multicast -- make most of the connections.
+    ///
+    /// It says the count is by address because the Destinations tile beside
+    /// it is not: with destinations shown by name it counts names, and on the
+    /// screen that prompted this the tile read 255 while this said 248, with
+    /// nothing to say which was right. Both are.
     private var destinationNamesNote: (short: String, full: String)? {
         let names = summary.destinationNames
         guard names.total > 0 else { return nil }
@@ -977,7 +982,7 @@ struct AgentOverviewPanel: View {
             L("Destinations without a name are shown as addresses. Counted by connections: %@.", $0)
         } ?? L("Destinations without a name are shown as addresses.")
         let full = L(
-            "Names were found for %lld of %lld destinations; the rest are shown as IP addresses. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name.",
+            "Counted by IP address, %lld of %lld destinations have a name; the rest are shown as IP addresses. The Destinations tile counts names while destinations are shown by name, so its number can differ. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name.",
             names.named, names.total
         )
         return (short, full)
