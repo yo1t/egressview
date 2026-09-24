@@ -14,6 +14,8 @@ struct AgentPeriodSummary: Equatable {
     var bytesOut: UInt64 = 0
     var observationsWithoutBytes = 0
     var outboundAnomalyCount = 0
+    /// How many of this period's destinations arrived with a name (P3-162).
+    var destinationNames = DestinationNameCoverage.empty
 }
 
 struct AgentObservationRow: Identifiable {
@@ -641,7 +643,8 @@ final class AgentMainViewModel: ObservableObject {
                         bytesIn: traffic.bytesIn,
                         bytesOut: traffic.bytesOut,
                         observationsWithoutBytes: traffic.observationsWithoutBytes,
-                        outboundAnomalyCount: try store.outboundAnomalyCount(from: from, to: to)
+                        outboundAnomalyCount: try store.outboundAnomalyCount(from: from, to: to),
+                        destinationNames: try store.destinationNameCoverage(from: from, to: to)
                     )
                     let buckets = try store.appTimeline(
                         from: from, to: to, buckets: VisualizationSelection.bucketCount

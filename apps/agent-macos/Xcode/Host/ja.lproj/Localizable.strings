@@ -398,7 +398,8 @@
 "It was run again at this launch and did not finish." = "今回の起動でやり直しましたが、完了しませんでした。";
 "A copy from before it started is kept at %@." = "開始前の複製が %@ にあります。";
 "Dismiss" = "閉じる";
-"Shaded: the Mac was asleep. Traffic during sleep is not recorded." = "網掛け: Macがスリープしていた時間。スリープ中の通信は記録されません。";
+"Shaded: the Mac was asleep. macOS still wakes it for a few seconds now and then, and traffic in those seconds is recorded." = "網掛け: Macがスリープしていた時間。スリープ中もmacOSが数秒ずつ起きることがあり、その間の通信は記録されます。";
+"While a Mac sleeps, macOS may wake it for a few seconds at a time without turning on the screen, for example for Power Nap or maintenance. Apps can use the network in those seconds, so bars can stand inside the shaded band." = "スリープ中でも、macOSは画面を点けずにMacを数秒ずつ起こすことがあります（Power Napやメンテナンスなど）。その間はアプリも通信できるため、網掛けの中にも棒が立ちます。";
 "Hatched: nothing was recorded here. Traffic in that time is unknown." = "斜線: この時間は記録がありません。通信があったかどうかは分かりません。";
 "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring." = "うち %@ はMacがスリープしていた時間で、不具合でも監視の欠落でもありません。";
 "Could not open the save panel because no window is open." = "ウィンドウが開いていないため、保存ダイアログを表示できませんでした。";
@@ -800,3 +801,8 @@
 // Which MaxMind account the table is fetched with (P3-117).
 "Using MaxMind account %@." = "MaxMindアカウント %@ を使います。";
 "No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you." = "MaxMindアカウントが未設定です。MaxMindから受け取った GeoIP.conf を読み込んでください。";
+
+/* Destination-name share on the overview (P3-162) */
+"Destinations without a name are shown as addresses. Counted by connections: %@." = "名前が分からない宛先はIPアドレスで表示します。接続数で数えると %@ です。";
+"Destinations without a name are shown as addresses." = "名前が分からない宛先はIPアドレスで表示します。";
+"Names were found for %lld of %lld destinations; the rest are shown as IP addresses. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name." = "通信先の名前は %2$lld 宛先のうち %1$lld 件で取得できています。残りはIPアドレスで表示します。下の図は接続数順に並びます。名前が付きにくい宛先（同じネットワーク内の機器、ブロードキャスト、マルチキャスト）は接続数が多くなりやすいため、多くの宛先に名前があっても、図はIPアドレスばかりに見えることがあります。";
