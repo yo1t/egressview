@@ -67,7 +67,10 @@ public struct AgentTimelineChart: View {
                 }
                 if !sleepPeriods.isEmpty {
                     // Says what the shaded band is. An unexplained grey stripe
-                    // is worse than no stripe.
+                    // is worse than no stripe. It also says why bars can stand
+                    // inside it: a sleeping Mac is woken for a few seconds at a
+                    // time (65 times in four hours on a MacBook on battery), and
+                    // what it sends then is real traffic.
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(AgentTimelinePlot.sleepColor.opacity(0.22))
@@ -76,10 +79,11 @@ public struct AgentTimelineChart: View {
                                     .strokeBorder(AgentTimelinePlot.sleepColor.opacity(0.6), lineWidth: 1)
                             )
                             .frame(width: 18, height: 10)
-                        Text(L("Shaded: the Mac was asleep. Traffic during sleep is not recorded."))
+                        Text(L("Shaded: the Mac was asleep. macOS still wakes it for a few seconds now and then, and traffic in those seconds is recorded."))
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .help(L("While a Mac sleeps, macOS may wake it for a few seconds at a time without turning on the screen, for example for Power Nap or maintenance. Apps can use the network in those seconds, so bars can stand inside the shaded band."))
                 }
                 if !monitoringGaps.isEmpty {
                     // An unexplained hatched band is worse than none, for the

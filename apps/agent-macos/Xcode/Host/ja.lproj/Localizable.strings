@@ -394,7 +394,8 @@
 "Whether the charts are sized by connection count or by data volume" = "グラフの大きさを接続数で決めるか、データ転送量で決めるか";
 "The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@." = "この更新は、記録の保存方法を変えている途中で止まりました。もう一度やり直します。開始前の複製が %@ にあります。";
 "The last update stopped while changing how records are stored. It will be tried again now." = "この更新は、記録の保存方法を変えている途中で止まりました。もう一度やり直します。";
-"Shaded: the Mac was asleep. Traffic during sleep is not recorded." = "網掛け: Macがスリープしていた時間。スリープ中の通信は記録されません。";
+"Shaded: the Mac was asleep. macOS still wakes it for a few seconds now and then, and traffic in those seconds is recorded." = "網掛け: Macがスリープしていた時間。スリープ中もmacOSが数秒ずつ起きることがあり、その間の通信は記録されます。";
+"While a Mac sleeps, macOS may wake it for a few seconds at a time without turning on the screen, for example for Power Nap or maintenance. Apps can use the network in those seconds, so bars can stand inside the shaded band." = "スリープ中でも、macOSは画面を点けずにMacを数秒ずつ起こすことがあります（Power Napやメンテナンスなど）。その間はアプリも通信できるため、網掛けの中にも棒が立ちます。";
 "Hatched: nothing was recorded here. Traffic in that time is unknown." = "斜線: この時間は記録がありません。通信があったかどうかは分かりません。";
 "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring." = "うち %@ はMacがスリープしていた時間で、不具合でも監視の欠落でもありません。";
 "Could not open the save panel because no window is open." = "ウィンドウが開いていないため、保存ダイアログを表示できませんでした。";
