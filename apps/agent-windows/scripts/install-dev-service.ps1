@@ -103,6 +103,11 @@ if (-not $existing) {
 if ($LASTEXITCODE -ne 0) { throw "sc failure failed: $LASTEXITCODE" }
 & sc.exe failureflag $serviceName '1' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "sc failureflag failed: $LASTEXITCODE" }
+# The same as the MSI: NT SERVICE\EgressViewAgent in the token, the only
+# identity the IPC pipe lets add instances of itself. Without it the service
+# serves one caller at a time (P3-140).
+& sc.exe sidtype $serviceName 'unrestricted' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "sc sidtype failed: $LASTEXITCODE" }
 
 Start-Service -Name $serviceName
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'

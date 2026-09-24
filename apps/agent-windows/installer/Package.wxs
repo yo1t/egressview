@@ -58,6 +58,14 @@
                             ThirdFailureActionType="restart"
                             RestartServiceDelayInSeconds="60"
                             ResetPeriodInDays="1" />
+        <!-- Puts NT SERVICE\EgressViewAgent in the service's token (P3-140).
+             The IPC pipe lets that SID, and no other account, add instances
+             of itself, so the service can take more than one caller at once.
+             Without it, only the account the service runs as could be given
+             that right: LocalService, which other Windows services share,
+             and which would then also be able to read and write the pipe.
+             Unrestricted: the SID is added; nothing is taken away. -->
+        <ServiceConfig ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes" />
       </ServiceInstall>
       <ServiceControl Id="AgentServiceControl" Name="EgressViewAgent"
                       Start="install" Stop="both" Remove="uninstall" Wait="yes" />
