@@ -1506,6 +1506,96 @@ public final class ObservationStore: @unchecked Sendable {
         }
     }
 
+    /// How many of the destinations the sankey draws this Mac could name.
+    ///
+    /// The same three sources, the same ranges, the same period as
+    /// `appDestinationTotals`, so the number on the card and the rows in the
+    /// chart are about one population. Asking a different question of a
+    /// different table would produce a percentage nobody could check against
+    /// what they are looking at (P3-162).
+    ///
+    /// Counted per unique address, not per observation and not per DNS event:
+    /// a destination contacted a thousand times counts once, and one with
+    /// several names counts once. The value therefore does not move when the
+    /// chart is switched between sessions and bytes, or between showing names
+    /// and showing addresses -- it is about the data behind the chart, not the
+    /// way it is drawn.
+    ///
+    /// One source cannot contribute a name: `hourly_rollup` has no hostname
+    /// column. It covers only hours so old that their raw rows are gone and
+    /// `chart_hourly` was never written for them, which is history from an
+    /// older version of this agent. Those addresses are counted in the total
+    /// and can never be named, so a period reaching that far back reads lower
+    /// than the traffic deserves. Stated rather than hidden: the alternative
+    /// is leaving them out of the total, which would make the denominator
+    /// disagree with the chart.
+    public func destinationNameCoverage(from: Date, to: Date) throws -> DestinationNameCoverage {
+        try lock.withLock {
+            let watermark = (try scalarDouble("SELECT folded_through FROM chart_hourly_state") ?? 0)
+            let ranges = chartRanges(from: from, to: to, watermark: watermark)
+            // Every distinct (address, name) pair with its connections, and the
+            // name test done in Swift. Not MAX(hostname) per address: the
+            // largest string need not be the usable one -- a hostname that is
+            // the address written out again sorts above a name beginning with
+            // a digit -- and one wrong pick turns a named destination into an
+            // unnamed one. The pairs are few: chart_hourly is already one row
+            // per hour, application and pair, and the raw rows are at most the
+            // hour in progress and the part-hour the period opens with.
+            let sql = """
+            SELECT address, hostname, SUM(sessions)
+            FROM (
+                SELECT remote_address AS address,
+                       NULLIF(TRIM(COALESCE(remote_hostname, '')), '') AS hostname,
+                       session_count AS sessions
+                FROM chart_hourly
+                WHERE hour_start >= ?3 AND hour_start < ?4
+                UNION ALL
+                SELECT remote_address AS address,
+                       NULLIF(TRIM(COALESCE(remote_hostname, '')), '') AS hostname,
+                       1 AS sessions
+                FROM observations
+                WHERE (last_observed_at >= ?1 AND last_observed_at < ?3)
+                   OR (last_observed_at >= ?4 AND last_observed_at < ?2)
+                UNION ALL
+                SELECT remote_address AS address, NULL AS hostname,
+                       session_count AS sessions
+                FROM hourly_rollup
+                WHERE hour_start >= ?1 AND hour_start < ?2
+                  AND hour_start NOT IN (SELECT hour_start FROM chart_hourly)
+            )
+            GROUP BY address, hostname
+            """
+            let statement = try prepare(sql)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 3, ranges.aggregateStart)
+            sqlite3_bind_double(statement, 4, ranges.aggregateEnd)
+
+            var addresses = Set<String>()
+            var namedAddresses = Set<String>()
+            var connections = 0
+            var namedConnections = 0
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let address = text(statement, 0) else { continue }
+                let sessions = Int(sqlite3_column_int64(statement, 2))
+                addresses.insert(address)
+                connections += sessions
+                // Done here rather than in SQL because it needs to parse an
+                // address: a hostname that is a literal address is not a
+                // name, and SQL cannot tell one from a short hostname.
+                if DestinationName.isUsable(text(statement, 1), for: address) {
+                    namedAddresses.insert(address)
+                    namedConnections += sessions
+                }
+            }
+            return DestinationNameCoverage(
+                named: namedAddresses.count, total: addresses.count,
+                namedConnections: namedConnections, connections: connections
+            )
+        }
+    }
+
     /// Per-application totals placed into a fixed number of equal buckets.
     ///
     /// The bucket count is fixed and the width follows the period, so drawing
