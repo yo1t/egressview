@@ -794,3 +794,8 @@
 // Which MaxMind account the table is fetched with (P3-117).
 "Using MaxMind account %@." = "Using MaxMind account %@.";
 "No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you." = "No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you.";
+
+/* Destination-name share on the overview (P3-162) */
+"Destinations without a name are shown as addresses. Counted by connections: %@." = "Destinations without a name are shown as addresses. Counted by connections: %@.";
+"Destinations without a name are shown as addresses." = "Destinations without a name are shown as addresses.";
+"Names were found for %lld of %lld destinations; the rest are shown as IP addresses. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name." = "Names were found for %lld of %lld destinations; the rest are shown as IP addresses. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name.";
