@@ -182,10 +182,20 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 + observations.count - deliverable.count
             let activeIDs = Set(state.activeBatch?.observationIDs ?? [])
             for observation in deliverable {
+                let identity = observation.deliveryIdentity
                 if let index = state.pending.lastIndex(where: {
-                    !activeIDs.contains($0.observationID) && $0.observation.stableKey == observation.stableKey
+                    !activeIDs.contains($0.observationID) && $0.observation.deliveryIdentity == identity
                 }) {
-                    state.pending[index].observation = observation
+                    // A later report of the same flow completes the earlier
+                    // one rather than replacing it: a closing report that
+                    // carries no name must not erase the name found at the
+                    // opening. Without a flow the tuple can join two
+                    // different connections, so there the newer one is taken
+                    // whole, as it always was.
+                    let existing = state.pending[index].observation
+                    state.pending[index].observation = observation.flowID == nil
+                        ? observation
+                        : existing.merging(observation)
                 } else {
                     state.pending.append(PendingObservation(
                         observationID: UUID(),
