@@ -1998,9 +1998,17 @@ public sealed partial class ObservationStore : IDisposable
     /// run begins is a run that never got to say goodbye. Its end is recorded
     /// as its last heartbeat rather than as now -- claiming it ran until this
     /// moment would invent the whole gap.
-    public long BeginRun(RunComponent component, string version)
+    /// <param name="startedAt">
+    /// When the process started, if it knows. The service passes the time it
+    /// wrote in service-starts.json, before the database was opened: the run
+    /// then begins when the process did rather than after the integrity check,
+    /// and a start already filed from that file by RecordUnreachedStarts is
+    /// recognised by its time instead of being filed twice.
+    /// </param>
+    public long BeginRun(RunComponent component, string version, DateTimeOffset? startedAt = null)
     {
         var name = component == RunComponent.Service ? "service" : "ui";
+        var began = (startedAt ?? DateTimeOffset.UtcNow).ToUniversalTime();
         lock (gate)
         {
             Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
@@ -2015,13 +2023,45 @@ public sealed partial class ObservationStore : IDisposable
                 Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
                     $"WHERE component='ui' AND ending='running' AND started_at < '{DateTimeOffset.UtcNow:O}'");
             Execute($"INSERT INTO run_history(component,version,started_at,heartbeat_at,ending) " +
-                $"VALUES('{name}','{Sql(Trim(version, 64))}','{DateTimeOffset.UtcNow:O}','{DateTimeOffset.UtcNow:O}','running')");
+                $"VALUES('{name}','{Sql(Trim(version, 64))}','{began:O}','{DateTimeOffset.UtcNow:O}','running')");
             var id = ScalarInt64("SELECT last_insert_rowid()");
             // Bounded: a machine that restarts often must not turn its own
             // history into the thing that fills the disk.
             Execute($"DELETE FROM run_history WHERE component='{name}' AND id<=(SELECT MIN(id) FROM (SELECT id FROM run_history WHERE component='{name}' ORDER BY id DESC LIMIT 50))-1");
             return id;
         }
+    }
+
+    /// Files the service starts that died before they could open a run.
+    ///
+    /// Each becomes an "unexpected" ending with StoppedBeforeRecording as its
+    /// fault, beginning and ending at the moment the process started: that is
+    /// all anyone knows about it, and claiming it lasted any longer would
+    /// invent the rest. A start whose time is already a run's start -- one
+    /// that did reach BeginRun but died before the file was cleared -- is
+    /// skipped, so nothing is filed twice.
+    ///
+    /// Called before BeginRun, so the rows sit in the order they happened:
+    /// the run that died, the starts that never got anywhere, then this one.
+    ///
+    /// Returns how many it filed.
+    public int RecordUnreachedStarts(IEnumerable<ServiceStart> starts)
+    {
+        var filed = 0;
+        lock (gate)
+        {
+            foreach (var start in starts.OrderBy(start => start.At))
+            {
+                var at = start.At.ToUniversalTime().ToString("O");
+                if (ScalarInt64($"SELECT COUNT(*) FROM run_history WHERE component='service' AND started_at='{at}'") != 0)
+                    continue;
+                Execute("INSERT INTO run_history(component,version,started_at,heartbeat_at,ended_at,ending,fault) " +
+                    $"VALUES('service','{Sql(Trim(start.Version, 64))}','{at}',NULL,'{at}','unexpected'," +
+                    $"'{ServiceStarts.StoppedBeforeRecording}')");
+                filed++;
+            }
+        }
+        return filed;
     }
 
     public void Heartbeat(long runId)
