@@ -63,6 +63,7 @@ public static class DiagnosticsBundle
             // above is why this report could not reach it, which for the
             // window is its own timeout -- true, and not the question.
             $"Service failures on record: {ServiceFailures(root)}",
+            $"Service starts that stopped before recording: {StoppedBeforeRecording(root)}",
             $"Database integrity: {Value(root, "database", "integrity")}",
             $"Database bytes: {Value(root, "database", "storageBytes")}",
             $"Hub queue pending: {Value(root, "delivery", "pending")}",
@@ -99,6 +100,16 @@ public static class DiagnosticsBundle
         return $"{list.GetArrayLength()}; latest {Field(last, "at")} {Field(last, "exceptionType")}"
                + (kind.Length > 0 ? $" ({kind})" : string.Empty) + where;
     }
+
+    /// From runSummary.service, which only a report from a running service
+    /// has: the limited report written while it is down cannot read the
+    /// database, and says so rather than printing zero.
+    private static string StoppedBeforeRecording(System.Text.Json.JsonElement root) =>
+        root.TryGetProperty("runSummary", out var summary)
+        && summary.TryGetProperty("service", out var service)
+        && service.TryGetProperty("stoppedBeforeRecording", out var count)
+            ? count.ToString()
+            : "not available";
 
     private static void Write(ZipArchive archive, string name, string content)
     {

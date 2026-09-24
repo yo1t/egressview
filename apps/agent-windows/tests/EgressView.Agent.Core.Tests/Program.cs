@@ -2681,6 +2681,80 @@ try
             "an unknown region falls back rather than landing at null island");
     }
 
+    // A start that dies before it can open a run (P3-133). On 2026-09-18 an
+    // upgraded service lived ten seconds; Windows logged it and the Agent's
+    // history went from the old version's clean stop straight to the restart,
+    // as if nothing had happened in between. run_history is in the database,
+    // and that start never got the database open.
+    {
+        var startsData = Path.Combine(directory, "starts-service");
+        Directory.CreateDirectory(startsData);
+        var startsDb = Path.Combine(startsData, "egressview-agent.db");
+        var t0 = new DateTimeOffset(2026, 9, 18, 14, 8, 24, TimeSpan.Zero);
+
+        // A: reaches the database, opens a run, and is killed while running.
+        var startA = ServiceStarts.Record(startsData, "0.1.52", t0);
+        using (var a = new ObservationStore(startsDb))
+        {
+            a.RecordUnreachedStarts(ServiceStarts.Read(startsData).Where(start => start.Token != startA.Token));
+            a.BeginRun(RunComponent.Service, "0.1.52", startA.At);
+            ServiceStarts.Clear(startsData);
+        }
+        // B: the upgraded service, dead ten seconds in, before the database.
+        var startB = ServiceStarts.Record(startsData, "0.1.53", t0.AddSeconds(19));
+        // C: the restart a minute later, which gets through.
+        var startC = ServiceStarts.Record(startsData, "0.1.53", t0.AddSeconds(104));
+        Assert(ServiceStarts.Read(startsData).Select(start => start.Token).SequenceEqual(new[] { startB.Token, startC.Token }),
+            "the starts are on record before any database is opened");
+
+        using (var c = new ObservationStore(startsDb))
+        {
+            var filed = c.RecordUnreachedStarts(ServiceStarts.Read(startsData).Where(start => start.Token != startC.Token));
+            var runC = c.BeginRun(RunComponent.Service, "0.1.53", startC.At);
+            ServiceStarts.Clear(startsData);
+            Assert(filed == 1, $"one start never reached the database, not {filed}");
+
+            var history = c.ReadRunHistory(10).Where(run => run.Component == RunComponent.Service).ToArray();
+            // Newest first: C running, B that never got anywhere, A killed.
+            Assert(history.Length == 3, $"three service runs, not {history.Length}");
+            Assert(history[0].Version == "0.1.53" && history[0].Ending == "running" && history[0].StartedAt == startC.At,
+                "this run began when its process did, not after the database opened");
+            Assert(history[1].Version == "0.1.53" && history[1].Ending == "unexpected"
+                   && history[1].Fault == ServiceStarts.StoppedBeforeRecording
+                   && history[1].StartedAt == startB.At && history[1].EndedAt == startB.At,
+                $"the start that died early is there, as unexpected and before recording, not {history[1]}");
+            // Nothing is known about how long it lived, so nothing is claimed.
+            Assert(history[1].HeartbeatAt is null, "and it claims no time it did not report");
+            Assert(history[2].Version == "0.1.52" && history[2].Ending == "unexpected" && history[2].Fault is null,
+                "and the run that was killed while running is told apart from it");
+
+            // Filed once. A start that reached BeginRun but died before the
+            // file was cleared is recognised by its start time.
+            var again = c.RecordUnreachedStarts([startB, startC]);
+            Assert(again == 0, $"nothing already on record is filed twice, not {again}");
+
+            // And the diagnostics count it apart.
+            var report = DiagnosticsReport.Create(new CollectorSnapshot("running", 0, 0, 0, 0, null, null, 0), c, "0.1.53");
+            using var document = System.Text.Json.JsonDocument.Parse(report);
+            var summary = document.RootElement.GetProperty("runSummary").GetProperty("service");
+            Assert(summary.GetProperty("stoppedBeforeRecording").GetInt32() == 1 && summary.GetProperty("unexpected").GetInt32() == 2,
+                $"the summary counts the early death apart from the crash: {summary}");
+            Assert(DiagnosticsBundle.RenderText(report).Contains("Service starts that stopped before recording: 1", StringComparison.Ordinal),
+                "and diagnostics.txt says it in a line");
+            c.EndRun(runC);
+        }
+        Assert(ServiceStarts.Read(startsData).Count == 0, "once filed, the file is emptied");
+
+        // Bounded: a service that dies on every start does not grow the file
+        // without end.
+        for (var i = 0; i < ServiceStarts.Kept + 15; i++)
+            ServiceStarts.Record(startsData, "0.1.53", t0.AddMinutes(i));
+        var kept = ServiceStarts.Read(startsData);
+        Assert(kept.Count == ServiceStarts.Kept && kept[^1].At == t0.AddMinutes(ServiceStarts.Kept + 14),
+            $"only the last {ServiceStarts.Kept} starts are kept, newest last, not {kept.Count}");
+        ServiceStarts.Clear(startsData);
+    }
+
     {
         // A process that crashes writes nothing, so its fate has to be decided
         // by the next start. The failure mode to avoid is the opposite one:

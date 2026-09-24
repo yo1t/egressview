@@ -169,6 +169,11 @@ public static class DiagnosticsReport
             systemShutdown = mine.Count(run => run.Ending == "system-shutdown"),
             unexpected = mine.Count(run => run.Ending == "unexpected"),
             faulted = mine.Count(run => run.Ending == "faulted"),
+            // Of the unexpected ones, those that died before they could open
+            // a run at all -- counted apart, because "it crashed while
+            // running" and "it never got as far as running" point at
+            // different places (P3-133).
+            stoppedBeforeRecording = mine.Count(run => run.Fault == ServiceStarts.StoppedBeforeRecording),
         };
     }
 
