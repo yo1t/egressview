@@ -72,7 +72,10 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            report = DiagnosticsReport.CreateFallback(DiagnosticsReport.CurrentVersion, exception.GetType().Name);
+            // Opening it again failed too; say so, and also what the service
+            // recorded when it failed, which is usually the more useful half.
+            report = DiagnosticsReport.CreateFallback(DiagnosticsReport.CurrentVersion, exception.GetType().Name,
+                Path.GetDirectoryName(Path.GetFullPath(database)));
         }
         DiagnosticsBundle.Create(destination, report);
         return 0;
@@ -149,6 +152,12 @@ internal sealed class AgentWindowsService : ServiceBase
             catch (Exception ex)
             {
                 WriteStartupFailure(ex);
+                // The part of it a diagnostics bundle may carry. Not for the
+                // slow shutdown above: that service stopped as asked, and a
+                // bundle listing it among failures would say otherwise.
+                var data = Path.Combine(AppContext.BaseDirectory, "data");
+                ServiceFailure.Append(data,
+                    ServiceFailure.From(ex, Path.Combine(data, "egressview-agent.db"), DateTimeOffset.UtcNow));
                 WriteEventLogFailure(ex);
                 Environment.Exit(1);
             }

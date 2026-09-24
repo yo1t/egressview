@@ -59,6 +59,10 @@ public static class DiagnosticsBundle
             $"Last observation: {Value(root, "collector", "LastObservedAt")}",
             $"IPC report channel: {Value(root, "ipc", "reportChannel")}",
             $"Service fallback: {Value(root, "service", "failure")}",
+            // Why the service itself last stopped with an error. The line
+            // above is why this report could not reach it, which for the
+            // window is its own timeout -- true, and not the question.
+            $"Service failures on record: {ServiceFailures(root)}",
             $"Database integrity: {Value(root, "database", "integrity")}",
             $"Database bytes: {Value(root, "database", "storageBytes")}",
             $"Hub queue pending: {Value(root, "delivery", "pending")}",
@@ -69,6 +73,31 @@ public static class DiagnosticsBundle
             $"Installer version: {Value(root, "installer", "version")}",
         };
         return string.Join("\r\n", lines) + "\r\n";
+    }
+
+    /// "none recorded", or how many and the latest, in a form a person can
+    /// read without opening the JSON.
+    private static string ServiceFailures(System.Text.Json.JsonElement root)
+    {
+        if (!root.TryGetProperty("serviceFailures", out var list)
+            || list.ValueKind != System.Text.Json.JsonValueKind.Array
+            || list.GetArrayLength() == 0)
+            return "none recorded";
+        var last = list[list.GetArrayLength() - 1];
+        string Field(System.Text.Json.JsonElement element, string name) =>
+            element.TryGetProperty(name, out var value) && value.ValueKind != System.Text.Json.JsonValueKind.Null
+                ? value.ToString() : string.Empty;
+        var kind = Field(last, "storeFailure");
+        var where = string.Empty;
+        if (last.TryGetProperty("migration", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            var steps = Field(m, "steps");
+            where = steps is "" or "0"
+                ? $" during the migration to schema v{Field(m, "toVersion")}"
+                : $" during the migration to schema v{Field(m, "toVersion")}, step {Field(m, "step")} of {steps}";
+        }
+        return $"{list.GetArrayLength()}; latest {Field(last, "at")} {Field(last, "exceptionType")}"
+               + (kind.Length > 0 ? $" ({kind})" : string.Empty) + where;
     }
 
     private static void Write(ZipArchive archive, string name, string content)

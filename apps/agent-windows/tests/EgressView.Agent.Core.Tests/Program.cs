@@ -1223,6 +1223,95 @@ try
             "and it reads as failed, not as interrupted, now that its writer has moved on");
     }
 
+    // Why it failed has to reach a diagnostics bundle (P3-161). The service
+    // wrote the reason to startup-error.txt and nothing read it: the window
+    // said "the update failed, the diagnostics export says why", and the
+    // export -- saved while the service was down -- recordedFailures the window's own
+    // pipe timeout instead.
+    {
+        var failedData = Path.Combine(directory, "failed-service");
+        Directory.CreateDirectory(failedData);
+        var failedDb = Path.Combine(failedData, "egressview-agent.db");
+        ObservationStore.CreateVersion1FixtureForTesting(failedDb, "CREATE TABLE observations_v26(x INTEGER);");
+        Exception? caughtFailure = null;
+        try { using var _ = new ObservationStore(failedDb); }
+        catch (Exception exception) { caughtFailure = exception; }
+        Assert(caughtFailure is ObservationStoreException, $"the rigged migration fails as a store failure, not {caughtFailure?.GetType().Name}");
+
+        // What the service does on its way out.
+        ServiceFailure.Append(failedData, ServiceFailure.From(caughtFailure!, failedDb, DateTimeOffset.UtcNow));
+        var recordedFailures = ServiceFailure.Read(failedData);
+        Assert(recordedFailures.Count == 1 && recordedFailures[0].ExceptionType == nameof(ObservationStoreException)
+               && recordedFailures[0].StoreFailure is not null,
+            "the failure is recorded with its type and the store's own classification");
+        Assert(recordedFailures[0].Migration is { FromVersion: 25, ToVersion: 26, Step: 1, Steps: 4 },
+            $"and with where it stopped, not {recordedFailures[0].Migration}");
+
+        // The bundle a window saves while the service is down carries it,
+        // beside -- not instead of -- why the window could not ask.
+        var withFailure = DiagnosticsReport.CreateFallback("0.0.0", "TimeoutException", failedData);
+        using (var failureDocument = System.Text.Json.JsonDocument.Parse(withFailure))
+        {
+            var failureRoot = failureDocument.RootElement;
+            Assert(failureRoot.GetProperty("service").GetProperty("failure").GetString() == "TimeoutException",
+                "the window's own failure is still said");
+            var failureList = failureRoot.GetProperty("serviceFailures");
+            Assert(failureList.GetArrayLength() == 1
+                   && failureList[0].GetProperty("exceptionType").GetString() == nameof(ObservationStoreException)
+                   && failureList[0].GetProperty("migration").GetProperty("toVersion").GetInt32() == 26
+                   && failureList[0].GetProperty("migration").GetProperty("step").GetInt32() == 1,
+                $"and the service's failure is carried with its step: {failureList}");
+        }
+        var failureSummary = DiagnosticsBundle.RenderText(withFailure);
+        Assert(failureSummary.Contains("Service failures on record: 1; latest", StringComparison.Ordinal)
+               && failureSummary.Contains("during the migration to schema v26, step 1 of 4", StringComparison.Ordinal),
+            $"and diagnostics.txt says it in a sentence: {failureSummary}");
+
+        // The message stays on the machine. An IOException names a path and a
+        // SQLite error can quote one; the bundle promises neither.
+        var leakyFailure = new IOException(@"C:\Users\someone\secret.db could not reach api.example.com");
+        ServiceFailure.Append(failedData, ServiceFailure.From(leakyFailure, failedDb, DateTimeOffset.UtcNow));
+        var failureFile = File.ReadAllText(Path.Combine(failedData, ServiceFailure.FileName));
+        var leakReport = DiagnosticsReport.CreateFallback("0.0.0", "TimeoutException", failedData);
+        foreach (var (name, text) in new[] { ("the file", failureFile), ("the report", leakReport), ("the summary", DiagnosticsBundle.RenderText(leakReport)) })
+            Assert(!text.Contains("secret", StringComparison.OrdinalIgnoreCase)
+                   && !text.Contains("example.com", StringComparison.OrdinalIgnoreCase)
+                   && !text.Contains("someone", StringComparison.OrdinalIgnoreCase),
+                $"{name} carries no part of the exception's message");
+        Assert(ServiceFailure.Read(failedData)[^1].ExceptionType == nameof(IOException),
+            "while the type still says what kind of failure it was");
+
+        // Kept once the progress failureFile is gone -- the next successful start
+        // clears that failureFile, and that is exactly when someone asks why the
+        // start before it failed.
+        MigrationProgress.Clear(failedDb);
+        Assert(ServiceFailure.Read(failedData).Count == 2, "the record outlives the progress file");
+
+        // And bounded: a service failing on every start does not grow a failureFile
+        // without end.
+        var failNow = DateTimeOffset.UtcNow;
+        for (var i = 0; i < 10; i++)
+            ServiceFailure.Append(failedData, new ServiceFailure(failNow.AddSeconds(i), "Repeated", null, null));
+        var keptFailures = ServiceFailure.Read(failedData);
+        Assert(keptFailures.Count == ServiceFailure.Kept && keptFailures[^1].At == failNow.AddSeconds(9),
+            $"only the last {ServiceFailure.Kept} are kept, newest last, not {keptFailures.Count}");
+
+        // A leakReport from a service that is runningReport again carries them too.
+        var healthyData = Path.Combine(directory, "healthy-service");
+        Directory.CreateDirectory(healthyData);
+        using (var healthy = new ObservationStore(Path.Combine(healthyData, "egressview-agent.db")))
+        {
+            var quietReport = DiagnosticsReport.Create(new CollectorSnapshot("running", 0, 0, 0, 0, null, null, 0), healthy, "0.0.0");
+            Assert(DiagnosticsBundle.RenderText(quietReport).Contains("Service failures on record: none recorded", StringComparison.Ordinal),
+                "a service that never failed says so rather than leaving the line out");
+            ServiceFailure.Append(healthyData, recordedFailures[0]);
+            var runningReport = DiagnosticsReport.Create(new CollectorSnapshot("running", 0, 0, 0, 0, null, null, 0), healthy, "0.0.0");
+            using var failureDocument = System.Text.Json.JsonDocument.Parse(runningReport);
+            Assert(failureDocument.RootElement.GetProperty("serviceFailures").GetArrayLength() == 1,
+                "and one that failed before and is running now still carries why");
+        }
+    }
+
     // The window is headed "outbound traffic from this PC" and its
     // destination list carried 127.0.0.1 -- 41,680 rows in a day on the
     // machine this was found on, the longest-lived flow there was.

@@ -62,10 +62,13 @@ public sealed record MigrationProgress(
     /// given up, described as one still working. Waiting is the right thing
     /// to do only while something is happening.
     ///
-    /// No message. Whatever went wrong is in startup-error.txt and in the
-    /// diagnostics bundle; a file the window reads is not the place to put
-    /// text nobody has looked at, which in this product is how a path or a
-    /// host ends up on screen.
+    /// No message. A file the window reads is not the place to put text
+    /// nobody has looked at, which in this product is how a path or a host
+    /// ends up on screen. The message is in startup-error.txt for someone at
+    /// the machine, and what of it may leave -- the type, the store's
+    /// classification, the step it stopped at -- is in service-failures.json,
+    /// which every diagnostics bundle carries (ServiceFailure). This comment
+    /// used to say the bundle had it before anything put it there.
     public const string Failed = "failed";
 
     /// How often a running migration says it is still running.
