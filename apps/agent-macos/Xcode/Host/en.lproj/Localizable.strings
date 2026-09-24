@@ -392,9 +392,14 @@
 "Measured" = "Measured";
 "The measure sizes the marks on the charts. The log lists every connection either way." = "The measure sizes the marks on the charts. The log lists every connection either way.";
 "Whether the charts are sized by connection count or by data volume" = "Whether the charts are sized by connection count or by data volume";
-"The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@." = "The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@.";
-"The last update stopped while changing how records are stored. It will be tried again now." = "The last update stopped while changing how records are stored. It will be tried again now.";
-"Shaded: the Mac was asleep. Traffic during sleep is not recorded." = "Shaded: the Mac was asleep. Traffic during sleep is not recorded.";
+"The last update stopped at step %lld of %lld while changing how records are stored." = "The last update stopped at step %lld of %lld while changing how records are stored.";
+"The last update stopped while copying the records before changing how they are stored." = "The last update stopped while copying the records before changing how they are stored.";
+"It was run again at this launch and finished." = "It was run again at this launch and finished.";
+"It was run again at this launch and did not finish." = "It was run again at this launch and did not finish.";
+"A copy from before it started is kept at %@." = "A copy from before it started is kept at %@.";
+"Dismiss" = "Dismiss";
+"Shaded: the Mac was asleep. macOS still wakes it for a few seconds now and then, and traffic in those seconds is recorded." = "Shaded: the Mac was asleep. macOS still wakes it for a few seconds now and then, and traffic in those seconds is recorded.";
+"While a Mac sleeps, macOS may wake it for a few seconds at a time without turning on the screen, for example for Power Nap or maintenance. Apps can use the network in those seconds, so bars can stand inside the shaded band." = "While a Mac sleeps, macOS may wake it for a few seconds at a time without turning on the screen, for example for Power Nap or maintenance. Apps can use the network in those seconds, so bars can stand inside the shaded band.";
 "Hatched: nothing was recorded here. Traffic in that time is unknown." = "Hatched: nothing was recorded here. Traffic in that time is unknown.";
 "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring." = "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring.";
 "Could not open the save panel because no window is open." = "Could not open the save panel because no window is open.";
@@ -794,3 +799,8 @@
 // Which MaxMind account the table is fetched with (P3-117).
 "Using MaxMind account %@." = "Using MaxMind account %@.";
 "No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you." = "No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you.";
+
+/* Destination-name share on the overview (P3-162) */
+"Destinations without a name are shown as addresses. Counted by connections: %@." = "Destinations without a name are shown as addresses. Counted by connections: %@.";
+"Destinations without a name are shown as addresses." = "Destinations without a name are shown as addresses.";
+"Names were found for %lld of %lld destinations; the rest are shown as IP addresses. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name." = "Names were found for %lld of %lld destinations; the rest are shown as IP addresses. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name.";

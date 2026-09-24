@@ -442,6 +442,22 @@ struct AgentMainView: View {
 
     @ViewBuilder
     private var errorBanner: some View {
+        if let notice = model.storageNotice {
+            HStack(alignment: .top, spacing: 8) {
+                Label(notice, systemImage: "exclamationmark.circle.fill")
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button(L("Dismiss")) { model.dismissStorageNotice() }
+                    .controlSize(.small)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
+        }
         if let error = model.errorMessage {
             Label(error, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
@@ -880,6 +896,15 @@ struct AgentOverviewPanel: View {
                         ? "exclamationmark.arrow.triangle.2.circlepath" : "checkmark.shield"
                 )
                 tile(L("Monitored"), "\(Int((coverage.share * 100).rounded()))%", "clock.badge.checkmark")
+                // In the ordinary style whatever the value. A low share is a
+                // fact about the traffic -- browsers resolving over DoH,
+                // connections to literal addresses -- not a fault, and
+                // colouring it as one would teach the reader to ignore colour.
+                tile(
+                    L("Destination names"),
+                    summary.destinationNames.share.map { "\(Int(($0 * 100).rounded()))%" } ?? "—",
+                    "tag"
+                )
                 // A dash, not a zero, when nothing checked. Zero is an answer
                 // and this would not be one.
                 tile(
@@ -896,6 +921,18 @@ struct AgentOverviewPanel: View {
             // nothing on its own, and a panel that looked like a verdict would
             // be inventing one.
             AgentRolledUpHistoryNote(applies: usesRolledUpHistory)
+
+            if let note = destinationNamesNote {
+                // Short on screen, whole on hover. The panel has a fixed
+                // height beside the globe, and a paragraph here pushed the
+                // privacy line below it off the bottom.
+                Label(note.short, systemImage: "tag")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help(note.full)
+                    .accessibilityHint(note.full)
+            }
 
             VStack(alignment: .leading, spacing: 5) {
                 Label(
@@ -922,6 +959,28 @@ struct AgentOverviewPanel: View {
         // globe is kept, and nothing is silently cut.
         .modifier(AgentFitsOrScrolls())
         .agentSection()
+    }
+
+    /// The counts behind the destination-name tile, and why the chart under
+    /// it can look like addresses when most destinations have a name.
+    ///
+    /// Both shares, because the chart is ordered by connections and the two
+    /// can be nothing alike: 93% by destination and 11% by connection on the
+    /// Windows machine this card was first built for. The destinations that
+    /// resolve are the majority; the ones that do not -- devices on the local
+    /// network, broadcast, multicast -- make most of the connections.
+    private var destinationNamesNote: (short: String, full: String)? {
+        let names = summary.destinationNames
+        guard names.total > 0 else { return nil }
+        let byConnections = names.connectionShare.map { "\(Int(($0 * 100).rounded()))%" }
+        let short = byConnections.map {
+            L("Destinations without a name are shown as addresses. Counted by connections: %@.", $0)
+        } ?? L("Destinations without a name are shown as addresses.")
+        let full = L(
+            "Names were found for %lld of %lld destinations; the rest are shown as IP addresses. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name.",
+            names.named, names.total
+        )
+        return (short, full)
     }
 
     private func storageDescription(_ statistics: ObservationStoreStatistics) -> String {
@@ -1066,6 +1125,10 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     @MainActor
     func showStorageError(_ message: String) {
         model.showStorageError(message)
+    }
+
+    func showStorageNotice(_ message: String) {
+        model.showStorageNotice(message)
     }
 
     @MainActor

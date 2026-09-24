@@ -87,6 +87,22 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
         ].joined(separator: "|")
     }
 
+    /// What makes two observations the same thing to deliver to the Hub.
+    ///
+    /// The Network Extension's flow UUID when there is one: the opening, the
+    /// name found later and the closing byte counts all carry it, and a
+    /// different flow never does. `stableKey` treats two flows as one whenever
+    /// the protocol, both endpoints and the PID match -- which a process that
+    /// opens several short connections to one server does all the time -- and
+    /// the second then replaced the first before either reached the Hub
+    /// (P3-164). The tuple remains the identity only for observations without
+    /// a flow, which is what the socket-table collector produces.
+    ///
+    /// Local only. It keys the queue and is never part of what is sent.
+    public var deliveryIdentity: String {
+        flowID.map { "flow|\($0.uuidString)" } ?? stableKey
+    }
+
     func merging(_ newer: ConnectionObservation) -> ConnectionObservation {
         ConnectionObservation(
             networkProtocol: networkProtocol,
