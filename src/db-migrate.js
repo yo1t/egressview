@@ -1348,6 +1348,7 @@ function runMigrations(db, dbPath, ctx = {}) {
   const pending = MIGRATIONS.filter(m => m.version > currentVersion);
 
   if (pending.length === 0) return;
+  ctx.onProgress?.('migration');
 
   const isOnDisk = dbPath && dbPath !== ':memory:';
 
