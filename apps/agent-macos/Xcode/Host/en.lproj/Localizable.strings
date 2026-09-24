@@ -394,7 +394,8 @@
 "Whether the charts are sized by connection count or by data volume" = "Whether the charts are sized by connection count or by data volume";
 "The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@." = "The last update stopped while changing how records are stored. It will be tried again now. A copy from before it started is kept at %@.";
 "The last update stopped while changing how records are stored. It will be tried again now." = "The last update stopped while changing how records are stored. It will be tried again now.";
-"Shaded: the Mac was asleep. Traffic during sleep is not recorded." = "Shaded: the Mac was asleep. Traffic during sleep is not recorded.";
+"Shaded: the Mac was asleep. macOS still wakes it for a few seconds now and then, and traffic in those seconds is recorded." = "Shaded: the Mac was asleep. macOS still wakes it for a few seconds now and then, and traffic in those seconds is recorded.";
+"While a Mac sleeps, macOS may wake it for a few seconds at a time without turning on the screen, for example for Power Nap or maintenance. Apps can use the network in those seconds, so bars can stand inside the shaded band." = "While a Mac sleeps, macOS may wake it for a few seconds at a time without turning on the screen, for example for Power Nap or maintenance. Apps can use the network in those seconds, so bars can stand inside the shaded band.";
 "Hatched: nothing was recorded here. Traffic in that time is unknown." = "Hatched: nothing was recorded here. Traffic in that time is unknown.";
 "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring." = "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring.";
 "Could not open the save panel because no window is open." = "Could not open the save panel because no window is open.";
