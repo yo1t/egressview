@@ -19,6 +19,15 @@
       "supersededBy": "0.1.120",
       "reason": "Never published. Two different builds carry this number: one with the unindexed migration and one with the fix. Installing the second over the first changed nothing, because Windows Installer skips payloads whose version has not moved, and msiexec returned 0 while replacing no files. The number cannot identify a build and must not be used to name one.",
       "recordedAt": "2026-09-23"
+    },
+    {
+      "platform": "windows",
+      "version": "0.1.125",
+      "kind": "defective-build",
+      "publishedAt": null,
+      "supersededBy": "0.1.126",
+      "reason": "Never published; installed on one machine for about twenty hours. It raised the IPC listeners to four but granted the service's account only CreateNewInstance on the pipe, and creating an instance of an existing pipe also opens it for reading and writing, so three of the four listeners failed on every attempt, retried every 100 ms and wrote a failure counter to the database each time -- 1,947,715 times before it was replaced. Status requests during a long analysis still failed to connect. Its test gave the window's and the server's rules the same SID and could not see it. Fixed in 0.1.126 by PR #667.",
+      "recordedAt": "2026-09-25"
     }
   ]
 }

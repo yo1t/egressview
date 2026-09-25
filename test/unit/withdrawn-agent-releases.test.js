@@ -21,7 +21,8 @@ describe('withdrawn agent releases', () => {
     for (const release of policy.releases) {
       assert.match(release.platform, /^(?:windows|macos)$/);
       assert.match(release.version, /^\d+\.\d+\.\d+$/);
-      assert.match(release.kind, /^(?:published-and-withdrawn|ambiguous-build)$/);
+      // defective-build: never published, but the artifact exists and must not be.
+      assert.match(release.kind, /^(?:published-and-withdrawn|ambiguous-build|defective-build)$/);
       assert.ok(release.reason && release.reason.length > 60, `${release.version} has no real reason`);
       assert.match(release.supersededBy, /^\d+\.\d+\.\d+$/);
       assert.match(release.recordedAt, /^\d{4}-\d{2}-\d{2}$/);
