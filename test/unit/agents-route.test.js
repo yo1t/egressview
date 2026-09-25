@@ -452,6 +452,9 @@ describe('Agent HTTP ingest', () => {
     // The exact string the agent looks for before it will send the field. A
     // rename here stops the name being sent and says nothing (P3-14 stage 2).
     assert.deepEqual(capabilities.body.observationFields, ['remoteHostname']);
+    // An agent reuses an observation id for a flow's closing report only when
+    // this is true; a Hub without it would drop the counts as a duplicate (P3-170).
+    assert.equal(capabilities.body.observationUpdates, true);
     assert.equal(capabilities.body.maxBodyBytes, 512 * 1024);
     // Declared empty rather than omitted, so an agent cannot read a missing
     // field as permission to compress.

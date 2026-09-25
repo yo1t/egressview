@@ -294,3 +294,95 @@ describe('観測に付いてきた宛先名', () => {
     assert.equal(row.remoteHostname, null);
   });
 });
+
+// A flow's closing report, sent under the observation id of its opening
+// report, completes the stored row instead of being dropped as a duplicate
+// (P3-170). One row per connection, with its byte counts.
+describe('終了時の報告で、開始時の行を完成させる', () => {
+  const secondBatch = '00000000-0000-4000-8000-0000000000b2';
+
+  function opening() {
+    const envelope = copy();
+    Object.assign(envelope.observations[0], {
+      localPort: 0, bytesIn: null, bytesOut: null,
+      lastObservedAt: '2026-08-11T11:59:58Z', remoteHostname: 'api.example',
+    });
+    return envelope;
+  }
+  function closing(changes = {}) {
+    const envelope = copy();
+    envelope.batchId = secondBatch;
+    Object.assign(envelope.observations[0], {
+      bytesIn: '5000', bytesOut: '700', lastObservedAt: '2026-08-11T13:00:05Z',
+    }, changes);
+    return envelope;
+  }
+  function rows() {
+    return store._dbForTest().prepare(`SELECT localPort, bytesIn, bytesOut, lastObservedAt, remoteHostname
+      FROM agent_observations`).all();
+  }
+
+  it('同じ observationId で届いたバイト数を、バイト数の無い行に書き込む', async () => {
+    await store.storeBatch(agentId, opening(), { receivedAt });
+    const ack = await store.storeBatch(agentId, closing(), { receivedAt: receivedAt + 1 });
+
+    // The agent checks accepted + duplicate against what it sent.
+    assert.equal(ack.accepted, 0);
+    assert.equal(ack.duplicate, 1);
+    assert.equal(ack.completed, 1);
+    assert.deepEqual(rows(), [{
+      localPort: 49152, bytesIn: '5000', bytesOut: '700',
+      lastObservedAt: Date.parse('2026-08-11T13:00:05Z'), remoteHostname: 'api.example',
+    }]);
+  });
+
+  it('同じ終了時の報告を再送しても、行は変わらない', async () => {
+    await store.storeBatch(agentId, opening(), { receivedAt });
+    await store.storeBatch(agentId, closing(), { receivedAt: receivedAt + 1 });
+    const retry = closing({ bytesIn: '9999' });
+    retry.batchId = '00000000-0000-4000-8000-0000000000b3';
+    const ack = await store.storeBatch(agentId, retry, { receivedAt: receivedAt + 2 });
+
+    assert.equal(ack.completed, 0);
+    assert.equal(rows()[0].bytesIn, '5000');
+    assert.equal(rows().length, 1);
+  });
+
+  it('宛先・プロトコル・プロセスが違えば、別の接続の行を書き換えない', async () => {
+    for (const change of [
+      { remoteAddress: '198.51.100.99' }, { remotePort: 8443 }, { processID: 43 }, { networkProtocol: 'udp' },
+    ]) {
+      store._initForTest();
+      await store.storeBatch(agentId, opening(), { receivedAt });
+      const ack = await store.storeBatch(agentId, closing(change), { receivedAt: receivedAt + 1 });
+      assert.equal(ack.completed, 0, `書き換えた: ${JSON.stringify(change)}`);
+      assert.equal(rows()[0].bytesIn, null);
+    }
+  });
+
+  it('開始時の行が実際のポートを持っていれば、別のポートの報告では書き換えない', async () => {
+    const withPort = opening();
+    withPort.observations[0].localPort = 50000;
+    await store.storeBatch(agentId, withPort, { receivedAt });
+    const ack = await store.storeBatch(agentId, closing({ localPort: 50001 }), { receivedAt: receivedAt + 1 });
+
+    assert.equal(ack.completed, 0);
+    assert.equal(rows()[0].bytesIn, null);
+  });
+
+  it('終わった時刻が後の時間帯なら、アプリ別の時間集計にもその時間帯が入る', async () => {
+    await store.storeBatch(agentId, opening(), { receivedAt });
+    await store.storeBatch(agentId, closing(), { receivedAt: receivedAt + 1 });
+
+    const hours = store._dbForTest().prepare('SELECT hourStart FROM agent_app_hourly ORDER BY hourStart').all()
+      .map(row => new Date(row.hourStart).toISOString());
+    assert.deepEqual(hours, ['2026-08-11T11:00:00.000Z', '2026-08-11T13:00:00.000Z']);
+  });
+
+  it('JSONの応答には completed を出さない（Agentが読む形を変えない）', async () => {
+    await store.storeBatch(agentId, opening(), { receivedAt });
+    const ack = await store.storeBatch(agentId, closing(), { receivedAt: receivedAt + 1 });
+
+    assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(ack)), 'completed'), false);
+  });
+});
