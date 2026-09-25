@@ -60,6 +60,13 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         let queuedAt: Date
     }
 
+    /// A flow whose opening report the Hub has taken, and the id it was
+    /// taken under.
+    private struct SentOpening: Codable {
+        let flowID: UUID
+        let observationID: UUID
+    }
+
     private struct ActiveBatch: Codable {
         let batchID: UUID
         let observationIDs: [UUID]
@@ -79,6 +86,10 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         var abandonedCount: Int?
         var splitCount: Int?
         var lastAcknowledgedAt: Date?
+        /// Flows the Hub has an opening row for, oldest first, so that their
+        /// closing report can complete that row (P3-170). Optional so queue
+        /// files written before it still load.
+        var sentOpenings: [SentOpening]?
     }
 
     private let fileURL: URL
@@ -88,10 +99,23 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     private let decoder = JSONDecoder()
     private var state: State
     private var unreadableStateResetAt: Date?
+    /// Whether the Hub completes a stored row when its id comes back with
+    /// byte counts. Told by the sender after every capability answer; until
+    /// then, and for a Hub that does not, every report gets its own id.
+    private var hubCompletesObservations = false
+    /// How many opening ids are remembered. A flow's closing report comes
+    /// within seconds for almost every flow; a long one whose opening has
+    /// been forgotten simply gets its own row, as it did before.
+    public static let defaultSentOpeningLimit = 4_096
+    private let sentOpeningLimit: Int
 
-    public init(fileURL: URL, maximumPending: Int = 10_000) throws {
+    public init(
+        fileURL: URL, maximumPending: Int = 10_000,
+        sentOpeningLimit: Int = AgentDeliveryQueue.defaultSentOpeningLimit
+    ) throws {
         self.fileURL = fileURL
         self.maximumPending = max(1, maximumPending)
+        self.sentOpeningLimit = max(1, sentOpeningLimit)
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         decoder.dateDecodingStrategy = .iso8601
@@ -198,7 +222,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                         : existing.merging(observation)
                 } else {
                     state.pending.append(PendingObservation(
-                        observationID: UUID(),
+                        observationID: takeOpeningID(for: observation) ?? UUID(),
                         observation: observation,
                         queuedAt: queuedAt
                     ))
@@ -314,11 +338,51 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 throw AgentDeliveryQueueError.unexpectedAcknowledgement
             }
             let acknowledged = Set(active.observationIDs)
+            rememberOpenings(state.pending.filter { acknowledged.contains($0.observationID) })
             state.pending.removeAll { acknowledged.contains($0.observationID) }
             state.activeBatch = nil
             state.lastAcknowledgedAt = date
             try persist()
         }
+    }
+
+    /// Told by the sender whether the Hub completes a stored observation from
+    /// a report under the same id (P3-170).
+    public func setHubCompletesObservations(_ value: Bool) {
+        lock.withLock { hubCompletesObservations = value }
+    }
+
+    /// The id of this flow's opening report, if the Hub has it and will
+    /// complete it from this report. Used once: a second report with counts
+    /// gets its own id rather than two pending entries sharing one.
+    private func takeOpeningID(for observation: ConnectionObservation) -> UUID? {
+        guard hubCompletesObservations,
+              observation.bytesIn != nil || observation.bytesOut != nil,
+              let flowID = observation.flowID,
+              let index = state.sentOpenings?.firstIndex(where: { $0.flowID == flowID }),
+              let observationID = state.sentOpenings?[index].observationID,
+              !state.pending.contains(where: { $0.observationID == observationID })
+        else { return nil }
+        state.sentOpenings?.remove(at: index)
+        return observationID
+    }
+
+    /// Remembers the flows whose opening report the Hub has just taken without
+    /// byte counts, so their closing report can complete that row.
+    private func rememberOpenings(_ entries: [PendingObservation]) {
+        var openings = state.sentOpenings ?? []
+        for entry in entries {
+            guard let flowID = entry.observation.flowID else { continue }
+            openings.removeAll { $0.flowID == flowID }
+            let hasByteCounts = entry.observation.bytesIn != nil || entry.observation.bytesOut != nil
+            if !hasByteCounts {
+                openings.append(SentOpening(flowID: flowID, observationID: entry.observationID))
+            }
+        }
+        if openings.count > sentOpeningLimit {
+            openings.removeFirst(openings.count - sentOpeningLimit)
+        }
+        state.sentOpenings = openings.isEmpty ? nil : openings
     }
 
     public func status() -> AgentDeliveryQueueStatus {
