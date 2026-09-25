@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="EgressView">
+  <rect width="512" height="512" rx="114" fill="#0b1424"/>
+  <g fill="#4d94ff">
+    <rect x="86" y="86" width="80" height="340" rx="19"/>
+    <rect x="86" y="86" width="210" height="80" rx="19"/>
+    <rect x="86" y="216" width="130" height="80" rx="19"/>
+    <rect x="86" y="346" width="210" height="80" rx="19"/>
+  </g>
+  <circle cx="386" cy="126" r="40" fill="#24d6a2"/>
+  <circle cx="386" cy="256" r="25" fill="#4d94ff"/>
+  <circle cx="386" cy="386" r="25" fill="#4d94ff"/>
+</svg>
