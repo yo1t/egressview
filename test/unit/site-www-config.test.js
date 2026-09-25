@@ -90,6 +90,18 @@ describe('product site Jekyll configuration', () => {
     assert.match(yaml, /count.*-ge 20/);
   });
 
+  it('3製品の比較ページをwwwのsitemapに含める', () => {
+    const productPage = fs.readFileSync(path.join(root, 'site', 'products.html'), 'utf8');
+    assert.match(productPage, /^---\nlayout: null\n---/);
+    assert.doesNotMatch(productPage.slice(0, 100), /sitemap: false/);
+    for (const product of ['EgressView Hub', 'EgressView Agent for Mac', 'EgressView Agent for Windows']) {
+      assert.ok(productPage.includes(product), `${product} is missing`);
+    }
+    const yaml = fs.readFileSync(workflow, 'utf8');
+    assert.match(yaml, /for page in index\.html index\.ja\.html products\.html/);
+    assert.match(yaml, /https:\/\/www\.egressview\.com\/products\.html/);
+  });
+
   it('両方の言語のページを公開対象として確認する', () => {
     const yaml = fs.readFileSync(workflow, 'utf8');
     assert.match(yaml, /docs\/agent-privacy\.html/);

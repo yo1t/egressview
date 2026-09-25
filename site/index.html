@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EgressView — see which app is talking, and to whom</title>
-<meta name="description" content="Every breach ends with something leaving. EgressView shows which application on which machine reached which destination — metadata only, kept on your own hardware.">
+<title>EgressView — see where your network goes</title>
+<meta name="description" content="EgressView Hub watches devices through Yamaha or Cisco routers. Mac and Windows Agents show which app made each outbound connection. Use either alone or together.">
 <meta name="color-scheme" content="dark light">
 <link rel="canonical" href="https://www.egressview.com/">
 <!-- Open Graph and the card tags. These decide what a link to this page looks
@@ -14,26 +14,39 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="EgressView">
 <meta property="og:url" content="https://www.egressview.com/">
-<meta property="og:title" content="EgressView — see which app is talking, and to whom">
-<meta property="og:description" content="Every breach ends with something leaving. EgressView records which application, on which machine, reached which destination — metadata only, and the record stays on your own hardware.">
+<meta property="og:title" content="EgressView — see where your network goes">
+<meta property="og:description" content="Hub for your network. Agents for Mac and Windows. See outbound destinations and the apps behind them, without collecting packet contents.">
 <meta property="og:image" content="https://www.egressview.com/assets/og.png">
 <meta property="og:image:alt" content="EgressView — outbound connections, per application, kept on your own hardware">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="EgressView — see which app is talking, and to whom">
-<meta name="twitter:description" content="Records which application reached which destination. Metadata only. It never reads what you send.">
+<meta name="twitter:title" content="EgressView — see where your network goes">
+<meta name="twitter:description" content="Hub for your network; Agents for Mac and Windows. Connection metadata only, never packet contents.">
 <meta name="twitter:image" content="https://www.egressview.com/assets/og.png">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "EgressView Agent",
-  "applicationCategory": "SecurityApplication",
-  "operatingSystem": "macOS 13 or later, Apple silicon",
-  "url": "https://www.egressview.com/",
-  "downloadUrl": "https://dl.egressview.com/",
-  "isAccessibleForFree": true,
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "description": "Records which application on a Mac reached which destination. Metadata only \u2014 it never reads what you send, and the record stays on your own hardware."
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "EgressView Hub",
+      "applicationCategory": "SecurityApplication",
+      "url": "https://www.egressview.com/products.html",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "description": "Collects network connection metadata from supported routers and optionally receives Mac and Windows Agent observations."
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "EgressView Agent",
+      "applicationCategory": "SecurityApplication",
+      "operatingSystem": "macOS 13 or later, Apple silicon; Windows 10 or later",
+      "url": "https://www.egressview.com/products.html",
+      "downloadUrl": "https://dl.egressview.com/",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "description": "Records which application on a Mac or Windows PC reached which destination. Metadata only; packet contents are never collected. Hub delivery is optional."
+    }
+  ]
 }
 </script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='114' fill='%230b1424'/%3E%3Cg fill='%234d94ff'%3E%3Crect x='86' y='86' width='80' height='340' rx='19'/%3E%3Crect x='86' y='86' width='210' height='80' rx='19'/%3E%3Crect x='86' y='216' width='130' height='80' rx='19'/%3E%3Crect x='86' y='346' width='210' height='80' rx='19'/%3E%3C/g%3E%3Ccircle cx='386' cy='126' r='40' fill='%2324d6a2'/%3E%3Ccircle cx='386' cy='256' r='25' fill='%234d94ff'/%3E%3Ccircle cx='386' cy='386' r='25' fill='%234d94ff'/%3E%3C/svg%3E">
@@ -146,7 +159,7 @@
   .verdict-good{color:var(--green);font-weight:620}
 
   /* Pieces */
-  .pieces{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+  .pieces{display:grid;gap:16px;grid-template-columns:repeat(3,minmax(0,1fr))}
   .piece{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px 26px}
   .piece h3{margin:0 0 4px;font-size:1.12rem;font-weight:640}
   .piece .role{color:var(--dot);font-size:.84rem;font-weight:600;letter-spacing:.03em;text-transform:uppercase;margin-bottom:12px}
@@ -154,6 +167,8 @@
   .piece ul{margin:0;padding-left:1.1rem;color:var(--muted);font-size:.92rem}
   .piece li{margin-bottom:5px}
   .piece .opt{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);color:var(--muted);font-size:.88rem}
+  .piece .product-shot{display:block;width:100%;height:auto;margin:16px 0;border:1px solid var(--border);border-radius:9px}
+  .piece .product-links{margin-top:14px;font-size:.9rem}
 
   /* Never */
   .never{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
@@ -191,6 +206,7 @@
     h1{font-size:1.85rem}
     html[lang="ja"] h1{font-size:min(1.6rem,7vw)}
   }
+  @media (max-width:900px){.pieces{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -219,16 +235,13 @@
       </div>
     </div>
 
-    <h1 data-ja="侵入は防ぎきれない。<br>出ていくものは、見える。">You will not block<br>every intrusion.<br>You can watch what leaves.</h1>
-    <p class="lede" data-ja="どんな侵害も、最後は「何かが外へ出ていく」ことで完了します。EgressView は、&lt;strong&gt;どの端末のどのアプリが、どこへ接続したか&lt;/strong&gt;を記録します。メタデータのみ。&lt;strong&gt;通信内容は読まず、記録はあなたの手元に残ります。&lt;/strong&gt;">Every breach ends the same way: something leaves. EgressView records
-      <strong>which application, on which machine, reached which destination</strong> —
-      metadata only. <strong>It never reads what you send, and the record stays on your
-      own hardware.</strong></p>
+    <h1 data-ja="通信先も、<br>送信したアプリも見える。">See where your network goes.<br>See which app sent it.</h1>
+    <p class="lede" data-ja="&lt;strong&gt;Hubはルーター配下の機器を&lt;/strong&gt;、&lt;strong&gt;Mac・Windows Agentは各PCのアプリ別通信を&lt;/strong&gt;可視化します。単独でも、組み合わせても使えます。記録するのは接続メタデータのみ。通信内容は収集しません。">The <strong>Hub sees devices through your router</strong>. The <strong>Mac and Windows Agents name the app</strong> behind connections on their own computers. Use either alone or together. Connection metadata only, never packet contents.</p>
 
     <div class="cta">
-      <a class="btn" href="https://dl.egressview.com/"><span data-ja="Mac用Agentを入手">Get the Mac agent</span></a>
-      <a class="btn ghost" href="https://github.com/yo1t/egressview"><span data-ja="ソースを読む">Read the source</span></a>
-      <p class="cta-note" data-ja="Apple silicon · macOS 13以降">Apple silicon &middot; macOS 13 or later</p>
+      <a class="btn" href="https://dl.egressview.com/"><span data-ja="Mac・Windows Agentを入手">Get an Agent for Mac or Windows</span></a>
+      <a class="btn ghost" href="#choose"><span data-ja="3つの始め方を見る">Choose your starting point</span></a>
+      <p class="cta-note" data-ja="Agentは単体で動作 · Hubは自分のサーバーに設置">Agents work standalone &middot; Install the Hub on your own server</p>
     </div>
   </div>
 </header>
@@ -287,39 +300,56 @@
   </figure>
 </section>
 
-<section class="wrap">
-  <h2 data-ja="仕組みは2つだけ">Two pieces, and only two</h2>
-  <p class="sub" data-ja="片方だけでも使えます。両方あると、ネットワーク全体が1つの記録になります。">Either works on its own. Together they make one record of the whole network.</p>
+<section class="wrap" id="choose">
+  <h2 data-ja="3つの始め方">Three ways to start</h2>
+  <p class="sub" data-ja="Hub・Mac Agent・Windows Agent。AgentだけならルーターもHubも不要です。Hubへ送るかどうかはAgent側で選べます。">Hub, Mac Agent, or Windows Agent. An Agent needs neither a router nor a Hub; sending its observations to a Hub is opt-in.</p>
   <div class="pieces">
     <div class="piece">
       <div class="role" data-ja="1台のMac">One Mac</div>
-      <h3 data-ja="EgressView Agent">EgressView Agent</h3>
+      <h3>EgressView Agent for Mac</h3>
       <p data-ja="そのMacの外向き接続を、接続したアプリの名前とともに記録します。">Records that Mac's outbound connections, each with the name of the application that made it.</p>
+      <img class="product-shot" id="mac-product-shot" src="assets/shot-agent-en.png" data-en="assets/shot-agent-en.png" data-ja="assets/shot-agent-ja.png" loading="lazy" decoding="async" alt="Mac Agent network status, application destinations and timeline">
       <ul>
         <li data-ja="どのアプリが、どの国・ドメイン・IPへ">Which app reached which country, domain and address</li>
         <li data-ja="脅威フィードとの照合はMacの中で完結">Threat lists are matched on the Mac itself</li>
         <li data-ja="記録が途切れた時間は、途切れたと表示する">Gaps in the record are shown as gaps</li>
       </ul>
       <div class="opt" data-ja="Hubは不要です。単体で動きます。">No Hub required. It works alone.</div>
+      <div class="product-links"><a href="https://dl.egressview.com/" data-ja="ダウンロード">Download</a> · <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md" data-ja="導入ガイド">Setup guide</a></div>
+    </div>
+    <div class="piece">
+      <div class="role" data-ja="1台のWindows PC">One Windows PC</div>
+      <h3>EgressView Agent for Windows</h3>
+      <p data-ja="そのPCの外向き通信をアプリ別に記録し、ローカルで表示します。Hubへの送信は任意です。">Records outbound connections by application on this PC, with a local view and optional Hub delivery.</p>
+      <img class="product-shot" src="docs/assets/egressview-agent-windows.png" loading="lazy" decoding="async" alt="Windows Agent showing destinations by application and a traffic timeline">
+      <ul>
+        <li data-ja="Windowsサービスが通信を観測する">A Windows service observes connections</li>
+        <li data-ja="アプリ・宛先・データ量を端末内に保存">Apps, destinations and byte counts stay on the PC</li>
+        <li data-ja="Hubへの送信は明示的に有効化する">Hub delivery is explicitly enabled</li>
+      </ul>
+      <div class="opt" data-ja="Hubは不要です。現在のMSIは未署名のため、チェックサムを確認してください。">No Hub required. The current MSI is unsigned; verify its checksum.</div>
+      <div class="product-links"><a href="https://dl.egressview.com/" data-ja="ダウンロード">Download</a> · <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-windows/README.en.md" data-ja="導入ガイド">Setup guide</a></div>
     </div>
     <div class="piece">
       <div class="role" data-ja="ネットワーク全体">A whole network</div>
       <h3 data-ja="EgressView Hub">EgressView Hub</h3>
-      <p data-ja="ルーターから全端末の通信を観測し、Agentからの報告と1つの履歴にまとめます。">Watches every device from the router, and folds in what the agents report, into one history.</p>
+      <p data-ja="対応ルーター配下の機器と、送信を有効にしたAgentの観測を1つの履歴にまとめます。">Combines supported-router observations and those Agents choose to send into one history.</p>
+      <img class="product-shot" id="hub-product-shot" src="docs/assets/egressview-ai-insights-en.png" data-en="docs/assets/egressview-ai-insights-en.png" data-ja="docs/assets/egressview-ai-insights-ja.png" loading="lazy" decoding="async" alt="Hub AI Insights dashboard showing network statistics and connected devices">
       <ul>
         <li data-ja="Agentを入れられない機器も見える（IoT、テレビ、プリンタ）">Sees devices that cannot run an agent — IoT, TVs, printers</li>
-        <li data-ja="脅威フィードを取得し、Agentへ配る">Fetches the threat lists and hands them to the agents</li>
-        <li data-ja="あなたのハードウェアで動く。クラウドへ送りません">Runs on your hardware. Nothing goes to a cloud</li>
+        <li data-ja="複数ルーターの観測を重複排除して保存">Deduplicates observations from multiple routers</li>
+        <li data-ja="自分のサーバーで動く。外部AIは任意">Runs on your server; external AI is optional</li>
       </ul>
-      <div class="opt" data-ja="Yamaha RTX または Cisco IOS のルーターが必要です。">Needs a Yamaha RTX or Cisco IOS router.</div>
+      <div class="opt" data-ja="Node.js 22以降が必要です。ルーター収集にはYamaha RTXまたはCisco IOSを使用します。">Needs Node.js 22+. Router collection uses Yamaha RTX or Cisco IOS.</div>
+      <div class="product-links"><a href="https://github.com/yo1t/egressview#run-the-hub" data-ja="Hubの導入手順">Hub setup</a> · <a href="https://github.com/yo1t/egressview" data-ja="ソースコード">Source code</a></div>
     </div>
   </div>
+  <p><a href="products.html" data-ja="3製品の違いと導入条件を比較する →">Compare the three products and their setup requirements →</a></p>
   <figure class="inline-shot wide">
     <img src="assets/shot-hub-graph-map.png" loading="lazy" decoding="async"
          alt="EgressView Hub graph map: every device on the network and the destinations each reached">
     <figcaption data-ja="Hubから見たネットワーク全体。中央が端末、外側が通信先。Agentを入れられない機器もここに出ます。">The Hub's view of a whole network: devices at the centre, destinations around them — including the ones that cannot run an agent.</figcaption>
   </figure>
-  </div>
 </section>
 
 <section class="wrap">
@@ -333,8 +363,8 @@
       <b data-ja="通信を遮断しない">It does not block anything</b>
       <span data-ja="観測するだけです。壊れた判定であなたの仕事を止めません。">It observes. A wrong verdict will not interrupt your work.</span></div></div>
     <div class="never-row"><span class="x">✕</span><div>
-      <b data-ja="あなたの通信先を、問い合わせのために外へ送らない">It does not send your destinations away to be identified</b>
-      <span data-ja="脅威情報も位置情報も、一覧ごと手元へ届き、照合はあなたの機器で行います。">Threat lists and locations come to you; the matching happens on your own machine.</span></div></div>
+      <b data-ja="通信先の外部照会を必須にしない">It does not require external destination lookups</b>
+      <span data-ja="脅威情報や位置情報はローカルの一覧で照合できます。宛先IPを使う任意の外部問い合わせは、設定で明示します。">Threat and location lists support local matching. Optional external lookups that send a destination IP are disclosed in Settings.</span></div></div>
     <div class="never-row"><span class="x">✕</span><div>
       <b data-ja="分からないことを、分かったふりで表示しない">It does not present a guess as a finding</b>
       <span data-ja="照合していなければ「照合していない」と表示します。空のリストを「脅威なし」とは呼びません。">If nothing was checked, it says so. An empty list is never labelled "no threats".</span></div></div>
@@ -352,7 +382,7 @@
     <div class="fit-card fit-yes">
       <h3 data-ja="向いている">A good fit</h3>
       <ul>
-        <li data-ja="自分のMacが何と通信しているか知りたい">You want to know what your own Mac talks to</li>
+        <li data-ja="自分のMacやWindows PCが何と通信しているか知りたい">You want to know what your Mac or Windows PC talks to</li>
         <li data-ja="記録を自分の手元に置きたい">You want the record to stay on your own hardware</li>
         <li data-ja="家庭・小規模オフィスのネットワークを把握したい">You look after a home or small-office network</li>
         <li data-ja="Yamaha RTX か Cisco IOS のルーターがある（Hubを使う場合）">You have a Yamaha RTX or Cisco IOS router — for the Hub</li>
@@ -362,7 +392,7 @@
       <h3 data-ja="向いていない">Not a fit</h3>
       <ul>
         <li data-ja="通信の遮断や防御を求めている">You want something that blocks or defends</li>
-        <li data-ja="Windows や Linux の端末に入れたい（現在はmacOSのみ）">You need agents for Windows or Linux — macOS only today</li>
+        <li data-ja="Linux用Agentが必要（現在はMacとWindowsのみ）">You need an Agent for Linux — currently Mac and Windows only</li>
         <li data-ja="上記以外のルーターしかない（Hubを使う場合）">Your router is not one of the two supported — for the Hub</li>
         <li data-ja="運用を任せられるクラウドサービスが欲しい">You want a hosted service someone else operates</li>
       </ul>
@@ -393,6 +423,9 @@
     into hourly totals rather than discarded — so "where was this app going
     last Tuesday" is a question with an answer.</p>
 
+  <h3 data-ja="WindowsでもHubなしで利用できますか">Can I use the Windows Agent without a Hub?</h3>
+  <p data-ja="できます。Windows AgentはそのPCの通信をローカルに記録します。Hubへの送信は明示的に有効化するまで始まりません。現在のWindows MSIは未署名なので、導入前にダウンロードページのチェックサムを照合してください。">Yes. It records this PC's connections locally. Hub delivery does not start until you explicitly enable it. The Windows MSI is currently unsigned, so verify its checksum on the download page before installing.</p>
+
   <h3 data-ja="通信の中身は読まれますか">Does it read what I send?</h3>
   <p data-ja="読みません。記録するのは宛先・ポート・プロセス名・時刻・バイト数といったメタデータだけです。ペイロードは復号も保存もしません。">
     No. It records metadata — destination, port, process name, timestamps, byte
@@ -400,10 +433,10 @@
 
   <h3 data-ja="知らない宛先に通信していないか知りたい">
     I want to know if something is talking to a destination I do not recognise</h3>
-  <p data-ja="公開されている脅威情報リストと照合し、一致した接続を印します。照合はこのMacの中で行い、<strong>あなたの通信先を第三者へ送りません</strong>。">
+  <p data-ja="公開されている脅威情報リストと照合し、一致した接続を印します。Agentの照合はその端末内で行い、<strong>あなたの通信先を照合のために第三者へ送りません</strong>。">
     Observed destinations are matched against public threat-intelligence lists
-    and flagged. The matching happens on your Mac: <strong>your destinations are
-    never sent to a third party</strong>.</p>
+    and flagged. An Agent can match against locally downloaded lists. Optional
+    external lookups that send a destination IP are disclosed in Settings.</p>
 
   <h3 data-ja="ファイアウォールと何が違いますか">
     How is this different from a firewall?</h3>
@@ -413,23 +446,22 @@
     the question that matters on the day prevention fails.</p>
 
   <h3 data-ja="無料ですか、ソースは読めますか">Is it free, and can I read the source?</h3>
-  <p data-ja="どちらもはいです。ソースは GitHub で公開しており、Agent は Developer ID 署名・公証済みです。">
-    Both yes. The source is on GitHub, and the agent is Developer ID signed and
-    notarised.</p>
+  <p data-ja="どちらもはいです。ソースはGitHubで公開しています。Mac AgentはDeveloper ID署名・公証済みです。Windows AgentのMSIは現在未署名なので、チェックサムを確認してください。">
+    Both yes. The source is on GitHub. The Mac Agent is Developer ID signed and notarised; the Windows MSI is currently unsigned, so verify its checksum.</p>
 </section>
 
 <section class="wrap">
   <h2 data-ja="始める">Getting started</h2>
-  <p class="sub" data-ja="Agentだけなら数分です。Hubは後からでも足せます。">The agent alone takes a few minutes. The Hub can come later, or never.</p>
+  <p class="sub" data-ja="使う環境を選んでください。AgentだけならHubもルーターも不要です。">Choose the setup that fits. An Agent needs neither a Hub nor a router.</p>
   <ol class="steps">
-    <li data-ja="&lt;b&gt;ダウンロードして開く。&lt;/b&gt;署名・公証済みのインストーラです。"><b>Download and open it.</b> A signed, notarised installer.</li>
-    <li data-ja="&lt;b&gt;ネットワーク監視を承認する。&lt;/b&gt;macOSが一度だけ確認します。"><b>Approve network monitoring.</b> macOS asks once.</li>
-    <li data-ja="&lt;b&gt;それだけです。&lt;/b&gt;記録はこのMacに残り、どこへも送信しません。"><b>That is all.</b> The record stays on that Mac and is sent nowhere.</li>
+    <li data-ja="&lt;b&gt;Mac:&lt;/b&gt; 署名・公証済みの.pkgを入れ、macOSのネットワーク監視を承認します。"><b>Mac:</b> Install the signed, notarised .pkg and approve network monitoring in macOS.</li>
+    <li data-ja="&lt;b&gt;Windows:&lt;/b&gt; MSIのチェックサムを照合し、管理者としてインストールします。現在のMSIは未署名です。"><b>Windows:</b> Verify the MSI checksum, then install with administrator approval. The current MSI is unsigned.</li>
+    <li data-ja="&lt;b&gt;Hub:&lt;/b&gt; Node.js 22以降で起動します。ルーターを使う場合はSSHから登録します。"><b>Hub:</b> Start with Node.js 22+. If using a router, add it through SSH.</li>
   </ol>
   <div class="cta" style="margin-top:26px">
-    <a class="btn" href="https://dl.egressview.com/"><span data-ja="Mac用Agentを入手">Get the Mac agent</span></a>
+    <a class="btn" href="https://dl.egressview.com/"><span data-ja="Mac・Windows Agentを入手">Get an Agent for Mac or Windows</span></a>
     <a class="btn ghost" href="https://github.com/yo1t/egressview#readme"><span data-ja="Hubを建てる">Set up the Hub</span></a>
-    <p class="cta-note" data-ja="Apple silicon · macOS 13以降">Apple silicon &middot; macOS 13 or later</p>
+    <p class="cta-note" data-ja="MacはApple silicon・macOS 13以降。WindowsはWindows 10以降。">Mac: Apple silicon and macOS 13+ &middot; Windows: Windows 10+</p>
   </div>
 </section>
 
@@ -441,6 +473,7 @@
     <a href="https://dl.egressview.com/" data-ja="ダウンロード">Download</a>
     <a href="https://github.com/yo1t/egressview" data-ja="ソースコード">Source</a>
     <a href="https://github.com/yo1t/egressview/releases" data-ja="リリースノート">Releases</a>
+    <a href="products.html" data-ja="製品の比較">Compare products</a>
     <a href="docs/architecture.html" data-ja="アーキテクチャ">Architecture</a>
     <a href="docs/api-reference.html" data-ja="APIリファレンス">API reference</a>
   </div>
@@ -456,15 +489,15 @@
   const buttons = Array.from(document.querySelectorAll('.lang button'));
   function apply(lang) {
     nodes.forEach(n => n.innerHTML = lang === 'ja' ? n.dataset.ja : n.dataset.en);
-    ['shot-agent', 'hero-shot'].forEach(id => {
+    ['shot-agent', 'hero-shot', 'mac-product-shot', 'hub-product-shot'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.src = lang === 'ja' ? el.dataset.ja : el.dataset.en;
     });
     buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
     document.documentElement.lang = lang;
     document.title = lang === 'ja'
-      ? 'EgressView — どのアプリが、誰と通信しているか'
-      : 'EgressView — see which app is talking, and to whom';
+      ? 'EgressView — 通信先と送信したアプリを可視化'
+      : 'EgressView — see where your network goes';
     try { localStorage.setItem('egressview.lang', lang); } catch (e) {}
   }
   buttons.forEach(b => b.addEventListener('click', () => apply(b.dataset.lang)));
