@@ -119,6 +119,31 @@ internal static class Entry
         ]);
         Save(globe, 330, 260, Path.Combine(output, "globe.png"));
 
+        // How many drawing instructions one frame is (P3-130). The globe drew
+        // its coastline and grid one DrawLine per segment -- 4,577 for this
+        // globe, 36 since -- and while it rotates every one is issued and
+        // composed again each frame: 38% of a core on the network tab of 0.1.127, 1.2% with the
+        // globe stopped. The picture was right and render-cost's 80 ms budget
+        // was met the whole time, so neither check could see it. This counts
+        // what the frame asks the render thread to do.
+        {
+            static int Instructions(Drawing? drawing) => drawing switch
+            {
+                DrawingGroup group => group.Children.Sum(Instructions),
+                null => 0,
+                _ => 1,
+            };
+            var instructions = Instructions(VisualTreeHelper.GetDrawing(globe));
+            // Five points: two arcs each, a marker each, the visited land, the
+            // rim, the home marker, and one geometry for the grid and one for
+            // the coastline. Five hundred is generous; per-segment drawing
+            // measured 4,577.
+            if (instructions > 500)
+                throw new InvalidOperationException(
+                    $"the globe issues {instructions:N0} drawing instructions a frame; draw each pen's lines as one geometry");
+            Console.WriteLine($"globe: {instructions} drawing instructions a frame");
+        }
+
         var countryMap = new WorldCountryMapControl();
         VerifyAutomationPeer(countryMap, "All-time destination countries");
         countryMap.SetVisitedCountries(["JP", "US", "AU", "GB", "BR"]);

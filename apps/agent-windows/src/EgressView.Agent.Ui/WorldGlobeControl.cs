@@ -116,13 +116,24 @@ public sealed class WorldGlobeControl : FrameworkElement
         var surface = ((Brush)FindResource("SurfaceSecondaryBrush")).Frozen();
         drawing.DrawEllipse(surface, new Pen(accent, 1.5).Frozen(), center, radius, radius);
 
-        var gridPen = new Pen(stroke, 0.8).Frozen();
-        foreach (var latitude in new[] { -60d, -30d, 0d, 30d, 60d })
-            DrawLine(drawing, gridPen, Enumerable.Range(-180, 73).Select(i => (latitude, i * 5d)), center, radius);
-        foreach (var meridian in Enumerable.Range(0, 12).Select(i => i * 30d))
-            DrawLine(drawing, gridPen, Enumerable.Range(-18, 37).Select(i => (i * 5d, meridian)), center, radius);
+        // One geometry per pen, not one DrawLine per segment (P3-130). Each
+        // visible segment of the coastline and grid was its own drawing
+        // instruction -- 4,577 in one frame of the globe render-check draws,
+        // 36 now -- and while the globe rotates they are all issued again
+        // every frame. The UI thread built them cheaply -- it was
+        // idle nineteen samples in twenty -- but the render thread composed
+        // every one: measured on 0.1.127 in a 1800x1304 window, the network
+        // tab used 38% of a core with the globe rotating and 1.2% with it
+        // stopped. Same lines, same breaks, a handful of instructions.
+        var gridPen = new Pen(stroke, 0.8) { LineJoin = PenLineJoin.Bevel }.Frozen();
+        var grid = Lines(center, radius,
+            new[] { -60d, -30d, 0d, 30d, 60d }.Select(latitude =>
+                Enumerable.Range(-180, 73).Select(i => (latitude, i * 5d)))
+            .Concat(Enumerable.Range(0, 12).Select(i => i * 30d).Select(meridian =>
+                Enumerable.Range(-18, 37).Select(i => (i * 5d, meridian)))));
+        drawing.DrawGeometry(null, gridPen, grid);
 
-        var landPen = new Pen(accent, 0.9).Frozen();
+        var landPen = new Pen(accent, 0.9) { LineJoin = PenLineJoin.Bevel }.Frozen();
         drawing.PushClip(new EllipseGeometry(center, radius, radius));
         drawing.PushOpacity(0.20);
         foreach (var country in atlas.Where(country => country.Code is not null && visitedCountryCodes.Contains(country.Code)))
@@ -130,9 +141,7 @@ public sealed class WorldGlobeControl : FrameworkElement
                 DrawVisitedLand(drawing, accent, ring, center, radius);
         drawing.Pop();
         drawing.Pop();
-        foreach (var country in atlas)
-            foreach (var ring in country.Rings)
-                DrawLine(drawing, landPen, ring, center, radius);
+        drawing.DrawGeometry(null, landPen, Lines(center, radius, atlas.SelectMany(country => country.Rings)));
 
         // The globe's subject is the traffic, not the coastline: without a
         // line from here to each place, the markers say where the machine has
@@ -207,18 +216,34 @@ public sealed class WorldGlobeControl : FrameworkElement
     private void DrawArc(DrawingContext drawing, Pen pen, IReadOnlyList<(double Latitude, double Longitude)> arc,
         Point center, double radius, bool visible)
     {
-        Point? prior = null;
-        foreach (var step in arc)
+        // One geometry per arc and side rather than one line per step, for the
+        // same reason as the coastline. Still one per arc, so overlapping
+        // routes to the same region keep compounding their opacity the way
+        // they did.
+        var geometry = new StreamGeometry();
+        using (var context = geometry.Open())
         {
-            var projected = Project(step.Latitude, step.Longitude, center, radius);
-            var onThisSide = projected is not null;
-            var point = projected ?? Clamp(step.Latitude, step.Longitude, center, radius);
-            if (onThisSide == visible)
+            var run = new List<Point>();
+            foreach (var step in arc)
             {
-                if (prior is not null) drawing.DrawLine(pen, prior.Value, point);
-                prior = point;
+                var projected = Project(step.Latitude, step.Longitude, center, radius);
+                var onThisSide = projected is not null;
+                if (onThisSide == visible) run.Add(projected ?? Clamp(step.Latitude, step.Longitude, center, radius));
+                else Flush(run, context);
             }
-            else prior = null;
+            Flush(run, context);
+        }
+        geometry.Freeze();
+        drawing.DrawGeometry(null, pen, geometry);
+
+        static void Flush(List<Point> run, StreamGeometryContext context)
+        {
+            if (run.Count >= 2)
+            {
+                context.BeginFigure(run[0], isFilled: false, isClosed: false);
+                context.PolyLineTo(run.GetRange(1, run.Count - 1), isStroked: true, isSmoothJoin: false);
+            }
+            run.Clear();
         }
     }
 
@@ -237,15 +262,43 @@ public sealed class WorldGlobeControl : FrameworkElement
         return new Point(center.X + x / length * radius, center.Y - y / length * radius);
     }
 
-    private void DrawLine(DrawingContext drawing, Pen pen, IEnumerable<(double Lat, double Lon)> coordinates, Point center, double radius)
+    /// Every line, as one frozen geometry.
+    ///
+    /// Breaks exactly where the per-segment version skipped a segment: where
+    /// a point is behind the globe, and where two consecutive points are more
+    /// than 0.35 of the radius apart -- a line wrapping round the far side,
+    /// which drawn straight would cut across the face.
+    private Geometry Lines(Point center, double radius, IEnumerable<IEnumerable<(double Lat, double Lon)>> lines)
     {
-        Point? prior = null;
-        foreach (var coordinate in coordinates)
+        var geometry = new StreamGeometry();
+        using (var context = geometry.Open())
         {
-            var point = Project(coordinate.Lat, coordinate.Lon, center, radius);
-            if (point is not null && prior is not null && (point.Value - prior.Value).Length < radius * 0.35)
-                drawing.DrawLine(pen, prior.Value, point.Value);
-            prior = point;
+            var run = new List<Point>();
+            foreach (var line in lines)
+            {
+                Point? prior = null;
+                foreach (var coordinate in line)
+                {
+                    var point = Project(coordinate.Lat, coordinate.Lon, center, radius);
+                    if (point is null || (prior is not null && (point.Value - prior.Value).Length >= radius * 0.35))
+                        Flush(run, context);
+                    if (point is not null) run.Add(point.Value);
+                    prior = point;
+                }
+                Flush(run, context);
+            }
+        }
+        geometry.Freeze();
+        return geometry;
+
+        static void Flush(List<Point> run, StreamGeometryContext context)
+        {
+            if (run.Count >= 2)
+            {
+                context.BeginFigure(run[0], isFilled: false, isClosed: false);
+                context.PolyLineTo(run.GetRange(1, run.Count - 1), isStroked: true, isSmoothJoin: false);
+            }
+            run.Clear();
         }
     }
 
