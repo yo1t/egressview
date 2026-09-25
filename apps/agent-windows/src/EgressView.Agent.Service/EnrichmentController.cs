@@ -14,6 +14,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     private readonly GeoLite2Updater updater = new();
     private readonly ThirdPartyGeoLookup thirdParty = new();
     private DateTimeOffset lastOnDemandHubFetch;
+    private bool removedLookupsWithoutAnAddress;
     private DateTimeOffset lastCountryFetchAttempt;
     private string countryState = "idle";
     private string? countryFailure;
@@ -261,6 +262,19 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     /// moment most worth seeing. That is the gap this closes.
     private async Task PlaceUnknownAddressesAsync(GeoCacheClient client, CancellationToken token)
     {
+        // Once per start: the table is tens of thousands of rows, and the bad
+        // answer this removes can only have been written before P3-128.
+        if (!removedLookupsWithoutAnAddress)
+        {
+            removedLookupsWithoutAnAddress = true;
+            try
+            {
+                if (store.RemoveLookupsWithoutAnAddress() is var removed and > 0)
+                    store.AddCounter("geo-lookups-without-address-removed", removed);
+            }
+            catch { /* Tidying an old mistake must not stop today's lookups. */ }
+        }
+
         var source = LookupSource;
         if (!source.UsesHub()) return;
 
