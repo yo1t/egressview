@@ -2064,6 +2064,27 @@ public sealed partial class ObservationStore : IDisposable
         return filed;
     }
 
+    /// Removes third-party answers stored under something that is not an
+    /// address.
+    ///
+    /// Before P3-128 the lookup could be handed an empty destination, asked
+    /// ipwho.is about "", and was answered with the location of whoever asked
+    /// -- this PC -- which it stored under an empty key. Anything with neither
+    /// a dot nor a colon cannot be an address, so it is safe to name that way
+    /// without parsing every row. Answers about real addresses are kept, even
+    /// ones in ranges the exclusion has since been widened to cover: those
+    /// were answered correctly, just not worth asking.
+    ///
+    /// Returns how many it removed.
+    public long RemoveLookupsWithoutAnAddress()
+    {
+        lock (gate)
+        {
+            Execute("DELETE FROM geo_locations WHERE source='lookup' AND (trim(ip)='' OR (ip NOT LIKE '%.%' AND ip NOT LIKE '%:%'))");
+            return ScalarInt64("SELECT changes()");
+        }
+    }
+
     public void Heartbeat(long runId)
     {
         lock (gate) Execute($"UPDATE run_history SET heartbeat_at='{DateTimeOffset.UtcNow:O}' WHERE id={runId} AND ending='running'");

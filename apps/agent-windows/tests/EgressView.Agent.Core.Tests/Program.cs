@@ -3502,6 +3502,69 @@ try
                 "something that is not an address is left to the caller rather than silently dropped");
         }
 
+        // The Hub's list and this one are the same list (P3-128). The Windows
+        // exclusion was a switch over the first octet, and six of the Hub's
+        // ranges were not in it -- 192.88.99.0/24 and, in IPv6, NAT64,
+        // discard-only, Teredo, documentation and 6to4 -- with nothing to say
+        // so, because nothing compared the two. This reads the Hub's own file.
+        {
+            var directoryOfRepo = new DirectoryInfo(AppContext.BaseDirectory);
+            while (directoryOfRepo is not null && !File.Exists(Path.Combine(directoryOfRepo.FullName, "src", "special-use-address.js")))
+                directoryOfRepo = directoryOfRepo.Parent;
+            Assert(directoryOfRepo is not null, "the Hub's special-use list is found from the test's location");
+            var hubRanges = Regex.Matches(File.ReadAllText(Path.Combine(directoryOfRepo!.FullName, "src", "special-use-address.js")),
+                    @"\[\s*'([0-9a-fA-F.:]+)'\s*,\s*(\d+)\s*\]")
+                .Select(match => (Network: match.Groups[1].Value, Prefix: int.Parse(match.Groups[2].Value)))
+                .ToArray();
+            Assert(hubRanges.Length == 25, $"the Hub's list has its fifteen IPv4 and ten IPv6 ranges, not {hubRanges.Length}");
+            foreach (var (network, prefix) in hubRanges)
+            {
+                Assert(PrivateAddress.Ranges.Contains((network, prefix)),
+                    $"the Hub excludes {network}/{prefix}, and so does the Agent");
+                // And the rule, not only the table: the range's first and last
+                // address are both excluded.
+                var first = System.Net.IPAddress.Parse(network);
+                var bytes = first.GetAddressBytes();
+                for (var bit = prefix; bit < bytes.Length * 8; bit++) bytes[bit / 8] |= (byte)(0x80 >> (bit % 8));
+                var last = new System.Net.IPAddress(bytes);
+                Assert(PrivateAddress.IsPrivateOrReserved(first) && PrivateAddress.IsPrivateOrReserved(last),
+                    $"{first} and {last} are both inside {network}/{prefix}");
+            }
+
+            // Just outside the new ranges is still a real destination.
+            string[] newlyUnaskable = ["192.88.99.1", "64:ff9b::808:808", "100::1", "2001::1", "2001:db8::1", "2002:c000:201::1"];
+            foreach (var address in newlyUnaskable)
+                Assert(PrivateAddress.IsPrivateOrReserved(address), $"{address} is now never asked about");
+            string[] stillAskable = ["192.88.100.1", "2001:4860:4860::8888", "2003::1", "64:ff9c::1"];
+            foreach (var address in stillAskable)
+                Assert(!PrivateAddress.IsPrivateOrReserved(address), $"{address} is a real destination and is still asked about");
+        }
+
+        // What is not an address is not sent. IsPrivateOrReserved leaves that
+        // to its caller, and Routable -- the caller that sends addresses out
+        // -- did not decide: an empty destination, which v28 kept for 6,815
+        // peerless UDP sockets, went to ipwho.is as "", and that service
+        // answers an empty path with the location of whoever asked.
+        {
+            Assert(PrivateAddress.Routable(["", " ", "not-an-address", "8.8.8.8"]) is ["8.8.8.8"],
+                "an empty or unparseable destination is never asked about");
+            Assert(PrivateAddress.Routable(["[2606:4700:4700::1111]"]) is ["[2606:4700:4700::1111]"],
+                "a bracketed address is still an address");
+            Assert(PrivateAddress.Routable(["fe80::1%12"]).Count == 0,
+                "and a scoped link-local one is still link-local");
+
+            // The answer that was stored under "" is removed; real ones stay.
+            using var lookups = new ObservationStore(Path.Combine(directory, "lookups-without-address.db"));
+            lookups.SaveGeoLocations([
+                new GeoLocation("", 35.6, 139.7, "JP", "Tokyo"),
+                new GeoLocation("198.51.100.7", 52.5, 13.4, "DE", "Berlin"),
+            ]);
+            var removedLookups = lookups.RemoveLookupsWithoutAnAddress();
+            Assert(removedLookups == 1 && lookups.ReadLookedUpLocationCount() == 1,
+                $"the answer about nothing is removed and the real one kept, not {removedLookups} removed");
+            Assert(lookups.RemoveLookupsWithoutAnAddress() == 0, "and removing it again removes nothing");
+        }
+
         // The one path that sends a watched address outside.
         {
             var asked = new List<string>();
