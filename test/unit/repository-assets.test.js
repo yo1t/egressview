@@ -8,7 +8,7 @@ const path = require('node:path');
 const { preparePagesSource } = require('../../scripts/prepare-pages-source');
 
 const root = path.join(__dirname, '..', '..');
-const sourceFiles = ['README.md', 'README.ja.md', 'site/index.html', 'site/index.ja.html'];
+const sourceFiles = ['README.md', 'README.ja.md', 'site/index.html', 'site/index.ja.html', 'site/products.html'];
 const packageJson = require('../../package.json');
 
 function localImageReferences(file) {
@@ -36,12 +36,15 @@ function rawGitHubImageReferences(file) {
 
 function resolveLocalImage(file, reference) {
   const cleanReference = decodeURIComponent(reference.split(/[?#]/, 1)[0]);
-  // Pages serves `site/` as the web root, so a reference like `docs/x.png` in
-  // site/index.html means site/docs/x.png -- resolved from the file, exactly as
-  // the browser resolves it. This used to resolve from the repository root,
-  // which only worked because the page happened to reference paths that existed
-  // in both places. It reported a missing image for a file that was there.
-  return path.resolve(root, path.dirname(file), cleanReference);
+  const sitePath = path.join(root, 'site');
+  const resolved = path.resolve(root, path.dirname(file), cleanReference);
+  if (!file.startsWith('site/') || fs.existsSync(resolved)) return resolved;
+
+  // preparePagesSource copies repository docs/ under the site's web root.
+  // Resolve that build-time mapping without duplicating screenshots in site/.
+  const siteRelative = path.relative(sitePath, resolved);
+  if (siteRelative.startsWith(`docs${path.sep}`)) return path.join(root, siteRelative);
+  return resolved;
 }
 
 describe('repository public assets', () => {
@@ -91,6 +94,7 @@ describe('repository public assets', () => {
       for (const file of [
         'index.html',
         'index.ja.html',
+        'products.html',
         '_config.yml',
         '_config.www.yml',
         'docs/setup-yamaha.md',
@@ -99,6 +103,8 @@ describe('repository public assets', () => {
         'docs/architecture.md',
         'docs/architecture.ja.md',
         'docs/assets/egressview-graph-map.png',
+        'docs/assets/egressview-agent-windows.png',
+        'assets/egressview-mark.svg',
       ]) {
         assert(fs.existsSync(path.join(output, file)), `Pages source is missing ${file}`);
       }

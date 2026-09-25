@@ -1,0 +1,104 @@
+---
+layout: null
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EgressView Hub, Mac Agent, and Windows Agent</title>
+<meta name="description" content="Compare EgressView Hub with the standalone Mac and Windows Agents. See what each observes, what it needs, and where to start.">
+<link rel="canonical" href="https://www.egressview.com/products.html">
+<link rel="icon" href="assets/egressview-mark.svg">
+<style>
+  :root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#e6edf3;--muted:#9aa6b2;--accent:#79c0ff;--green:#24d6a2}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 85% 0%,#132b35 0%,var(--bg) 44%);color:var(--text);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans",sans-serif}
+  a{color:var(--accent)}a:hover{color:#a5d4ff}
+  header,main,footer{max-width:1060px;margin:auto;padding:24px}
+  header{display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border)}
+  header img{width:42px;height:42px}header b{font-size:1.1rem}header .home{margin-left:auto}
+  .lang{display:flex;gap:6px}.lang button{background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:6px 10px;cursor:pointer}
+  .lang button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+  h1{font-size:clamp(2rem,5vw,3.3rem);line-height:1.16;margin:38px 0 12px}h2{font-size:1.45rem;margin:0 0 10px}
+  .intro{color:var(--muted);max-width:70ch;margin:0 0 38px}
+  .products{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  article{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;display:flex;flex-direction:column}
+  article .type{color:var(--green);font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+  article p{color:var(--muted);margin:0 0 16px}article img{display:block;width:100%;height:auto;border:1px solid var(--border);border-radius:9px;margin:8px 0 18px}
+  article .needs{border-top:1px solid var(--border);padding-top:14px;margin-top:auto}
+  .action{display:inline-block;background:#58a6ff;color:#071525;text-decoration:none;border-radius:9px;padding:10px 16px;font-weight:700;margin-top:14px}
+  .action:hover{background:#79c0ff;color:#071525}
+  .details{margin-top:42px;border-top:1px solid var(--border);padding-top:28px;color:var(--muted)}
+  .details strong{color:var(--text)}
+  footer{color:var(--muted);border-top:1px solid var(--border);font-size:.9rem}
+  @media(max-width:560px){header{flex-wrap:wrap}header .home{margin-left:0}.lang{margin-left:auto}}
+</style>
+</head>
+<body>
+<header>
+  <img src="assets/egressview-mark.svg" alt="">
+  <b>EgressView</b>
+  <a class="home" href="./" data-ja="トップへ戻る">Back to home</a>
+  <div class="lang" role="group" aria-label="Language">
+    <button type="button" data-lang="en" aria-pressed="true">English</button>
+    <button type="button" data-lang="ja" aria-pressed="false">日本語</button>
+  </div>
+</header>
+<main>
+  <h1 data-ja="使う場所から選ぶ">Choose where to observe</h1>
+  <p class="intro" data-ja="ネットワーク全体にはHub。自分の端末のアプリ別通信にはAgent。どれも単独で始められ、後から組み合わせられます。記録するのは接続メタデータのみで、パケットの中身は読みません。">Use the Hub for network-wide visibility, or an Agent to see which application made a connection on your own computer. Each works on its own; you can combine them later. Only connection metadata is collected, never packet contents.</p>
+  <div class="products">
+    <article>
+      <span class="type" data-ja="ネットワーク全体">Whole network</span>
+      <h2>EgressView Hub</h2>
+      <p data-ja="Yamaha RTX・Cisco IOSルーター配下の機器を観測し、Agentから任意で送られた記録をまとめます。TVやIoT機器も対象です。">Collects from devices behind Yamaha RTX or Cisco IOS routers and combines opt-in Agent observations. TVs and IoT devices are included.</p>
+      <img id="hub-shot" src="docs/assets/egressview-ai-insights-en.png" data-en="docs/assets/egressview-ai-insights-en.png" data-ja="docs/assets/egressview-ai-insights-ja.png" alt="Hub dashboard with network statistics and connected devices" loading="lazy">
+      <p class="needs" data-ja="必要: Node.js 22以降。ルーター収集には対応ルーターとSSH接続。Agent受信だけならルーター不要。">Needs Node.js 22+. Router collection needs a supported router and SSH; Agent-only intake needs no router.</p>
+      <a class="action" href="https://github.com/yo1t/egressview#run-the-hub" data-ja="Hubの導入手順">Set up the Hub</a>
+    </article>
+    <article>
+      <span class="type" data-ja="このMac">This Mac</span>
+      <h2>EgressView Agent for Mac</h2>
+      <p data-ja="このMacの外向き通信をアプリ名・宛先・データ量とともにローカルに記録します。Hubへの送信は任意です。">Records this Mac's outbound connections locally with application, destination, and byte count. Hub delivery is optional.</p>
+      <img id="mac-shot" src="assets/shot-agent-en.png" data-en="assets/shot-agent-en.png" data-ja="assets/shot-agent-ja.png" alt="Mac Agent network status and per-app destinations" loading="lazy">
+      <p class="needs" data-ja="必要: Apple siliconのMac、macOS 13以降。インストール時にネットワーク監視の承認。">Needs an Apple silicon Mac with macOS 13+. Network monitoring approval is required during setup.</p>
+      <a class="action" href="https://dl.egressview.com/" data-ja="Mac版を入手">Get the Mac Agent</a>
+    </article>
+    <article>
+      <span class="type" data-ja="このWindows PC">This Windows PC</span>
+      <h2>EgressView Agent for Windows</h2>
+      <p data-ja="このPCの外向き通信をアプリ別にローカルで記録します。Hubへの送信は任意です。">Records this PC's outbound connections by application locally. Hub delivery is optional.</p>
+      <img src="docs/assets/egressview-agent-windows.png" alt="Windows Agent network status and per-app destinations; interface shown in Japanese" loading="lazy">
+      <p class="needs" data-ja="必要: Windows 10以降。現在のMSIは未署名です。ダウンロードページの手順でチェックサムを照合してください。">Needs Windows 10+. The current MSI is unsigned; verify its checksum with the download-page instructions.</p>
+      <a class="action" href="https://dl.egressview.com/" data-ja="Windows版を入手">Get the Windows Agent</a>
+    </article>
+  </div>
+  <p class="details" data-ja="&lt;strong&gt;使い分け:&lt;/strong&gt; Agentはインストールした端末だけを見ます。ルーターはソフトウェアを入れられない機器を見られますが、PC上のプロセス名は分かりません。Hubへの送信を有効にすると、両方の観測を合わせて調べられます。"><strong>The difference:</strong> An Agent sees only its own computer. A router sees devices without installed software, but not the process behind a PC's connection. Opt in to Hub delivery to investigate both together.</p>
+</main>
+<footer><a href="./" data-ja="EgressViewトップ">EgressView home</a> · <a href="https://github.com/yo1t/egressview" data-ja="ソースコード">Source code</a> · <a href="https://dl.egressview.com/" data-ja="Agentのダウンロード">Agent downloads</a></footer>
+<script>
+(function () {
+  const nodes = Array.from(document.querySelectorAll('[data-ja]:not(img)'));
+  nodes.forEach(node => { node.dataset.en = node.innerHTML; });
+  const buttons = Array.from(document.querySelectorAll('.lang button'));
+  function apply(lang) {
+    nodes.forEach(node => { node.innerHTML = lang === 'ja' ? node.dataset.ja : node.dataset.en; });
+    ['hub-shot', 'mac-shot'].forEach(id => {
+      const shot = document.getElementById(id);
+      shot.src = lang === 'ja' ? shot.dataset.ja : shot.dataset.en;
+    });
+    buttons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.lang === lang)));
+    document.documentElement.lang = lang;
+    document.title = lang === 'ja' ? 'EgressView — Hub・Mac・Windows' : 'EgressView Hub, Mac Agent, and Windows Agent';
+    try { localStorage.setItem('egressview.lang', lang); } catch (_) {}
+  }
+  buttons.forEach(button => button.addEventListener('click', () => apply(button.dataset.lang)));
+  let initial;
+  try { initial = localStorage.getItem('egressview.lang'); } catch (_) {}
+  if (!initial) initial = (navigator.language || '').toLowerCase().startsWith('ja') ? 'ja' : 'en';
+  if (initial === 'ja') apply('ja');
+})();
+</script>
+</body>
+</html>

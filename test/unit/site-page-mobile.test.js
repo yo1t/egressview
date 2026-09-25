@@ -21,11 +21,19 @@ describe('product site on a phone', () => {
   });
 
   it('見出しの2行を狭い画面でも2行のまま保つ', () => {
-    // Each clause of the Japanese heading is written as one line. Shrinking
-    // the type keeps it that way at 320px, where the longest clause is 12
-    // characters -- the alternative was a third line with one character on it.
+    // The two clauses have an explicit break. Keep the type small enough that
+    // neither clause wraps into an unintended third line on narrow screens.
     assert.match(page, /@media \(max-width:560px\)[\s\S]*html\[lang="ja"\] h1\{font-size:min\(1\.6rem,7vw\)\}/);
     assert.doesNotMatch(page, /h1 br\{display:none\}/);
+  });
+
+  it('Hubと両Agentから選べる', () => {
+    assert.match(page, /<section class="wrap" id="choose">/);
+    assert.match(page, /EgressView Agent for Mac/);
+    assert.match(page, /EgressView Agent for Windows/);
+    assert.match(page, /EgressView Hub/);
+    assert.match(page, /href="products\.html"/);
+    assert.doesNotMatch(page, /macOS only today/);
   });
 
   it('セクションの上下余白が実際に効いている', () => {
