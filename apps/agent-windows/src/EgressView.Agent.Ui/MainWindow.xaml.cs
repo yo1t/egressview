@@ -104,6 +104,9 @@ public partial class MainWindow : Window
         Deactivated += (_, _) => ReconcileCountryAtlasStream();
         IsVisibleChanged += (_, _) => ReconcileCountryAtlasStream();
         StateChanged += (_, _) => ReconcileCountryAtlasStream();
+        Activated += (_, _) => ReconcileGlobeRate();
+        Deactivated += (_, _) => ReconcileGlobeRate();
+        StateChanged += (_, _) => ReconcileGlobeRate();
         Closing += SaveWindowSize;
         Closing += HideToTray;
         Closed += (_, _) => { refreshTimer.Stop(); countryAtlasTimer.Stop(); lifetime.Cancel(); aiRequest?.Cancel(); aiClient.Dispose(); };
@@ -795,6 +798,19 @@ public partial class MainWindow : Window
         finally { countryAtlasStreaming = false; }
     }
 
+    /// The chosen frame rate while the window is in front, at most five while
+    /// it is behind another, and none while minimized (P3-130, decided
+    /// 2026-09-26). At 15 frames a second the rotating globe cost 16.3% of a
+    /// core, at five 8.0%: a resident window left open behind others should
+    /// cost the default, and the smoothness someone chose is for when they
+    /// are looking.
+    private void ReconcileGlobeRate()
+    {
+        var chosen = AgentSettings.GlobeFrameRate;
+        Globe.Suspended = WindowState == WindowState.Minimized;
+        Globe.FramesPerSecond = IsActive ? chosen : Math.Min(chosen, 5);
+    }
+
     private void ReconcileCountryAtlasStream()
     {
         var live = IsVisible && WindowState != WindowState.Minimized && MainTabs.SelectedIndex == 0 &&
@@ -1374,7 +1390,7 @@ public partial class MainWindow : Window
         AiCloudConsent.IsChecked = AgentSettings.AiCloudConsent(AgentSettings.AiProvider);
         PopulateAiModels();
         ShowAgentVersion();
-        Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
+        ReconcileGlobeRate();
         Globe.DegreesPerSecond = AgentSettings.GlobeSpinSpeed switch { "slow" => 2, "fast" => 16, _ => 6 };
         loadingSettings = false;
     }
@@ -1979,7 +1995,7 @@ public partial class MainWindow : Window
     private void FrameRateChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (loadingSettings || FrameRateChoice.SelectedItem is not ComboBoxItem item || !int.TryParse(item.Tag?.ToString(), out var value)) return;
-        AgentSettings.GlobeFrameRate = value; Globe.FramesPerSecond = value;
+        AgentSettings.GlobeFrameRate = value; ReconcileGlobeRate();
     }
 
     private void SendTestNotification_Click(object sender, RoutedEventArgs e)

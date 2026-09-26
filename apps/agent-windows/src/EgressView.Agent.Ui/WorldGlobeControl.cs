@@ -41,6 +41,16 @@ public sealed class WorldGlobeControl : FrameworkElement
 
     protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
 
+    private bool suspended;
+
+    /// Stops the frames without forgetting the rotation, for a minimized
+    /// window (P3-130): IsVisible stays true when the window is minimized, and
+    /// 0.1.127 spent 8.7% of a core turning a globe nobody could see.
+    public bool Suspended
+    {
+        set { suspended = value; ReconcileTimer(); }
+    }
+
     public bool IsRotating
     {
         get => rotating;
@@ -74,7 +84,7 @@ public sealed class WorldGlobeControl : FrameworkElement
 
     private void ReconcileTimer()
     {
-        if (IsVisible && rotating)
+        if (IsVisible && rotating && !suspended)
         {
             previousFrame = DateTimeOffset.UtcNow;
             timer.Start();
