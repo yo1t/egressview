@@ -234,6 +234,9 @@ public actor AgentIngestSender {
             // the shipped strict schema accepts (P3-14 stage 2).
             let includeHostname = AgentCapabilityNegotiation
                 .acceptsRemoteHostname(capabilities: hubCapabilities)
+            queue.setHubCompletesObservations(
+                AgentCapabilityNegotiation.completesObservations(capabilities: hubCapabilities)
+            )
             logger.notice("hub-capabilities: includeHostname=\(includeHostname, privacy: .public)")
             guard let envelope = try queue.prepareBatch(
                 limit: limit, sentAt: now(), metadata: metadata, schemaVersion: schemaVersion,

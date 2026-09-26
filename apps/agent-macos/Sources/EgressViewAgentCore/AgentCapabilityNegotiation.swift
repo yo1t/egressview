@@ -17,6 +17,11 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
     /// before they existed, which is why absence must mean "send nothing
     /// extra" rather than "unspecified, so try" (P3-14 stage 2).
     public let observationFields: [String]?
+    /// Whether this Hub completes a stored observation when the same id comes
+    /// back with byte counts (P3-170). Absent on every Hub built before it,
+    /// and absence means no: such a Hub drops the second report as a
+    /// duplicate.
+    public let observationUpdates: Bool?
 
     public init(
         schemaVersions: [Int],
@@ -24,7 +29,8 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
         maxBodyBytes: Int? = nil,
         requestsPerMinute: Int? = nil,
         compression: [String]? = nil,
-        observationFields: [String]? = nil
+        observationFields: [String]? = nil,
+        observationUpdates: Bool? = nil
     ) {
         self.schemaVersions = schemaVersions
         self.maxObservationsPerBatch = maxObservationsPerBatch
@@ -32,6 +38,7 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
         self.requestsPerMinute = requestsPerMinute
         self.compression = compression
         self.observationFields = observationFields
+        self.observationUpdates = observationUpdates
     }
 }
 
@@ -56,6 +63,13 @@ public enum AgentCapabilityNegotiation {
     /// False for a Hub that answered nothing, answered an older shape, or
     /// listed other fields and not this one. The agent has no way to learn
     /// this except by being told, and guessing wrong rejects the whole batch.
+    /// Whether a flow's closing report may be sent under the id of its opening
+    /// report, for the Hub to complete that row (P3-170). Only when the Hub
+    /// said so: anything less, and the counts are dropped as a duplicate.
+    public static func completesObservations(capabilities: AgentHubCapabilities?) -> Bool {
+        capabilities?.observationUpdates == true
+    }
+
     public static func acceptsRemoteHostname(capabilities: AgentHubCapabilities?) -> Bool {
         capabilities?.observationFields?.contains("remoteHostname") ?? false
     }
