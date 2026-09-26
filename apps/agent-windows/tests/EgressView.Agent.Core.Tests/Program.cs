@@ -274,6 +274,23 @@ try
             "up to half a minute, however many there are");
     }
 
+    // The shown tab refreshes at a pace set by what its last refresh took.
+    // Seven days re-aggregated every five seconds kept the service busy
+    // without pause (P3-171).
+    {
+        Assert(RefreshPacing.After(TimeSpan.FromMilliseconds(250)) == TimeSpan.FromSeconds(5),
+            "the last hour, a quarter of a second to read, still refreshes every five seconds");
+        Assert(RefreshPacing.After(TimeSpan.FromMilliseconds(710)) == TimeSpan.FromMilliseconds(14_200),
+            "six hours waits twenty times what it took");
+        Assert(RefreshPacing.After(TimeSpan.FromSeconds(8.7)) == TimeSpan.FromSeconds(174),
+            "seven days, about three minutes");
+        Assert(RefreshPacing.After(TimeSpan.FromMinutes(2)) == TimeSpan.FromMinutes(10),
+            "never longer than ten minutes, however slow the read");
+        Assert(RefreshPacing.After(TimeSpan.Zero) == TimeSpan.FromSeconds(5)
+               && RefreshPacing.After(TimeSpan.FromSeconds(-1)) == TimeSpan.FromSeconds(5),
+            "and a clock that went backwards does not make it refresh continuously");
+    }
+
     // A status request does not wait behind a long one, and does not lie for
     // long either.
     {
