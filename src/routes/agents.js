@@ -522,6 +522,11 @@ module.exports = function agentRoutes({
       // answers 404 to the whole endpoint, and the agent sends nothing extra
       // (P3-14 stage 2).
       observationFields: [...AGENT_INGEST_OPTIONAL_OBSERVATION_FIELDS],
+      // A flow's closing report may be sent under the observation id of its
+      // opening report, and the stored row gains its byte counts (P3-170). An
+      // agent reuses an id only when this says true: a Hub without it counts
+      // the second report as a duplicate and the counts would be lost.
+      observationUpdates: true,
     });
   });
 
