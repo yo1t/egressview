@@ -3,7 +3,7 @@
 
 'use strict';
 
-const { describe, it, before, after, beforeEach } = require('node:test');
+const { describe, it, before, after, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs   = require('fs');
 const path = require('path');
@@ -778,5 +778,77 @@ describe('restore does not hold the main thread', () => {
     const result = await backup._verifyOnWorker(cut);
     assert.equal(result.ok, false);
     assert.match(result.error, /declares|malformed|corrupt|integrity/i);
+  });
+});
+
+// ─── when the next backup is due (P3-176) ────────────────────────────────────
+//
+// Counted from the newest backup, not from when the Hub started: three deploys
+// in three days had left production 44 hours from one backup to the next.
+
+describe('次のバックアップの時刻', () => {
+  const HOUR = 60 * 60 * 1000;
+  const now = Date.parse('2026-09-26T10:00:00Z');
+
+  it('最新のバックアップから数える', () => {
+    assert.equal(backup._nextBackupDelay({ now, intervalMs: 24 * HOUR, latestAt: now - 20 * HOUR }), 4 * HOUR);
+  });
+
+  it('バックアップが無いか、間隔より古ければ、すぐ', () => {
+    assert.equal(backup._nextBackupDelay({ now, intervalMs: 24 * HOUR, latestAt: null }), 0);
+    assert.equal(backup._nextBackupDelay({ now, intervalMs: 24 * HOUR, latestAt: now - 30 * HOUR }), 0);
+  });
+
+  // Retrying at once is how a backup loop begins (2026-09-23).
+  it('取れなかった後は、今から間隔ぶん待つ（すぐ再試行しない）', () => {
+    assert.equal(backup._nextBackupDelay({
+      now, intervalMs: 24 * HOUR, latestAt: now - 30 * HOUR, lastRunMadeNoBackup: true,
+    }), 24 * HOUR);
+  });
+
+  describe('実際に予約する', () => {
+    beforeEach(setup);
+    afterEach(() => { backup._setCopyForTest(null); teardown(); });
+
+    function backupAgedHours(hours) {
+      fs.mkdirSync(backupDir, { recursive: true });
+      const file = path.join(backupDir, 'egressview_2026-09-25_00-00-00.db');
+      makeRealDb(file, 'old');
+      const at = new Date(Date.now() - hours * HOUR);
+      fs.utimesSync(file, at, at);
+      return at.getTime();
+    }
+
+    it('再起動しても、最新のバックアップから間隔ぶん後に予約する', () => {
+      const latest = backupAgedHours(20);
+      let copies = 0;
+      backup._setCopyForTest(async () => { copies += 1; return { ok: false, error: 'not expected' }; });
+      backup.configure({ intervalHours: 24 });
+      backup.startPeriodicBackup();
+      try {
+        assert.equal(backup._nextBackupAt(), latest + 24 * HOUR);
+        assert.equal(copies, 0);
+      } finally {
+        backup.stopPeriodicBackup();
+      }
+    });
+
+    it('間隔より古ければ起動してすぐ取り、失敗しても次は間隔ぶん後', async () => {
+      backupAgedHours(30);
+      let copies = 0;
+      backup._setCopyForTest(async () => { copies += 1; return { ok: false, error: 'disk said no' }; });
+      backup.configure({ intervalHours: 24 });
+      const startedAt = Date.now();
+      backup.startPeriodicBackup();
+      try {
+        for (let i = 0; i < 100 && copies === 0; i += 1) await new Promise(r => setTimeout(r, 10));
+        for (let i = 0; i < 100 && backup._nextBackupAt() < startedAt + HOUR; i += 1) await new Promise(r => setTimeout(r, 10));
+        assert.equal(copies, 1);
+        assert.ok(backup._nextBackupAt() >= startedAt + 24 * HOUR - 1000,
+          `next backup at ${new Date(backup._nextBackupAt()).toISOString()}, not a day away`);
+      } finally {
+        backup.stopPeriodicBackup();
+      }
+    });
   });
 });

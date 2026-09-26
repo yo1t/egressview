@@ -411,6 +411,57 @@ function removeAbandonedPartials() {
   return partials.length;
 }
 
+/** When the newest finished backup was written, or null with none. */
+function latestBackupAt() {
+  const existing = listBackups();
+  if (existing.length === 0) return null;
+  return new Date(existing[existing.length - 1].created).getTime();
+}
+
+/**
+ * How long to wait before the next scheduled backup (P3-176).
+ *
+ * Counted from the newest backup, not from when the Hub started. Counted from
+ * the start, every restart pushed the next backup a full interval away: three
+ * deploys in three days left production 44 hours from its last backup to its
+ * next. A backup that could not be taken -- failed, or skipped for lack of
+ * room -- waits a full interval from now, as before: retrying at once is how a
+ * backup loop begins, and 2026-09-23 showed what one costs.
+ */
+function nextBackupDelay({ now, intervalMs, latestAt, lastRunMadeNoBackup = false }) {
+  if (lastRunMadeNoBackup) return intervalMs;
+  if (latestAt == null) return 0;
+  return Math.min(Math.max(0, latestAt + intervalMs - now), MAX_TIMER_MS);
+}
+
+let scheduleGeneration = 0;
+let nextBackupAt = null;
+
+function scheduleNextBackup(intervalMs, generation, { lastRunMadeNoBackup = false } = {}) {
+  if (generation !== scheduleGeneration) return;
+  const now = Date.now();
+  const delay = nextBackupDelay({ now, intervalMs, latestAt: latestBackupAt(), lastRunMadeNoBackup });
+  nextBackupAt = now + delay;
+  backupIntervalTimer = setTimeout(() => runScheduledBackup(intervalMs, generation), delay);
+  if (delay > 0) logger.info(`[backup] Next backup at ${new Date(nextBackupAt).toISOString()}`);
+}
+
+async function runScheduledBackup(intervalMs, generation) {
+  if (generation !== scheduleGeneration) return;
+  const before = latestBackupAt();
+  // Someone took a backup since this was scheduled -- from the settings
+  // screen, or a restore's safety copy. The next one is due from that.
+  if (before != null && before + intervalMs > Date.now() + 60 * 1000) {
+    scheduleNextBackup(intervalMs, generation);
+    return;
+  }
+  try { await createBackup(); } catch { /* logged by the backup itself */ }
+  const after = latestBackupAt();
+  scheduleNextBackup(intervalMs, generation, {
+    lastRunMadeNoBackup: after == null || (before != null && after <= before),
+  });
+}
+
 function startPeriodicBackup() {
   stopPeriodicBackup();
   ensureBackupDir();
@@ -418,25 +469,18 @@ function startPeriodicBackup() {
   // configure() already refuses a larger value; this is the last line, because
   // the failure it prevents is silent and continuous.
   const intervalMs = Math.min(backupIntervalHours * 60 * 60 * 1000, MAX_TIMER_MS);
-  backupIntervalTimer = setInterval(() => { createBackup().catch(() => {}); }, intervalMs);
   logger.info(`[backup] Periodic backup every ${backupIntervalHours}h, keep ${maxGenerations} generations`);
   logCapacityWarning();
-  // Create a backup on startup if none exist or the latest is older than the interval.
-  // This ensures a backup is taken even when the service restarts before the interval elapses.
-  const existing = listBackups();
-  if (existing.length === 0) {
-    createBackup().catch(() => {});
-  } else {
-    const latestMtime = new Date(existing[existing.length - 1].created).getTime();
-    if (Date.now() - latestMtime >= intervalMs) {
-      createBackup().catch(() => {});
-    }
-  }
+  // Due from the newest backup: at once if none exists or it is older than the
+  // interval, otherwise when it becomes that old.
+  scheduleNextBackup(intervalMs, scheduleGeneration);
 }
 
 function stopPeriodicBackup() {
+  scheduleGeneration += 1;
+  nextBackupAt = null;
   if (backupIntervalTimer) {
-    clearInterval(backupIntervalTimer);
+    clearTimeout(backupIntervalTimer);
     backupIntervalTimer = null;
   }
 }
@@ -567,6 +611,8 @@ module.exports = {
   _setPathsForTest,
   _setFreeBytesForTest,
   _setCopyForTest,
+  _nextBackupDelay: nextBackupDelay,
+  _nextBackupAt: () => nextBackupAt,
   _setVerifyForTest,
   _verifyOnWorker: verifyOnWorker,
   _copyOnWorker: copyOnWorker,
