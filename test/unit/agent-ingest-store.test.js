@@ -379,6 +379,43 @@ describe('終了時の報告で、開始時の行を完成させる', () => {
     assert.deepEqual(hours, ['2026-08-11T11:00:00.000Z', '2026-08-11T13:00:00.000Z']);
   });
 
+  it('開始時にローカルのアドレスが未定（0.0.0.0:0）なら、終了時の報告のアドレスとポートで埋める', async () => {
+    const unbound = opening();
+    unbound.observations[0].localAddress = '0.0.0.0';
+    await store.storeBatch(agentId, unbound, { receivedAt });
+    const ack = await store.storeBatch(agentId, closing({ localAddress: '192.0.2.10', localPort: 49152 }),
+      { receivedAt: receivedAt + 1 });
+
+    assert.equal(ack.completed, 1);
+    const [row] = store._dbForTest().prepare('SELECT localAddress, localPort FROM agent_observations').all();
+    assert.deepEqual({ ...row }, { localAddress: '192.0.2.10', localPort: 49152 });
+    // The hour the flow ended in is counted under the address it left from.
+    const hourly = store._dbForTest().prepare(`SELECT localAddress FROM agent_app_hourly
+      WHERE hourStart = ?`).get(Date.parse('2026-08-11T13:00:00Z'));
+    assert.equal(hourly.localAddress, '192.0.2.10');
+  });
+
+  it('IPv6 の未定アドレス（::）も埋める', async () => {
+    const unbound = opening();
+    Object.assign(unbound.observations[0], { localAddress: '::', remoteAddress: '2001:db8::5' });
+    await store.storeBatch(agentId, unbound, { receivedAt });
+    await store.storeBatch(agentId, closing({ localAddress: '2001:db8::10', localPort: 49152, remoteAddress: '2001:db8::5' }),
+      { receivedAt: receivedAt + 1 });
+
+    const [row] = store._dbForTest().prepare('SELECT localAddress, localPort FROM agent_observations').all();
+    assert.deepEqual({ ...row }, { localAddress: '2001:db8::10', localPort: 49152 });
+  });
+
+  it('終了時の報告も未定なら、保存済みのアドレスを消さない', async () => {
+    await store.storeBatch(agentId, opening(), { receivedAt });
+    await store.storeBatch(agentId, closing({ localAddress: '0.0.0.0', localPort: 0 }), { receivedAt: receivedAt + 1 });
+
+    const [row] = store._dbForTest().prepare('SELECT localAddress, localPort, bytesIn FROM agent_observations').all();
+    assert.equal(row.localAddress, copy().observations[0].localAddress);
+    assert.equal(row.localPort, 0);
+    assert.equal(row.bytesIn, '5000');
+  });
+
   it('JSONの応答には completed を出さない（Agentが読む形を変えない）', async () => {
     await store.storeBatch(agentId, opening(), { receivedAt });
     const ack = await store.storeBatch(agentId, closing(), { receivedAt: receivedAt + 1 });

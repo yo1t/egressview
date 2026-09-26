@@ -120,6 +120,18 @@ function completesStoredObservation(stored, observation) {
     && (stored.localPort === 0 || stored.localPort === observation.localPort);
 }
 
+const UNSPECIFIED_ADDRESSES = new Set(['0.0.0.0', '::', '']);
+
+/**
+ * Whether an observation says which local address and port its flow left
+ * from. A Mac agent's opening report often does not: the flow is seen before
+ * the system has chosen them, and on one Mac on 2026-09-27 that was 93% of
+ * TCP flows. Without them the flow cannot be matched to the router's record.
+ */
+function hasLocalEndpoint(observation) {
+  return observation.localPort !== 0 && !UNSPECIFIED_ADDRESSES.has(observation.localAddress);
+}
+
 /**
  * Store one agent batch.
  *
@@ -148,7 +160,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
     UPDATE agent_observations
     SET bytesIn = @bytesIn, bytesOut = @bytesOut,
         lastObservedAt = MAX(lastObservedAt, @lastObservedAt),
-        localPort = CASE WHEN localPort = 0 THEN @localPort ELSE localPort END,
+        localAddress = @localAddress, localPort = @localPort,
         remoteHostname = COALESCE(remoteHostname, @remoteHostname)
     WHERE agentId = @agentId AND observationId = @observationId
       AND bytesIn IS NULL AND bytesOut IS NULL
@@ -199,13 +211,19 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
       if (stored) {
         duplicateCount += 1;
         if (completesStoredObservation(stored, observation)) {
+          // The closing report knows the local endpoint an opening report
+          // taken before the connection was made did not. One already stored
+          // is kept; address and port move together.
+          const endpoint = !hasLocalEndpoint(stored) && hasLocalEndpoint(observation)
+            ? observation : stored;
           completeObservation.run({
             agentId,
             observationId: observation.observationId,
             bytesIn: observation.bytesIn ?? null,
             bytesOut: observation.bytesOut ?? null,
             lastObservedAt: Date.parse(observation.lastObservedAt),
-            localPort: observation.localPort,
+            localAddress: endpoint.localAddress,
+            localPort: endpoint.localPort,
             remoteHostname: observation.remoteHostname ?? null,
           });
           // The flow may now end in a later hour than its opening said.
@@ -215,7 +233,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
             hourStart: Math.floor(lastObservedAt / 3_600_000) * 3_600_000,
             appIdentity: stored.bundleId || stored.processName,
             processName: stored.processName,
-            localAddress: stored.localAddress,
+            localAddress: endpoint.localAddress,
             remoteAddress: stored.remoteAddress,
             remotePort: stored.remotePort,
             networkProtocol: stored.networkProtocol,
