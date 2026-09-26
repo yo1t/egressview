@@ -698,7 +698,7 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
   const { staleEnrichmentIps } = runDbBootstrap({
     dbPath: runtimeDbPath,
     sourceRouterMap,
-    onProgress: phase => startup.setPhase(phase),
+    onProgress: (phase, detail) => startup.setPhase(phase, detail),
     history,
     sessions,
     devices,

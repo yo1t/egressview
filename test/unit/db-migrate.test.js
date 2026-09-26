@@ -39,7 +39,14 @@ describe('db-migrate: fresh database', () => {
     try {
       runMigrations(db, ':memory:', { onProgress: phase => phases.push(phase) });
       runMigrations(db, ':memory:', { onProgress: phase => phases.push(phase) });
-      assert.deepEqual(phases, ['migration']);
+      // Once, and only for the run with work to do: the copy, one line per
+      // step, then the check of the result (P3-173).
+      const { _MIGRATIONS: MIGRATIONS } = require('../../src/db-migrate');
+      assert.deepEqual(phases, [
+        'migration-backup',
+        ...MIGRATIONS.map(() => 'migration'),
+        'migration-verify',
+      ]);
     } finally {
       db.close();
     }
@@ -839,3 +846,24 @@ describe('db-migrate: fail-closed backup (P2-33)', () => {
     try { fs.unlinkSync(p); } catch {}
   });
 });
+
+// Which step of how many, the only measure of a migration's progress that is
+// true: its steps take nothing like equal times (P3-173).
+describe('db-migrate: says which step it is on', () => {
+  it('reports each step with its number, the total and the version', () => {
+    const { _MIGRATIONS: MIGRATIONS } = require('../../src/db-migrate');
+    const db = openDb(':memory:');
+    const steps = [];
+    try {
+      runMigrations(db, ':memory:', { onProgress: (phase, detail) => { if (phase === 'migration') steps.push(detail); } });
+    } finally {
+      db.close();
+    }
+    assert.equal(steps.length, MIGRATIONS.length);
+    assert.deepEqual(steps[0], { step: 1, total: MIGRATIONS.length, version: MIGRATIONS[0].version });
+    assert.deepEqual(steps.at(-1), {
+      step: MIGRATIONS.length, total: MIGRATIONS.length, version: MIGRATIONS.at(-1).version,
+    });
+  });
+});
+
