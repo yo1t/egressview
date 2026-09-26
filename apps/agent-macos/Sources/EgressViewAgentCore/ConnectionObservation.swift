@@ -103,11 +103,23 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
         flowID.map { "flow|\($0.uuidString)" } ?? stableKey
     }
 
+    /// Addresses that stand for "not chosen yet" rather than for this Mac.
+    public static let unspecifiedAddresses: Set<String> = ["0.0.0.0", "::", ""]
+
+    /// Whether this observation says which local address and port the flow
+    /// left from. Many do not: the extension first sees a flow before the
+    /// system has chosen them.
+    public var hasLocalEndpoint: Bool {
+        localPort != 0 && !Self.unspecifiedAddresses.contains(localAddress)
+    }
+
     func merging(_ newer: ConnectionObservation) -> ConnectionObservation {
-        ConnectionObservation(
+        // A later report may know the local endpoint an earlier one did not.
+        let endpointFromNewer = !hasLocalEndpoint && newer.hasLocalEndpoint
+        return ConnectionObservation(
             networkProtocol: networkProtocol,
-            localAddress: localAddress,
-            localPort: localPort,
+            localAddress: endpointFromNewer ? newer.localAddress : localAddress,
+            localPort: endpointFromNewer ? newer.localPort : localPort,
             remoteAddress: remoteAddress,
             remotePort: remotePort,
             processID: processID,

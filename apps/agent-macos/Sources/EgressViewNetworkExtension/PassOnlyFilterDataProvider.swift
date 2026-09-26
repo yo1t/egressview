@@ -151,7 +151,14 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         }
         var classification: QUICInitialCandidate?
         var isQUICCandidate = false
-        if let metadata = adapter.metadata(from: socketFlow),
+        let current = adapter.metadata(from: socketFlow)
+        // The first outbound bytes come after the connection is made, so the
+        // local address and port the flow was created without are known now.
+        // Taken before the opening observation below is built from them.
+        if let current {
+            lock.withLock { openFlows.noteLocalEndpoint(flowID: socketFlow.identifier, from: current) }
+        }
+        if let metadata = current,
            metadata.networkProtocol == .udp, metadata.remotePort == 443 {
             let seen = QUICInitialProbe.classify(readBytes)
             classification = seen

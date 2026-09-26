@@ -2828,6 +2828,17 @@ public final class ObservationStore: @unchecked Sendable {
             bytes_in, bytes_out, collector, confidence, remote_hostname, flow_id
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(flow_id) WHERE flow_id IS NOT NULL DO UPDATE SET
+            -- The local endpoint a flow was first recorded without, taken
+            -- from a later report that has it; one already known is kept.
+            -- Both columns decide on the old row, so they move together.
+            local_address = CASE
+                WHEN (observations.local_port = 0 OR observations.local_address IN ('0.0.0.0', '::', ''))
+                     AND excluded.local_port <> 0 AND excluded.local_address NOT IN ('0.0.0.0', '::', '')
+                THEN excluded.local_address ELSE observations.local_address END,
+            local_port = CASE
+                WHEN (observations.local_port = 0 OR observations.local_address IN ('0.0.0.0', '::', ''))
+                     AND excluded.local_port <> 0 AND excluded.local_address NOT IN ('0.0.0.0', '::', '')
+                THEN excluded.local_port ELSE observations.local_port END,
             process_name = excluded.process_name,
             bundle_id = coalesce(excluded.bundle_id, observations.bundle_id),
             first_observed_at = min(observations.first_observed_at, excluded.first_observed_at),
