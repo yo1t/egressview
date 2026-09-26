@@ -6,19 +6,23 @@ For what EgressView does today, see the [README](README.md).
 
 ## ✅ Available now
 
-### macOS agent
+### Agent for Mac
 
-A signed and notarized macOS agent ships with v1.9.0. It visualizes a Mac's own outbound connections by process instead of relying on a router NAT table, complementing the server rather than replacing it. It offers lightweight monitoring (socket table, no System Extension approval) and full monitoring (a pass-only Network Extension for higher-fidelity flows), never captures payloads, and reports to a Hub only as an explicit, off-by-default opt-in.
+The signed and notarized Mac app visualizes this Mac's outbound connections by process. Network monitoring uses a pass-only Network Extension and requires macOS approval. The app includes a globe, connection history, local threat matching, notifications, and optional AI insights. It does not collect packet contents. Hub delivery is off by default and requires an explicit opt-in.
+
+### Agent for Windows
+
+The Windows app records this PC's outbound connections and originating processes through a local service. It provides local history and visualizations without a Hub; Hub delivery is optional. The currently distributed MSI is not Authenticode-signed, so verify its checksum before installation. See the [Windows installation guide](apps/agent-windows/README.en.md).
+
+### Linux conntrack collection (preview)
+
+The shared Linux `nf_conntrack` adapter is implemented and has automated integration tests. OpenWrt, ASUS router mode, and Ubiquiti hardware have not yet been verified; see the [preview setup guide](docs/setup-conntrack.md).
 
 ## 🚧 Planned
 
-### Full-featured macOS agent
+### Linux router hardware validation
 
-A richer version of the macOS agent is in development — turning it from a collector into a standalone app with its own dashboards and visualizations, on-device threat matching so a Mac is protected even when away from its home network, notifications, and AI insights. Agent-side changes are batched into a single release because each one requires signing, notarization, and reinstall. No release date is committed yet.
-
-### conntrack router support (OpenWrt / ASUS router mode / Ubiquiti UDM)
-
-A shared parser for Linux `nf_conntrack` opens EgressView up to many Linux-based routers, including OpenWrt, ASUS router mode, and Ubiquiti UDM-class devices.
+The conntrack adapter remains a preview until it is checked on representative physical routers. Hardware-specific setup requirements and failure modes may differ from the container-based tests.
 
 **🙋 Hardware testers wanted** — implementation can largely be done without hardware, but real-device validation cannot. If you run one of these routers, please [open an issue](https://github.com/yo1t/egressview/issues).
 

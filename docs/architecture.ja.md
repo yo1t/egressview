@@ -17,7 +17,8 @@ flowchart LR
     C[Cisco IOS routers]
     A[任意のASUS AP]
     L[任意のdnsmasq / syslog]
-    M[任意のmacOS Agent<br/>プロセス名つき]
+    M[任意のAgent for Mac<br/>プロセス名つき]
+    W[任意のAgent for Windows<br/>プロセス名つき]
   end
 
   subgraph Server[EgressView Node.js process]
@@ -38,6 +39,7 @@ flowchart LR
   A -->|HTTP client data| N
   L -->|log event| N
   M -->|HTTPS ingest<br/>Agentから発信| IN
+  W -->|HTTPS ingest<br/>Agentから発信| IN
   IN --> N
   IN --> DB
   N --> DB
@@ -59,7 +61,7 @@ Runtime上の自然keyは`(src, dst, dport, proto)`です。同じ通信を複�
 
 ## 端末Agent
 
-Routerは「何が外へ出たか」を見せますが、**どのアプリケーションが出したかは見せません**。macOS Agentがその1点を埋めます。
+Routerは「何が外へ出たか」を見せますが、**どのアプリケーションが出したかは見せません**。MacとWindowsのAgentは、それぞれ自身のPCについてこの情報を補います。
 
 - **接続は必ずAgent側から始まります。** Hubは端末をpollしません。端末が家の外にあっても、Hub側にfirewallの穴を開ける必要がありません。
 - **登録は管理者の承認が必要です。** 6文字のcodeで申請し、Web UIで承認して初めて資格情報が渡ります。申請に含まれるホスト名は**クライアントの自称**であり、承認画面はその旨を明示します。
@@ -67,7 +69,7 @@ Routerは「何が外へ出たか」を見せますが、**どのアプリケー
 - **相関は5-tupleで行います。** ルーターとAgentの両方が見た通信は1件に畳み、`connection_agent_observations`に対応を残します。どちらが観測したかは失われません。
 - **プロセス名は`connections.process`へ保存します。** Routerが同じ通信を後から観測しても、routerはプロセスを知らないため`NULL`を書き、**既にある値を消しません**。
 
-**Agentは補助であって代替ではありません。** 1台のMacについては取りこぼしが少ない（フロー発生時に受け取るため60秒の隙間が無い）一方、**LAN内の他の機器は一切見えません。**
+**Agentは補助であって代替ではありません。** Routerの定期pollを待たずに自分のPCの通信を観測しますが、**LAN内の他の機器は一切見えません。** macOSのNetwork ExtensionとWindowsサービスでは観測範囲が異なり、すべての通信を捕捉できると保証するものではありません。
 
 ## Data flow
 

@@ -6,7 +6,7 @@
 - **Node.js**: >=22（CI: 22 / 24 / 26）。**macOSエージェント**: Swift 6 toolchain、最小 macOS 13。**Windowsエージェント**: .NET 10（C#）、WPF tray UI、Windowsサービス
 - **評価方法**: 自動テスト、V8 coverage、静的解析、依存・secret scan、browser smoke、parser fuzzing、手動コードレビュー。各クライアントは*それぞれのプラットフォーム*の基準で評価します: macOSエージェントはMacアプリ品質フレームワーク（§6）、WindowsエージェントはWindowsアプリ品質フレームワーク（§7）
 
-> 本レポートは現在のmainを評価します。SonarQubeとOpenSSFのスコアはリポジトリ内容からの推定で、公式scannerは実行していません。penetration testも対象外です。macOS/Windowsエージェントはプラットフォーム固有ビルド（Network Extension / ETW、keychain / Credential Manager、コード署名）のため、ネイティブ群と署名パイプラインは実行ではなくソースとCIの証跡から評価しています — ただしmacOSエージェントのSwiftテスト群は本レビューのためmacOS上で実行しました。Windows側のテスト、MSIビルド、Authenticode署名は `windows-latest` のCIでのみ実行されます。
+> 本レポートはコミット`95e4ef0`までを評価した過去時点の記録であり、現在のmainの評価ではありません。後日追加されたWindowsの更新マニフェスト取得機能などは、以下の指摘に反映されていません。SonarQubeとOpenSSFのスコアはリポジトリ内容からの推定で、公式scannerは実行していません。penetration testも対象外です。プラットフォーム固有のビルドと署名工程はソースとCIの証跡から評価し、macOSのSwiftテストは本レビューのためmacOS上で実行しました。
 
 ---
 
@@ -166,7 +166,7 @@ macOS作業を定義づけるのは「**Macから何を外へ出さないか**�
 | Vulnerabilities | 10 | production `npm audit`をCI実行。本レビュー0件 |
 | Dependency updates | 10 | npm/Actionsのweekly Dependabot（7日cooldown）を、npmの `min-release-age` インストール時下限で補完 |
 | CI tests | 10 | PRでunit/coverage、parser fuzz、browser smoke。Node 22/24/26 matrix。System Extension identity gate付きのmacOSエージェント専用workflow |
-| Maintained | 10 | 現在のmainまで継続的にrelease・改善 |
+| Maintained | 10 | 評価対象のcommitまで継続的にrelease・改善 |
 | Code review | 8 | PRと必須checkを運用。RBACとpermission matrixがreview基準を強化 |
 | Fuzzing | 7 | parser fuzzingをPRごと、および `fuzz-continuous.yml` で6時間ごとの20分campaignとして実行し、発見入力を `test/fuzz/corpus/` に永続化。意図的にOSS-Fuzzではない（coverage誘導なし）ため残点が生じる |
 | Signed releases | 9 | Hubリリースはdetached signature資産付きで、リリースと署名を統合したコマンドを通じて公開され、資産をダウンロードした形で検証し、publish/edit/週次で再検査される。macOSエージェントリリースはDeveloper ID署名・公証済み。残り1点はSLSA provenance |
@@ -295,7 +295,7 @@ Default hardware integration CI、正式process manager/OCI成果物、OpenAPI�
 
 ## 結論
 
-現在のmainは、文書化されたself-hostedデプロイモデルに対して十分な多人数運用向けセキュリティ制御を備えています。macOSエージェントは行儀のよいMacアプリであり、Windowsエージェントはvertical sliceから実体あるアプリへ育ちました — 14,447行、3プロジェクト、per-machine MSI、独自の6つのCIチェック — しかも第二の面を開かずHubの既存 `agent` 境界を再利用しています。自動品質ゲートは広く、データ変更操作はfail-closed、deny-by-defaultのRBACが全面適用され、MCPはOAuth保護・rate limit・監査付きで、Critical/Highの問題は残っていません。
+評価時点のmainは、文書化されたself-hostedデプロイモデルに対して十分な多人数運用向けセキュリティ制御を備えています。macOSエージェントは行儀のよいMacアプリであり、Windowsエージェントはvertical sliceから実体あるアプリへ育ちました — 14,447行、3プロジェクト、per-machine MSI、独自の6つのCIチェック — しかも第二の面を開かずHubの既存 `agent` 境界を再利用しています。自動品質ゲートは広く、データ変更操作はfail-closed、deny-by-defaultのRBACが全面適用され、MCPはOAuth保護・rate limit・監査付きで、Critical/Highの問題は残っていません。
 
 Macのフレームワークを拡張せずWindows用（§7）を追加したことで、レビューが見えるものが変わりました。自分のプラットフォームの基準で採点すると、Windowsエージェントのセキュリティ設計はよく読めます — `LocalSystem` より `LocalService`、名前付きパイプへのNetwork SID明示Deny、設定ファイルよりCredential Manager、プラットフォーム障害復旧を伴う `perMachine` — そして汎用チェックリストなら埋もれていたギャップが1つ際立ちます: **MSIは無署名でビルドされ、Windows向け更新マニフェストが無い**ことです。macOSでは「署名なしでリリースは出せない」を痛い形で学び、1つのコマンドに強制しました。Windows側はその地点に達しておらず、達するまで、Macの利用者が検証可能なパッケージを得るところでWindowsの利用者はSmartScreen警告を受けます。次に直すべき最も価値ある一点です。
 

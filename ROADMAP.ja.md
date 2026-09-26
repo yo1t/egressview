@@ -6,19 +6,23 @@
 
 ## ✅ 提供中
 
-### macOS エージェント
+### Agent for Mac
 
-署名・公証済みの macOS エージェントを v1.9.0 で提供しています。ルーターのNATテーブルではなく、Mac自身の外向き通信をプロセス単位で可視化し、サーバー版を置き換えるのではなく補完します。軽量監視（socket情報の定期取得、System Extension承認は不要）とフル監視（pass-onlyのNetwork Extensionで高精度なflowを取得）を選べ、payloadは取得せず、Hubへの送信は既定OFFの明示opt-inのみです。
+署名・公証済みのMacアプリは、このMacの外向き通信をプロセス単位で可視化します。ネットワーク監視はpass-onlyのNetwork Extensionを使い、macOSでの承認が必要です。地球儀、通信履歴、ローカルの脅威照合、通知、任意のAI洞察を備えています。パケットの中身は収集しません。Hubへの送信は既定で無効で、明示的な有効化が必要です。
+
+### Agent for Windows
+
+WindowsアプリはローカルサービスでこのPCの外向き通信と通信元プロセスを記録します。Hubなしで履歴と可視化を使え、Hubへの送信は任意です。現在配布中のMSIはAuthenticode未署名のため、インストール前にチェックサムを確認してください。[Windows導入ガイド](apps/agent-windows/README.md)を参照してください。
+
+### Linux conntrack収集（プレビュー）
+
+Linuxの`nf_conntrack`用共通adapterは実装済みで、自動integration testを通しています。OpenWrt、ASUSルーターモード、Ubiquiti実機での確認はまだです。[プレビュー版の設定ガイド](docs/setup-conntrack.ja.md)を参照してください。
 
 ## 🚧 計画中
 
-### フル機能版 macOS エージェント
+### Linuxルーター実機検証
 
-macOS エージェントのフル機能版を開発中です。単なるcollectorから、独自のダッシュボードと可視化、オンデバイスでの脅威判定（自宅ネットワークの外にいるMacも守る）、通知、AIインサイトを備えたスタンドアロンアプリへ広げます。エージェント側の変更は1件ごとに署名・公証・再インストールが必要なため、まとめて1つのリリースにします。正式リリース日は未定です。
-
-### conntrack ルーター対応（OpenWrt / ASUS ルーターモード / Ubiquiti UDM）
-
-Linux の `nf_conntrack` 用共通パーサーを実装することで、OpenWrt、ASUS ルーターモード、Ubiquiti UDM 系など、Linux ベースの多くのルーターに対応できる可能性があります。
+conntrack adapterは、代表的な物理ルーターで確認するまでプレビュー扱いです。ハードウェア固有の設定条件や失敗時の挙動は、コンテナ上のテストとは異なる可能性があります。
 
 **🙋 実機テスター募集中** — 実装の大半はハードウェアなしで進められますが、実機での検証だけはできません。これらのルーターをお持ちの方は [Issue を立てて](https://github.com/yo1t/egressview/issues)ください。
 

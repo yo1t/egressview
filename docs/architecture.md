@@ -17,7 +17,8 @@ flowchart LR
     C[Cisco IOS routers]
     A[Optional ASUS AP]
     L[Optional dnsmasq / syslog]
-    M[Optional macOS Agent<br/>carries process names]
+    M[Optional Agent for Mac<br/>carries process names]
+    W[Optional Agent for Windows<br/>carries process names]
   end
 
   subgraph Server[EgressView Node.js process]
@@ -38,6 +39,7 @@ flowchart LR
   A -->|HTTP client data| N
   L -->|log events| N
   M -->|HTTPS ingest<br/>agent initiates| IN
+  W -->|HTTPS ingest<br/>agent initiates| IN
   IN --> N
   IN --> DB
   N --> DB
@@ -59,7 +61,7 @@ The runtime natural key is `(src, dst, dport, proto)`. When multiple routers see
 
 ## Endpoint agents
 
-A router shows what left the house but not **which application sent it**. The macOS agent fills exactly that gap.
+A router shows what left the house but not **which application sent it**. Agents for Mac and Windows fill that gap on their own computers.
 
 - **The agent always initiates.** The Hub never polls an endpoint, so a laptop away from home needs no inbound path and the Hub needs no hole in its firewall.
 - **Enrolment requires an administrator.** A machine applies with a six-character code and receives a credential only after someone approves it in the web UI. The host name in an application is **claimed by the client**, and the approval screen says so.
@@ -67,7 +69,7 @@ A router shows what left the house but not **which application sent it**. The ma
 - **Correlation is by 5-tuple.** A flow seen by both a router and an agent is stored once, with the association kept in `connection_agent_observations`; neither observer is lost.
 - **The process name lands in `connections.process`.** A later router poll writes `NULL` there, because a router cannot know it, and the upsert keeps the value the agent supplied.
 
-**An agent supplements a router rather than replacing one.** For its own machine it misses less than a router does — flows arrive as they happen, with no 60-second gap — but it sees nothing else on the LAN.
+**An Agent supplements a router rather than replacing one.** It observes its own computer as connections occur, rather than waiting for the router's poll cycle, but sees nothing else on the LAN. Collection coverage differs between the macOS Network Extension and Windows service; an Agent does not claim to capture every connection.
 
 ## Data flow
 
