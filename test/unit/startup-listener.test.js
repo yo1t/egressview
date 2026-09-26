@@ -26,9 +26,15 @@ test('startup listener responds during initialization and releases its port', as
     assert.match(pageHtml, /設定を読み込んでいます/);
     assert.match(pageHtml, /http-equiv="refresh" content="5"/);
 
-    startup.setPhase('migration');
+    startup.setPhase('migration', { step: 2, total: 3, version: 30 });
     const migrated = await fetch(base, { headers: { 'Accept-Language': 'en' } });
-    assert.match(await migrated.text(), /Updating the database/);
+    const migratedHtml = await migrated.text();
+    assert.match(migratedHtml, /Updating the database/);
+    assert.match(migratedHtml, /Step 2 of 3 \(v30\)/);
+
+    startup.setPhase('migration-verify', { mode: 'full', readBase: null, expectedBytes: null });
+    const verifying = await fetch(base, { headers: { 'Accept-Language': 'ja' } });
+    assert.match(await verifying.text(), /移行したデータベースを確認しています/);
 
     const api = await fetch(`${base}/api/connections`);
     assert.equal(api.status, 503);

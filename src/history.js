@@ -10,6 +10,7 @@ const { runMigrations, SCHEMA_VERSION } = require('./db-migrate');
 const {
   checkLiveDatabase, isCorruptionError, restoreFromCandidates, DbRestoreFailClosedError,
 } = require('./db-restore');
+const { followCheck } = require('./startup-progress');
 const {
   takeCleanShutdownMarker, chooseStartupCheck, writeCleanShutdownMarker, openHandlesTo,
 } = require('./db-startup-check');
@@ -216,7 +217,16 @@ function initDb(dbPath, { sourceRouterMap: mapOverride, onProgress } = {}) {
   }
   _secureDbFiles();
   const checkStartedAt = Date.now();
-  if (db && checkLiveDatabase(db, { mode: checkPlan.mode }) === 'corrupt') damaged = true;
+  if (db) {
+    // Followed from outside so the startup page can say how far it has got;
+    // the check itself is unchanged (P3-173).
+    const outcome = followCheck(
+      { dbPath: actualPath, mode: checkPlan.mode, phase: 'database', onProgress },
+      () => checkLiveDatabase(db, { mode: checkPlan.mode }),
+      result => result === 'ok'
+    );
+    if (outcome === 'corrupt') damaged = true;
+  }
   startupCheck = {
     ...checkPlan,
     ms: Date.now() - checkStartedAt,
