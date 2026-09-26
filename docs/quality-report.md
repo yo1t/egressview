@@ -6,7 +6,7 @@
 - **Node.js**: >=22 (CI: 22, 24, and 26); **macOS agent**: Swift 6 toolchain, minimum macOS 13; **Windows agent**: .NET 10 (C#), WPF tray UI, Windows service
 - **Method**: automated tests, V8 coverage, static analysis, dependency/secret scans, browser smoke tests, parser fuzzing, and manual review. Each client is judged against the expectations of *its own* platform: the macOS agent against a Mac-application framework (§6), the Windows agent against a Windows-application framework (§7)
 
-> This report evaluates the current main line. SonarQube and OpenSSF scores are repository-based estimates; neither official scanner was run. No penetration test was performed. The macOS and Windows agents are platform-specific builds (Network Extension / ETW, keychain / Credential Manager, code-signing), so their native suites and signing pipelines are evaluated from source and CI evidence rather than executed here — except the macOS agent's Swift suite, which was run on macOS for this review. The Windows suite, the MSI build and Authenticode signing run only on `windows-latest` in CI.
+> This is a historical assessment through commit `95e4ef0`, not an assessment of today's main branch. Later changes, including the Windows update-manifest client, are not reflected in the findings below. SonarQube and OpenSSF scores are repository-based estimates; neither official scanner was run. No penetration test was performed. The platform-specific builds and signing pipelines were assessed from source and CI evidence; the macOS Swift tests were also run on macOS for this review.
 
 ---
 
@@ -166,7 +166,7 @@ Values in parentheses are the previous report's figures where they changed.
 | Vulnerabilities | 10 | Production `npm audit` in CI; 0 findings in this review |
 | Dependency updates | 10 | Weekly Dependabot for npm and Actions with a 7-day cooldown, matched by an `npm` `min-release-age` install-time floor |
 | CI tests | 10 | Unit/coverage, parser fuzz, and browser smoke on PRs; Node 22/24/26 matrix; a separate macOS-agent workflow with a System-Extension identity gate |
-| Maintained | 10 | Active release and PR history through the current main |
+| Maintained | 10 | Active release and PR history through the assessed commit |
 | Code review | 8 | PR workflow with required checks; RBAC and permission matrix enforce review standards |
 | Fuzzing | 7 | Parser fuzzing runs on every PR and, via `fuzz-continuous.yml`, in 20-minute campaigns every 6 hours that persist found inputs into `test/fuzz/corpus/`. It is deliberately not OSS-Fuzz (no coverage-guided feedback), which caps the remaining points |
 | Signed releases | 9 | Hub releases are published with detached signature assets through a unified release-and-sign command that verifies assets as downloaded and is re-checked on publish/edit/weekly; macOS agent releases are Developer ID-signed and notarized. The remaining point requires SLSA provenance |
@@ -295,7 +295,7 @@ It is deliberately a *separate* framework from §6 rather than a re-score of the
 
 ## Conclusion
 
-The current main line remains suitable for its documented self-hosted deployment model with strong multi-user security controls. The macOS agent is a well-behaved Mac application, and the Windows agent has grown from a vertical slice into a real one — 14,447 lines, three projects, a per-machine MSI and six CI checks of its own — while reusing the Hub's existing `agent` boundary rather than opening a second. Automated quality gates are broad, data-changing operations fail closed, full RBAC with deny-by-default permissions is enforced, MCP access is OAuth-protected with rate limiting and audit, and no critical or high issue remains.
+At the assessed commit, the main line remained suitable for its documented self-hosted deployment model with strong multi-user security controls. The macOS agent is a well-behaved Mac application, and the Windows agent has grown from a vertical slice into a real one — 14,447 lines, three projects, a per-machine MSI and six CI checks of its own — while reusing the Hub's existing `agent` boundary rather than opening a second. Automated quality gates are broad, data-changing operations fail closed, full RBAC with deny-by-default permissions is enforced, MCP access is OAuth-protected with rate limiting and audit, and no critical or high issue remains.
 
 The defining work this cycle lived in the client agents, and the notable thing is how consistently the macOS agent chose restraint: a pass-only filter that never blocks, opt-in reading that is bounded and stays on-device, QUIC counted rather than decoded, threat questions answered locally, a self-update that verifies four ways and still stops for the user to click, and now a privacy manifest a build test keeps truthful. The hardest problems — updating a sandboxed app, and never shipping an unsigned release again — were both solved by discovering the real failure on a real run and fixing the process, not just the code. The new Windows agent reuses the established `agent` boundary rather than opening a second one, which is the right way to add a platform.
 

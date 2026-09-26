@@ -1,10 +1,19 @@
 # EgressView Agent for Windows
 
-[English: Hub delivery and update-check disclosure](README.en.md)
+[English installation guide](README.en.md)
 
 ![ネットワーク状況タブ。地球儀、どのアプリがどこへ通信したかのサンキー図、いつ通信があったかの時系列](../../docs/assets/egressview-agent-windows.png)
 
 実機の画面です。宛先のうち2件は、このリポジトリが公開されるため、documentation用のドメインに置き換えてあります。
+
+## インストールと使い始め
+
+1. [公式ダウンロードページ](https://dl.egressview.com/)から、PCに合うWindows MSI（x64またはARM64）を取得します。Windows 10以降に対応し、.NET runtimeの事前導入は不要です。
+2. ページにある`/windows/manifest.json`の該当パッケージのSHA-256と、ダウンロードしたMSIの値を照合します。PowerShellでは`Get-FileHash -Algorithm SHA256 "<ダウンロードしたMSIのパス>"`で確認できます。現在の配布MSIはAuthenticode未署名で、SmartScreenに「発行元不明」と表示される場合があります。チェックサムが一致しなければ実行しないでください。
+3. MSIを実行し、Windowsの管理者承認を行います。インストール後、スタートメニューからEgressView Agentを開き、ネットワーク状況で収集状態を確認します。記録はWindowsサービスが行うため、画面を閉じても継続します。
+4. Hubを使う場合だけ、Agentの設定から登録します。登録後も観測データの送信は別途有効化するまで始まりません。
+
+AgentはHubがなくても、このPCの通信をローカルに記録します。更新通知は表示できますが、新しいMSIの取得とインストールは利用者が行います。送信先や送信内容は[Windows Agentのプライバシー説明](../../docs/agent-privacy-windows.ja.md)を参照してください。
 
 ## Hub送信と更新確認で送るもの
 
@@ -17,7 +26,9 @@ Hub登録ではPC名、Windowsのバージョン、Agentのバージョンを送
 
 更新確認は観測データの送信とは別で、`dl.egressview.com`の`/windows/manifest.json`と署名を取得します。HTTP User-AgentにはAgentバージョンとWindowsバージョンが含まれます。通常のHTTP通信と同様、接続先サーバーには送信元IPアドレスが見えます。更新確認で観測データやHub資格情報は送りません。
 
-Phase 1の最小vertical sliceです。ネットワーク観測をbounded channelで受け、Windows標準SQLiteへ
+## 開発者向け実装・ビルド情報
+
+初期のPhase 1は、ネットワーク観測をbounded channelで受け、Windows標準SQLiteへ
 batch保存し、再起動後の整合性とprivacy-safeな診断を確認します。
 
 ETW collectorとSCM service hostを含みます。ETW session開始には管理者権限または`LocalService`が必要です。
@@ -61,13 +72,13 @@ dotnet publish src/EgressView.Agent.Ui -c Release -r win-x64 --self-contained tr
 .\scripts\build-msi.ps1 -Version 0.1.0
 ```
 
-利用者向けには`artifacts\windows\EgressView-Agent-Windows-<version>-<arch>-unsigned.msi`を使います。
+ローカルビルドでは`artifacts\windows\EgressView-Agent-Windows-<version>-<arch>-unsigned.msi`を作ります。
 `-Runtime win-x64`（既定）と`-Runtime win-arm64`があり、MSIはself-contained buildを内包するため、
 .NET runtimeの事前導入は不要です。ETW callbackの解析がhot pathであるため、ARM機ではx64 emulationに
 任せず、ARM64 buildを使ってください。Windowsの通常のinstaller UI、
 Program Filesへの配置、LocalService、スタートメニュー、ログオン時のtray起動、メジャーアップグレード、
-「インストールされているアプリ」からのアンインストールを管理します。`-unsigned`は開発成果物であり、
-一般配布前にはAuthenticode署名、署名検証、SmartScreen実測が必要です。
+「インストールされているアプリ」からのアンインストールを管理します。`-unsigned`は署名されていないことを示します。
+公開配布時の状態と確認方法は上のインストール手順に記載しています。
 
 **1つの版番号は1つのビルドを指します。**同じ版・同じアーキのMSIが出力先に既にあれば、
 `build-msi.ps1`は何もビルドする前に拒否します。Windows Installerはファイルの版で置き換えを判断するため、
