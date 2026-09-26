@@ -988,8 +988,10 @@ describe('queryByTimeRangePaged / countByTimeRange: filter options', () => {
   });
 
   it('filters by country', () => {
-    insertWithFields({ dst: '10.0.0.1', dport: 80, country: 'US' });
-    insertWithFields({ dst: '10.0.0.2', dport: 80, country: 'JP' });
+    // Public destinations: a 10.x one is shown, and so filtered, as LAN
+    // whatever country a row carries (P3-174).
+    insertWithFields({ dst: '8.8.8.8', dport: 80, country: 'US' });
+    insertWithFields({ dst: '203.0.113.200', dport: 80, country: 'JP' });
 
     const results = history.queryByTimeRangePaged(null, null, 10, 0, {
       filters: { country: { mode: 'contains', value: 'JP' } },
