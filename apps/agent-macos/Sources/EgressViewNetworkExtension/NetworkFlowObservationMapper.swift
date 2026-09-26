@@ -38,6 +38,28 @@ public struct SocketFlowMetadata: Equatable, Sendable {
         self.bundleID = bundleID
         self.remoteHostname = remoteHostname
     }
+
+    /// Whether the system had chosen this flow's local address and port when
+    /// the metadata was read.
+    ///
+    /// Read when a flow is created, an outbound TCP flow has neither yet: on
+    /// one Mac on 2026-09-27, 93% of TCP flows were recorded from 0.0.0.0:0
+    /// and never corrected. The Hub matches an agent's flow to the router's by
+    /// the address it left from, so those flows could not be matched, and
+    /// several connections opened at once could not be told apart (P3-174
+    /// follow-up).
+    public var hasLocalEndpoint: Bool {
+        localPort != 0 && !ConnectionObservation.unspecifiedAddresses.contains(localAddress)
+    }
+
+    /// This metadata with another reading's local address and port.
+    public func withLocalEndpoint(of other: SocketFlowMetadata) -> SocketFlowMetadata {
+        SocketFlowMetadata(
+            networkProtocol: networkProtocol, localAddress: other.localAddress, localPort: other.localPort,
+            remoteAddress: remoteAddress, remotePort: remotePort, processID: processID,
+            processName: processName, bundleID: bundleID, remoteHostname: remoteHostname
+        )
+    }
 }
 
 public struct NetworkFlowObservationMapper: Sendable {

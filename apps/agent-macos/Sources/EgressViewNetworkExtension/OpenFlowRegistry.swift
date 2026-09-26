@@ -118,6 +118,20 @@ public struct OpenFlowRegistry: Sendable {
         )
     }
 
+    /// Takes the local address and port from a later reading of the flow,
+    /// when the one taken at creation had none.
+    ///
+    /// The system chooses them when the connection is made, after the flow
+    /// was first seen. Only fills a gap: a local endpoint already known is
+    /// never replaced.
+    public mutating func noteLocalEndpoint(flowID: UUID, from metadata: SocketFlowMetadata) {
+        guard var entry = entries[flowID], !entry.metadata.hasLocalEndpoint, metadata.hasLocalEndpoint else {
+            return
+        }
+        entry.metadata = entry.metadata.withLocalEndpoint(of: metadata)
+        entries[flowID] = entry
+    }
+
     /// Emits the opening observation once, after the first outbound bytes have
     /// given the TLS parser its chance to attach SNI. The closing report later
     /// carries the same flow ID and updates this row with final byte counts.
@@ -164,7 +178,12 @@ public struct OpenFlowRegistry: Sendable {
         }
         // The report's own metadata is the fallback for a flow this registry
         // never saw, or whose entry was evicted.
-        guard let resolved = entry?.metadata ?? metadata else { return nil }
+        guard var resolved = entry?.metadata ?? metadata else { return nil }
+        // By the time a flow closes its local endpoint is known, even when it
+        // was not when the flow began.
+        if !resolved.hasLocalEndpoint, let metadata, metadata.hasLocalEndpoint {
+            resolved = resolved.withLocalEndpoint(of: metadata)
+        }
 
         return observation(
             flowID: flowID,
