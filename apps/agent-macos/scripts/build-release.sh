@@ -19,7 +19,9 @@ PROJECT_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
 OUTPUT_DIR=${EGRESSVIEW_RELEASE_OUTPUT_DIR:-"$PROJECT_DIR/dist"}
 SIGN_IDENTITY=${EGRESSVIEW_SIGN_IDENTITY:-Developer ID Application}
 ARCHS=${EGRESSVIEW_ARCHS:-arm64}
-NOTARY_PROFILE=${EGRESSVIEW_NOTARY_PROFILE:-}
+SCRIPT_DIR_FOR_NOTARY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=notary-auth.sh
+source "$SCRIPT_DIR_FOR_NOTARY/notary-auth.sh"
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/egressview-macos-release.XXXXXX")
 ARCHIVE_PATH="$WORK_DIR/EgressViewAgent.xcarchive"
 DERIVED_DATA="$WORK_DIR/DerivedData"
@@ -35,29 +37,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Checked before the build, not after it. Finding out at the end costs the
-# whole build -- twice on 2026-08-19.
-#
-# `notarytool` keeps its credentials in the data protection keychain, and when
-# that is locked a non-interactive shell gets `errSecInteractionNotAllowed`,
-# which `notarytool` reports as "No Keychain password item found". **The
-# profile is almost never actually missing.** It was re-registered six times
-# between 2026-08 and 2026-09-13 on the strength of that message, and the two
-# reconstructed "lifetimes" -- about 22 hours and about 20 hours -- were the
-# gap until the keychain next locked, not an expiry.
-#
-# So say what the message means, and put the cheap fix first.
-if [[ -n "$NOTARY_PROFILE" ]]; then
-  if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
-    printf 'Notarisation profile "%s" cannot be read.\n' "$NOTARY_PROFILE" >&2
-    printf '\nUsually the profile is there and the keychain is locked: notarytool\n' >&2
-    printf 'reports both as the same error. Unlock it and run this again:\n' >&2
-    printf '  security unlock-keychain\n' >&2
-    printf '\nOnly if that does not help, register the profile again:\n' >&2
-    printf '  xcrun notarytool store-credentials %s --apple-id <apple-id> --team-id <team-id>\n' "$NOTARY_PROFILE" >&2
-    exit 2
-  fi
-fi
+# Checked before the build; notary-auth.sh says why the message matters.
+check_notary_credentials
 
 mkdir -p -- "$OUTPUT_DIR"
 if [[ -e "$OUTPUT_ZIP" ]]; then
@@ -140,8 +121,8 @@ done
 
 ditto -c -k --keepParent "$APP_PATH" "$SUBMISSION_ZIP"
 
-if [[ -n "$NOTARY_PROFILE" ]]; then
-  xcrun notarytool submit "$SUBMISSION_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+if [[ -n "$NOTARY_MODE" ]]; then
+  xcrun notarytool submit "$SUBMISSION_ZIP" "${NOTARY_ARGS[@]}" --wait
   xcrun stapler staple "$APP_PATH"
   xcrun stapler validate "$APP_PATH"
   codesign --verify --deep --strict --verbose=2 "$APP_PATH"
@@ -198,7 +179,7 @@ for forbidden in \
   fi
 done
 
-if [[ -n "$NOTARY_PROFILE" ]]; then
+if [[ -n "$NOTARY_MODE" ]]; then
   xcrun stapler validate "$ROUNDTRIP_APP"
   spctl --assess --type execute --verbose=2 "$ROUNDTRIP_APP"
 fi
