@@ -13,7 +13,8 @@
 # new one itself, which is the part the user should never have been asked to do.
 #
 # Usage:
-#   EGRESSVIEW_NOTARY_PROFILE=<keychain profile> \
+#   EGRESSVIEW_NOTARY_PROFILE=<keychain profile> \   (or EGRESSVIEW_NOTARY_KEY/_KEY_ID/_ISSUER;
+#                                                       see notary-auth.sh)
 #   EGRESSVIEW_INSTALLER_IDENTITY='Developer ID Installer: ...' \
 #     ./scripts/build-agent-pkg.sh
 #
@@ -27,7 +28,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 AGENT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 DIST_DIR="$AGENT_DIR/dist"
 SOURCE_ZIP="${EGRESSVIEW_AGENT_ZIP:-$DIST_DIR/EgressViewAgent.zip}"
-NOTARY_PROFILE="${EGRESSVIEW_NOTARY_PROFILE:-}"
+SCRIPT_DIR_FOR_NOTARY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=notary-auth.sh
+source "$SCRIPT_DIR_FOR_NOTARY/notary-auth.sh"
 INSTALLER_IDENTITY="${EGRESSVIEW_INSTALLER_IDENTITY:-}"
 APP_NAME="EgressView Agent.app"
 BUNDLE_ID="com.egressview.agent.macos"
@@ -36,16 +39,8 @@ fail() { printf '%s\n' "$1" >&2; exit 1; }
 
 [[ -f "$SOURCE_ZIP" ]] || fail "No signed build at $SOURCE_ZIP. Run ./scripts/build-release.sh first."
 
-# Checked before the build, not after it. The notarisation profile has gone
-# missing five times, and finding out at the end costs the whole build --
-# twice on 2026-08-19. Its cause is not worth chasing; the wait is.
-if [[ -n "$NOTARY_PROFILE" ]]; then
-  if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
-    printf 'Notarisation profile "%s" is not usable. Register it and run this again:\n' "$NOTARY_PROFILE" >&2
-    printf '  xcrun notarytool store-credentials %s --apple-id <apple-id> --team-id <team-id>\n' "$NOTARY_PROFILE" >&2
-    exit 2
-  fi
-fi
+# Checked before the build; notary-auth.sh says why the message matters.
+check_notary_credentials
 
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/egressview-agent-pkg.XXXXXX")
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -309,9 +304,9 @@ fi
 
 productsign --sign "$INSTALLER_IDENTITY" "$BUILT_PKG" "$WORK_DIR/signed.pkg"
 
-if [[ -z "$NOTARY_PROFILE" ]]; then
+if [[ -z "$NOTARY_MODE" ]]; then
     cp "$WORK_DIR/signed.pkg" "$PKG_PATH"
-    printf 'No EGRESSVIEW_NOTARY_PROFILE: signed but not notarised. Do not publish it.\n' >&2
+    printf 'No notarisation credentials: signed but not notarised. Do not publish it.\n' >&2
     printf 'Installer package: %s\n' "$PKG_PATH"
     exit 0
 fi
@@ -320,7 +315,7 @@ fi
 # reason it does for the disk image: a first install from an unstapled package
 # asks Apple over the network, and the first thing a new user meets should not
 # depend on their connection.
-xcrun notarytool submit "$WORK_DIR/signed.pkg" --keychain-profile "$NOTARY_PROFILE" --wait
+xcrun notarytool submit "$WORK_DIR/signed.pkg" "${NOTARY_ARGS[@]}" --wait
 xcrun stapler staple "$WORK_DIR/signed.pkg"
 cp "$WORK_DIR/signed.pkg" "$PKG_PATH"
 
