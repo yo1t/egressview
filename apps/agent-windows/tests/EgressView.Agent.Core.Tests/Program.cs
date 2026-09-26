@@ -1313,8 +1313,18 @@ try
         var beating = Path.Combine(directory, "beating.db");
         var reporter = new MigrationReporter(beating, TimeSpan.FromMilliseconds(40));
         var first = reporter.Report(28, 29, MigrationProgress.MovingRows, 100, 6, 8);
-        Thread.Sleep(400);
-        var later = MigrationProgress.Read(beating);
+        // Read until it moves, within five seconds. One read after 400 ms
+        // failed on a busy CI runner: a read that meets a beat replacing the
+        // file is a sharing violation on Windows, and Read answers null for
+        // it -- as it should, since the window simply reads again.
+        MigrationProgress? later;
+        var beatDeadline = DateTime.UtcNow.AddSeconds(5);
+        do
+        {
+            Thread.Sleep(40);
+            later = MigrationProgress.Read(beating);
+        }
+        while (!(later is not null && later.Heartbeat > first.Heartbeat) && DateTime.UtcNow < beatDeadline);
         Assert(later is not null && later.Heartbeat > first.Heartbeat,
             "the heartbeat moves while nothing else does");
         Assert(later!.Step == 6 && later.At == first.At,

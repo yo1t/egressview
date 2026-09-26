@@ -15,8 +15,9 @@ public struct ConnectionLogFilter: Equatable, Hashable, Sendable {
 
     public var application = ""
     public var destination = ""
-    /// ISO country code, or nil for every country. The empty-string case is
-    /// distinct: it means "rows whose address was never placed".
+    /// ISO country code, or "LAN", "loopback" or "CGNAT" (P3-174), or nil for
+    /// every country. isUnplacedCountryOnly is distinct: it means "rows with
+    /// neither a country nor one of those networks".
     public var country: String?
     public var isUnplacedCountryOnly = false
     public var networkProtocol: InternetProtocol?
