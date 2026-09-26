@@ -54,6 +54,7 @@ const beaconDetector = require('./src/beacon-detector');
 const sessions       = require('./src/sessions');
 const authPassword   = require('./src/auth-password');
 const authAudit      = require('./src/auth-audit');
+const { createIngestAuditSummary } = require('./src/ingest-audit-summary');
 const apiIdentities  = require('./src/api-identities');
 const agentIdentities = require('./src/agent-identities');
 const agentIngest    = require('./src/agent-ingest-store');
@@ -415,8 +416,12 @@ async function reMatchAndNotify() {
 
 // ─── Beacon detection scan ────────────────────────────────────────────────────
 
+// Successful agent uploads, one audit row per agent per hour (P3-175).
+const ingestAuditSummary = createIngestAuditSummary({ append: event => authAudit.append(event) });
+
 const routeCtx = {
   requireAdmin,
+  ingestAuditSummary,
   getAdminToken:       () => appState.adminToken,
   asus, yamaha, cisco, enrichment, threatIntel, notifier, history, devices, deviceId, backup,
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
@@ -989,7 +994,9 @@ function shutdown(exitCode = 0) {
     ['devices', () => devices.closeDb()],
     ['beacons', () => beacons.closeDb()],
     ['sessions', () => sessions.closeDb()],
-    ['authAudit', () => authAudit.closeDb()],
+    // The hour of successful uploads counted so far is written before the
+    // audit store closes, so an orderly stop loses none of it (P3-175).
+    ['authAudit', () => { ingestAuditSummary.stop(); authAudit.closeDb(); }],
     ['apiIdentities', () => apiIdentities.closeDb()],
   ]) {
     try { closeDb(); } catch (error) {

@@ -102,6 +102,9 @@ module.exports = function agentRoutes({
   // the Hub runs without threat feeds, in which case the endpoint says so
   // rather than pretending there is nothing to match.
   threatIntel = null,
+  // One audit row per agent per hour for successful uploads (P3-175). Absent,
+  // every upload is its own row, as before.
+  ingestAuditSummary = null,
 }) {
   const router = Router();
   const failedEnrollments = new Map();
@@ -720,6 +723,25 @@ module.exports = function agentRoutes({
             )),
           }));
         }
+      }
+      if (ack.rejected === 0 && ingestAuditSummary) {
+        // A routine upload that went through. Counted into the agent's hour
+        // rather than written on its own: at 24,000-34,000 a day these were
+        // over 90% of the audit trail and said nothing a count does not.
+        ingestAuditSummary.record({
+          authMethod: req.authMethod,
+          actor: req.actor,
+          principal: req.principal,
+          clientIp: req.ip,
+          path: req.originalUrl,
+        }, {
+          observationCount: parsed.data.observations.length,
+          acceptedCount: ack.accepted,
+          duplicateCount: ack.duplicate,
+          replayed: ack.replayed,
+          durationMs: Date.now() - startedAt,
+        });
+        return res.json({ ...ack, requestId: req.id });
       }
       audit(req, 'agent_ingest', ack.rejected > 0 ? 'failure' : 'success', {
         reason: ack.rejected > 0 ? 'observation_rejected' : undefined,

@@ -39,6 +39,7 @@ function makeApp({
   recordConnections = null,
   queueConnectionEnrichment = null,
   threatIntel = null,
+  ingestAuditSummary = null,
 } = {}) {
   const audits = [];
   const app = express();
@@ -69,6 +70,7 @@ function makeApp({
     threatIntel,
     isPlaintextAllowed: () => allowPlaintext,
     authAudit: { append: event => audits.push(event) },
+    ingestAuditSummary,
   }));
   return { app, audits };
 }
@@ -666,3 +668,64 @@ describe('Agent HTTP ingest', () => {
     assert.deepEqual(responses.map(response => response.status), [200, 200, 200, 200]);
   });
 });
+
+// A routine upload that went through is counted into the agent's hour rather
+// than written as its own audit row; anything else still is (P3-175).
+describe('Agent送信の監査ログ', () => {
+  it('成功した送信は1件ずつ書かず、1時間ごとの集計に回す', async () => {
+    const recorded = [];
+    const { app, audits } = makeApp({ ingestAuditSummary: { record: (who, upload) => recorded.push({ who, upload }) } });
+    const { enrolled } = await enrolledAgent(app);
+    const before = audits.length;
+    const response = await request(app, 'POST', '/api/agent/ingest', {
+      body: ingestEnvelope(), headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(audits.slice(before).filter(event => event.eventType === 'agent_ingest').length, 0);
+    assert.equal(recorded.length, 1);
+    assert.equal(recorded[0].who.principal, `agent:${enrolled.body.agentId}`);
+    assert.equal(recorded[0].upload.observationCount, 1);
+    assert.equal(recorded[0].upload.acceptedCount, 1);
+  });
+
+  it('断った送信は、今どおり1件ずつ書く', async () => {
+    const recorded = [];
+    const { app, audits } = makeApp({ ingestAuditSummary: { record: () => recorded.push(1) } });
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    envelope.schemaVersion = 99;
+    await request(app, 'POST', '/api/agent/ingest', {
+      body: envelope, headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+
+    assert.equal(recorded.length, 0);
+    const failures = audits.filter(event => event.eventType === 'agent_ingest' && event.outcome === 'failure');
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].metadata.reason, 'unsupported_schema_version');
+  });
+
+  // Part of the upload could not be stored: that is not routine, and it is
+  // written as its own failure row with the reason, never folded into a count.
+  it('一部を保存できなかった送信は、集計に回さず1件の失敗として書く', async () => {
+    const recorded = [];
+    const partial = {
+      ...agentIngestStore,
+      storeBatch: async (_agentId, envelope) => Object.freeze({
+        batchId: envelope.batchId, accepted: 0, duplicate: 0, rejected: envelope.observations.length,
+        receivedAt: Date.now(), replayed: false,
+      }),
+    };
+    const { app, audits } = makeApp({ agentIngest: partial, ingestAuditSummary: { record: () => recorded.push(1) } });
+    const { enrolled } = await enrolledAgent(app);
+    await request(app, 'POST', '/api/agent/ingest', {
+      body: ingestEnvelope(), headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+
+    assert.equal(recorded.length, 0);
+    const failures = audits.filter(event => event.eventType === 'agent_ingest' && event.outcome === 'failure');
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].metadata.reason, 'observation_rejected');
+  });
+});
+
