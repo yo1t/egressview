@@ -209,7 +209,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 let identity = observation.deliveryIdentity
                 if let index = state.pending.lastIndex(where: {
                     !activeIDs.contains($0.observationID) && $0.observation.deliveryIdentity == identity
-                }) {
+                }) ?? openingAwaitingClose(for: observation, excluding: activeIDs) {
                     // A later report of the same flow completes the earlier
                     // one rather than replacing it: a closing report that
                     // carries no name must not erase the name found at the
@@ -231,6 +231,25 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             trimToLimit()
             try persist()
         }
+    }
+
+    /// A queued opening that this closing report completes although their
+    /// starts differ.
+    ///
+    /// A closing report whose flow the extension no longer remembered -- it
+    /// restarted, as it does on every update, while the flow was open -- says
+    /// the flow started when it closed. It still ends the latest time that
+    /// flow opened, the same rule the local history applies.
+    private func openingAwaitingClose(
+        for observation: ConnectionObservation, excluding activeIDs: Set<UUID>
+    ) -> Int? {
+        guard observation.hasByteCounts, let flowID = observation.flowID else { return nil }
+        return state.pending.lastIndex(where: {
+            !activeIDs.contains($0.observationID)
+                && $0.observation.flowID == flowID
+                && !$0.observation.hasByteCounts
+                && $0.observation.firstObservedAt < observation.firstObservedAt
+        })
     }
 
     /// - Parameter schemaVersion: what the Hub said it accepts, or the

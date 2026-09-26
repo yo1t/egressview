@@ -320,7 +320,7 @@ public final class ObservationStore: @unchecked Sendable {
     ///
     /// Named rather than counted from the code so the backup and the progress
     /// file can say where the migration is heading before it starts.
-    static let latestSchemaVersion = 15
+    static let latestSchemaVersion = 16
 
     private func migrate() throws {
         let version = try scalar("PRAGMA user_version") ?? 0
@@ -715,6 +715,31 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("ALTER TABLE geo_locations_v15 RENAME TO geo_locations")
             try execute("PRAGMA user_version=15")
             reportMigrationStep(15)
+        }
+        if version < 16 {
+            // One row per time a flow was open, not per flow id. macOS reuses
+            // a UDP socket's flow id each time it opens again, and the one row
+            // it used to get kept only the last time's byte counts: on
+            // 2026-09-27 a rapportd socket that sent 288 bytes every minute
+            // for two and a half hours was one row of 288 bytes. The Hub
+            // already had a row for each time.
+            //
+            // Existing rows each become one time the flow was open, which is
+            // what the history already showed for them.
+            if try !columnExists(table: "observations", column: "flow_episode") {
+                try execute("ALTER TABLE observations ADD COLUMN flow_episode REAL")
+            }
+            try execute(
+                "UPDATE observations SET flow_episode = first_observed_at "
+                + "WHERE flow_id IS NOT NULL AND flow_episode IS NULL"
+            )
+            try execute("DROP INDEX IF EXISTS observations_flow_id")
+            try execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS observations_flow_episode "
+                + "ON observations(flow_id, flow_episode) WHERE flow_id IS NOT NULL"
+            )
+            try execute("PRAGMA user_version=16")
+            reportMigrationStep(16)
         }
     }
 
@@ -2825,9 +2850,9 @@ public final class ObservationStore: @unchecked Sendable {
         INSERT INTO observations (
             network_protocol, local_address, local_port, remote_address, remote_port,
             process_id, process_name, bundle_id, first_observed_at, last_observed_at,
-            bytes_in, bytes_out, collector, confidence, remote_hostname, flow_id
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(flow_id) WHERE flow_id IS NOT NULL DO UPDATE SET
+            bytes_in, bytes_out, collector, confidence, remote_hostname, flow_id, flow_episode
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(flow_id, flow_episode) WHERE flow_id IS NOT NULL DO UPDATE SET
             -- The local endpoint a flow was first recorded without, taken
             -- from a later report that has it; one already known is kept.
             -- Both columns decide on the old row, so they move together.
@@ -2870,10 +2895,43 @@ public final class ObservationStore: @unchecked Sendable {
             bindText(statement, 14, observation.confidence.rawValue)
             bindOptionalText(statement, 15, observation.remoteHostname)
             bindOptionalText(statement, 16, observation.flowID?.uuidString)
+            if let episode = try flowEpisode(of: observation) {
+                sqlite3_bind_double(statement, 17, episode)
+            } else {
+                sqlite3_bind_null(statement, 17)
+            }
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw ObservationStoreError.statement(lastMessage)
             }
         }
+    }
+
+    /// Which time the flow was open this report belongs to, as the row key.
+    ///
+    /// Normally the start the report carries: every report of one time a flow
+    /// was open carries the start the extension recorded for it. A closing
+    /// report the extension could not place -- it restarted while the flow was
+    /// open, as it does on every update -- carries its own close time instead.
+    /// It completes the latest time that flow opened and has not yet closed,
+    /// as it did when the flow had a single row.
+    private func flowEpisode(of observation: ConnectionObservation) throws -> Double? {
+        guard let flowID = observation.flowID else { return nil }
+        let start = observation.firstObservedAt.timeIntervalSince1970
+        guard observation.hasByteCounts else { return start }
+        let statement = try prepare("""
+        SELECT flow_episode FROM observations
+        WHERE flow_id = ?1 AND (
+            flow_episode = ?2
+            OR (flow_episode < ?2 AND bytes_in IS NULL AND bytes_out IS NULL)
+        )
+        ORDER BY flow_episode = ?2 DESC, flow_episode DESC
+        LIMIT 1
+        """)
+        defer { sqlite3_finalize(statement) }
+        bindText(statement, 1, flowID.uuidString)
+        sqlite3_bind_double(statement, 2, start)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return start }
+        return sqlite3_column_double(statement, 0)
     }
 
     /// Country history counts connections, not opening/closing reports. Merge
