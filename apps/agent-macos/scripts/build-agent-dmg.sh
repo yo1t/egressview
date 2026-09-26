@@ -20,7 +20,9 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 AGENT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 DIST_DIR="$AGENT_DIR/dist"
 SOURCE_ZIP="${EGRESSVIEW_AGENT_ZIP:-$DIST_DIR/EgressViewAgent.zip}"
-NOTARY_PROFILE="${EGRESSVIEW_NOTARY_PROFILE:-}"
+SCRIPT_DIR_FOR_NOTARY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=notary-auth.sh
+source "$SCRIPT_DIR_FOR_NOTARY/notary-auth.sh"
 APP_NAME="EgressView Agent.app"
 
 fail() { printf '%s\n' "$1" >&2; exit 1; }
@@ -46,7 +48,7 @@ DMG_PATH="$DIST_DIR/egressview-agent-$VERSION.dmg"
 # Refuse to package something that would fail on the user's machine. Checking
 # here costs a second; finding out from a user costs their evening.
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-if [[ -n "$NOTARY_PROFILE" ]]; then
+if [[ -n "$NOTARY_MODE" ]]; then
   xcrun stapler validate "$APP_PATH" || fail 'The app in the ZIP is not stapled. Rebuild with a notary profile.'
   spctl --assess --type execute --verbose=2 "$APP_PATH"
 fi
@@ -64,17 +66,18 @@ hdiutil create \
   -ov \
   "$WORK_DIR/agent.dmg" >/dev/null
 
-if [[ -n "$NOTARY_PROFILE" ]]; then
+if [[ -n "$NOTARY_MODE" ]]; then
+  check_notary_credentials
   # Signing the image itself is what lets the ticket be stapled to it.
   IDENTITY=$(codesign -dvv "$APP_PATH" 2>&1 | sed -n 's/^Authority=\(Developer ID Application.*\)$/\1/p' | head -1)
   [[ -n "$IDENTITY" ]] || fail 'Could not determine the Developer ID identity from the signed app'
   codesign --sign "$IDENTITY" --timestamp "$WORK_DIR/agent.dmg"
-  xcrun notarytool submit "$WORK_DIR/agent.dmg" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun notarytool submit "$WORK_DIR/agent.dmg" "${NOTARY_ARGS[@]}" --wait
   xcrun stapler staple "$WORK_DIR/agent.dmg"
   xcrun stapler validate "$WORK_DIR/agent.dmg"
   spctl --assess --type open --context context:primary-signature --verbose=2 "$WORK_DIR/agent.dmg"
 else
-  printf 'No EGRESSVIEW_NOTARY_PROFILE: built an unnotarised image for local checking only. Do not publish it.\n' >&2
+  printf 'No notarisation credentials: built an unnotarised image for local checking only. Do not publish it.\n' >&2
 fi
 
 mv "$WORK_DIR/agent.dmg" "$DMG_PATH"
