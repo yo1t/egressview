@@ -52,7 +52,7 @@ function requireDb() {
   return db;
 }
 
-function batchAck(row, replayed, acceptedObservationIds = []) {
+function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0) {
   const ack = {
     batchId: row.batchId,
     accepted: row.acceptedCount,
@@ -67,6 +67,10 @@ function batchAck(row, replayed, acceptedObservationIds = []) {
     value: Object.freeze([...acceptedObservationIds]),
     enumerable: false,
   });
+  // How many of the duplicates completed a stored row (P3-170). Counted in
+  // `duplicate` for the agent, whose check is accepted + duplicate = sent, and
+  // kept out of the JSON the agent reads.
+  Object.defineProperty(ack, 'completed', { value: completedCount, enumerable: false });
   return Object.freeze(ack);
 }
 
@@ -97,6 +101,26 @@ function yieldToLoop() {
 }
 
 /**
+ * Whether a repeated observation id is the closing report of the flow stored
+ * under it, carrying the byte counts the stored row does not have (P3-170).
+ *
+ * Only then is the row updated. Anything else with a known id -- a retry of
+ * the same report, a second report with counts, or a report whose protocol,
+ * destination or process is not the stored one -- stays a plain duplicate, so
+ * an agent can never rewrite a different connection's row through an id it
+ * reused.
+ */
+function completesStoredObservation(stored, observation) {
+  if (stored.bytesIn != null || stored.bytesOut != null) return false;
+  if (observation.bytesIn == null && observation.bytesOut == null) return false;
+  return stored.networkProtocol === observation.networkProtocol
+    && stored.remoteAddress === observation.remoteAddress
+    && stored.remotePort === observation.remotePort
+    && stored.processId === observation.processID
+    && (stored.localPort === 0 || stored.localPort === observation.localPort);
+}
+
+/**
  * Store one agent batch.
  *
  * Asynchronous because it gives the event loop a turn between chunks; the work
@@ -112,8 +136,22 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
   `).get(agentId, envelope.batchId);
   if (existing) return batchAck(existing, true);
 
-  const observationExists = database.prepare(`
-    SELECT 1 FROM agent_observations WHERE agentId = ? AND observationId = ?
+  const storedObservation = database.prepare(`
+    SELECT networkProtocol, localAddress, localPort, remoteAddress, remotePort, processId,
+           processName, bundleId, firstObservedAt, lastObservedAt, bytesIn, bytesOut, remoteHostname
+    FROM agent_observations WHERE agentId = ? AND observationId = ?
+  `);
+  // The closing report of a flow, sent under the observation id of its opening
+  // report (P3-170). The row gains the counts it could not have had when the
+  // flow opened; nothing else about the flow is taken from the second report.
+  const completeObservation = database.prepare(`
+    UPDATE agent_observations
+    SET bytesIn = @bytesIn, bytesOut = @bytesOut,
+        lastObservedAt = MAX(lastObservedAt, @lastObservedAt),
+        localPort = CASE WHEN localPort = 0 THEN @localPort ELSE localPort END,
+        remoteHostname = COALESCE(remoteHostname, @remoteHostname)
+    WHERE agentId = @agentId AND observationId = @observationId
+      AND bytesIn IS NULL AND bytesOut IS NULL
   `);
   const insertObservation = database.prepare(`
     INSERT INTO agent_observations (
@@ -151,16 +189,44 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
 
   let acceptedCount = 0;
   let duplicateCount = 0;
+  let completedCount = 0;
   let rejectedCount = 0;
   const acceptedObservationIds = [];
 
   const writeChunk = database.transaction((chunk) => {
     for (const observation of chunk) {
-      if (observationExists.get(agentId, observation.observationId)) {
+      const stored = storedObservation.get(agentId, observation.observationId);
+      if (stored) {
         duplicateCount += 1;
+        if (completesStoredObservation(stored, observation)) {
+          completeObservation.run({
+            agentId,
+            observationId: observation.observationId,
+            bytesIn: observation.bytesIn ?? null,
+            bytesOut: observation.bytesOut ?? null,
+            lastObservedAt: Date.parse(observation.lastObservedAt),
+            localPort: observation.localPort,
+            remoteHostname: observation.remoteHostname ?? null,
+          });
+          // The flow may now end in a later hour than its opening said.
+          const lastObservedAt = Math.max(stored.lastObservedAt, Date.parse(observation.lastObservedAt));
+          upsertAppHourly.run({
+            agentId,
+            hourStart: Math.floor(lastObservedAt / 3_600_000) * 3_600_000,
+            appIdentity: stored.bundleId || stored.processName,
+            processName: stored.processName,
+            localAddress: stored.localAddress,
+            remoteAddress: stored.remoteAddress,
+            remotePort: stored.remotePort,
+            networkProtocol: stored.networkProtocol,
+            firstObservedAt: stored.firstObservedAt,
+            lastObservedAt,
+          });
+          completedCount += 1;
+        }
         continue;
       }
-      const stored = {
+      const row = {
         agentId,
         observationId: observation.observationId,
         batchId: envelope.batchId,
@@ -185,7 +251,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
         remoteHostname: observation.remoteHostname ?? null,
       };
       try {
-        insertObservation.run(stored);
+        insertObservation.run(row);
       } catch (error) {
         if (isRejectedObservationError(error)) {
           rejectedCount += 1;
@@ -194,9 +260,9 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
         throw error;
       }
       upsertAppHourly.run({
-        ...stored,
-        hourStart: Math.floor(stored.lastObservedAt / 3_600_000) * 3_600_000,
-        appIdentity: stored.bundleId || stored.processName,
+        ...row,
+        hourStart: Math.floor(row.lastObservedAt / 3_600_000) * 3_600_000,
+        appIdentity: row.bundleId || row.processName,
       });
       acceptedCount += 1;
       acceptedObservationIds.push(observation.observationId);
@@ -262,7 +328,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
     duplicateCount,
     rejectedCount,
     receivedAt,
-  }, false, acceptedObservationIds);
+  }, false, acceptedObservationIds, completedCount);
 }
 
 function pruneObservations({ before }) {
