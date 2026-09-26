@@ -1610,14 +1610,25 @@ public sealed partial class ObservationStore : IDisposable
                         Check(WinSqlite.BindInt64(statement, 1, item.ObservedAt.ToUniversalTime().UtcTicks));
                         Check(WinSqlite.BindInt64(statement, 2, flowId));
                         Bind(statement, 3, item.RemoteAddress);
-                        Check(WinSqlite.BindInt64(statement, 4, item.RemotePort));
+                        // The port and the process instance are the flow's
+                        // (both are in its key since v29), and only the
+                        // observation log reads them -- from the flow it
+                        // already joins. The instance alone was 61 of about
+                        // 130 bytes a row (P3-158). Empty and zero cost no
+                        // bytes; the address stays, because the counts, the
+                        // loopback filter and the destination chart read it
+                        // row by row, and joining for it cost a day's
+                        // analysis a quarter more time. A later migration
+                        // that regroups flows must take the port and the
+                        // instance from the flow, as the v29 one could not.
+                        Check(WinSqlite.BindInt64(statement, 4, 0));
                         BindNullable(statement, 5, item.BytesSent);
                         BindNullable(statement, 6, item.BytesReceived);
                         Bind(statement, 7, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport");
                         Bind(statement, 8, item.Source);
                         BindNullable(statement, 9, item.ProcessName);
                         BindNullable(statement, 10, NormalizeDomain(item.RemoteHostname));
-                        Bind(statement, 11, instanceId);
+                        Bind(statement, 11, string.Empty);
                         CheckDone(WinSqlite.Step(statement));
                         Check(WinSqlite.Reset(statement));
                         Check(WinSqlite.ClearBindings(statement));
@@ -2591,7 +2602,7 @@ public sealed partial class ObservationStore : IDisposable
             // No hostname column here -- enrichment lands on the flow, not on
             // the event, so this reads as unresolved rather than as wrong.
             const string columns = "o.observed_at,o.observed_at,fl.protocol,fl.local_address,fl.local_port,o.remote_address," +
-                "o.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),o.process_instance_id";
+                "fl.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),fl.process_instance_id";
             var sql = $"SELECT {columns} FROM observations o JOIN flows fl ON fl.rowid=o.flow_id LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"ORDER BY o.observed_at DESC,o.id DESC LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
@@ -2627,7 +2638,7 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate)
         {
             const string columns = "o.observed_at,o.observed_at,fl.protocol,fl.local_address,fl.local_port,o.remote_address," +
-                "o.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),o.process_instance_id";
+                "fl.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),fl.process_instance_id";
             var sql = $"SELECT {columns},o.id FROM observations o JOIN flows fl ON fl.rowid=o.flow_id LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"WHERE o.id>{afterId} ORDER BY o.id LIMIT {limit}";
             var rows = ReadRecentFlowQuery(sql, out var lastId);
