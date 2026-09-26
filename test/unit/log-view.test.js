@@ -266,6 +266,23 @@ describe('Connection Log view behavior', () => {
     assert.deepEqual(tbody.children[0].children.map(cell => cell.tagName), Array(10).fill('TD'));
   });
 
+  // P3-174: a LAN, loopback or CGNAT destination has no country; the
+  // server names its network and the cell shows that, without a flag.
+  it('shows the network name in the country cell when the server gives one', async () => {
+    const h = makeHarness({
+      rows: [
+        { src: '192.0.2.10', dst: '192.168.1.1', dport: 53, proto: 'UDP', country: '', network: 'LAN' },
+        { src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP', country: 'JP' },
+      ],
+    });
+    h.context.updateLogView();
+    await h.settle();
+
+    const countryCells = h.getEl('log-tbody').children.map(row => row.children[7].textContent.trim());
+    assert.deepEqual(countryCells.map(text => text.replace(/^\S*\s/, '')), ['LAN', 'JP']);
+    assert.equal(countryCells[0], 'LAN', 'no flag in front of a network name');
+  });
+
   it('shows multiple Agent applications without replacing them with a port guess', async () => {
     const h = makeHarness({
       rows: [{

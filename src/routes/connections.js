@@ -7,6 +7,7 @@ const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
 const { parseTimestamp } = require('../utils');
 const { streamConnectionExport } = require('../connection-export');
+const { networkName } = require('../special-use-address');
 const logger = require('../logger');
 const {
   sourceScopeShape, validateSourceScopePair, requireKnownSourceScope,
@@ -334,6 +335,18 @@ function attachThreats(connections, threatIntel) {
   }));
 }
 
+/**
+ * `network` is what the log's country column shows for a LAN, loopback or
+ * CGNAT destination (P3-174). Absent otherwise, so a row with a country is
+ * unchanged. The filter matches the same word in SQL (countryLikeSql).
+ */
+function attachNetworkNames(connections) {
+  return connections.map(connection => {
+    const network = networkName(connection.dst);
+    return network ? { ...connection, network } : connection;
+  });
+}
+
 function attachApplications(connections, history, sourceScope, from, to) {
   if (typeof history.attachAgentAttributions !== 'function') return connections;
   return history.attachAgentAttributions(connections, { sourceScope, from, to });
@@ -632,7 +645,7 @@ function connectionsRoutes(ctx) {
       if (['safe', 'warn', 'danger'].includes(fThreat)) {
         const result = queryThreatFilteredPage(history, threatIntel, from, to, clampedLimit, offset, opts, fThreat);
         return res.json({
-          connections: attachApplications(result.connections, history, opts.sourceScope, from, to),
+          connections: attachNetworkNames(attachApplications(result.connections, history, opts.sourceScope, from, to)),
           total: result.total,
           limit: clampedLimit,
           offset,
@@ -652,9 +665,9 @@ function connectionsRoutes(ctx) {
       }, () => history.countByTimeRange(from, to, {
         filters: opts.filters, sourceScope: opts.sourceScope,
       }), { from, to });
-      const connections = attachApplications(attachThreats(
+      const connections = attachNetworkNames(attachApplications(attachThreats(
         history.queryByTimeRangePaged(from, to, clampedLimit, offset, opts), threatIntel
-      ), history, opts.sourceScope, from, to);
+      ), history, opts.sourceScope, from, to));
       return res.json({ connections, total, limit: clampedLimit, offset, serverTime: Date.now() });
     }
 
@@ -665,11 +678,11 @@ function connectionsRoutes(ctx) {
     const fThreat = query.fThreat;
     if (['safe', 'warn', 'danger'].includes(fThreat)) {
       const result = queryThreatFilteredPage(history, threatIntel, from, to, MAX_FULL_FETCH, 0, opts, fThreat);
-      return sendLargeJson(req, res, { connections: result.connections, truncated: result.truncated, serverTime: Date.now() });
+      return sendLargeJson(req, res, { connections: attachNetworkNames(result.connections), truncated: result.truncated, serverTime: Date.now() });
     }
-    let connections = attachThreats(
+    const connections = attachNetworkNames(attachThreats(
       history.queryByTimeRangePaged(from, to, MAX_FULL_FETCH, 0, opts), threatIntel
-    );
+    ));
     const truncated = connections.length >= MAX_FULL_FETCH;
     sendLargeJson(req, res, { connections, truncated, serverTime: Date.now() });
   });
@@ -680,6 +693,7 @@ function connectionsRoutes(ctx) {
 module.exports = connectionsRoutes;
 module.exports._attachThreats = attachThreats;
 module.exports._attachApplications = attachApplications;
+module.exports._attachNetworkNames = attachNetworkNames;
 module.exports._matchesThreatFilter = matchesThreatFilter;
 module.exports._parseTimestampParam = parseTimestampParam;
 module.exports._parsePaginationOpts = parsePaginationOpts;

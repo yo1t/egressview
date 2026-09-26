@@ -5,7 +5,7 @@ const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  _attachApplications, _attachThreats, _parseTimestampParam, _parsePaginationOpts,
+  _attachApplications, _attachNetworkNames, _attachThreats, _parseTimestampParam, _parsePaginationOpts,
   _resetReadCacheForTest, MAX_LIMIT, SERVER_FILTER_COLS,
 } = require('../../src/routes/connections');
 
@@ -82,6 +82,19 @@ describe('connections route: Agent application attribution', () => {
 });
 
 // ─── _parseTimestampParam helper ──────────────────────────────────────────────
+
+describe('connections route: network names (P3-174)', () => {
+  it('names LAN, loopback and CGNAT destinations and leaves every other row as it was', () => {
+    const rows = [
+      { dst: '192.168.1.1', country: '' }, { dst: '127.0.0.1' }, { dst: '100.100.1.1' },
+      { dst: 'fe80::1' }, { dst: '8.8.8.8', country: 'US' }, { dst: '224.0.0.251' },
+    ];
+    const named = _attachNetworkNames(rows);
+    assert.deepEqual(named.map(row => row.network), ['LAN', 'loopback', 'CGNAT', 'LAN', undefined, undefined]);
+    assert.equal(named[4], rows[4], 'a row with nothing to add is the same object');
+    assert.equal(rows[0].network, undefined, 'the rows handed in are not changed');
+  });
+});
 
 describe('connections route: _parseTimestampParam', () => {
   function mockRes() {

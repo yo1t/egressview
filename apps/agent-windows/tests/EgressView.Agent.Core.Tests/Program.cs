@@ -3530,14 +3530,18 @@ try
                 directoryOfRepo = directoryOfRepo.Parent;
             Assert(directoryOfRepo is not null, "the Hub's special-use list is found from the test's location");
             var hubRanges = Regex.Matches(File.ReadAllText(Path.Combine(directoryOfRepo!.FullName, "src", "special-use-address.js")),
-                    @"\[\s*'([0-9a-fA-F.:]+)'\s*,\s*(\d+)\s*\]")
-                .Select(match => (Network: match.Groups[1].Value, Prefix: int.Parse(match.Groups[2].Value)))
+                    @"\[\s*'([0-9a-fA-F.:]+)'\s*,\s*(\d+)\s*(?:,\s*'([A-Za-z]+)'\s*)?\]")
+                .Select(match => (Network: match.Groups[1].Value, Prefix: int.Parse(match.Groups[2].Value),
+                    Shown: match.Groups[3].Success ? match.Groups[3].Value : null))
                 .ToArray();
             Assert(hubRanges.Length == 25, $"the Hub's list has its fifteen IPv4 and ten IPv6 ranges, not {hubRanges.Length}");
-            foreach (var (network, prefix) in hubRanges)
+            foreach (var (network, prefix, shown) in hubRanges)
             {
                 Assert(PrivateAddress.Ranges.Any(range => range.Network == network && range.PrefixLength == prefix),
                     $"the Hub excludes {network}/{prefix}, and so does the Agent");
+                // The log names a destination the same way on both (P3-174).
+                Assert(PrivateAddress.Ranges.Single(range => range.Network == network && range.PrefixLength == prefix).Shown == shown,
+                    $"the Hub shows {network}/{prefix} as {shown ?? "its country"}, and so does the Agent");
                 // And the rule, not only the table: the range's first and last
                 // address are both excluded.
                 var first = System.Net.IPAddress.Parse(network);
