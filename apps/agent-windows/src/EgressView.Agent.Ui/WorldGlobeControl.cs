@@ -41,6 +41,16 @@ public sealed class WorldGlobeControl : FrameworkElement
 
     protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
 
+    private bool suspended;
+
+    /// Stops the frames without forgetting the rotation, for a minimized
+    /// window (P3-130): IsVisible stays true when the window is minimized, and
+    /// 0.1.127 spent 8.7% of a core turning a globe nobody could see.
+    public bool Suspended
+    {
+        set { suspended = value; ReconcileTimer(); }
+    }
+
     public bool IsRotating
     {
         get => rotating;
@@ -74,7 +84,7 @@ public sealed class WorldGlobeControl : FrameworkElement
 
     private void ReconcileTimer()
     {
-        if (IsVisible && rotating)
+        if (IsVisible && rotating && !suspended)
         {
             previousFrame = DateTimeOffset.UtcNow;
             timer.Start();
@@ -189,7 +199,13 @@ public sealed class WorldGlobeControl : FrameworkElement
             foreach (var coordinate in ring)
             {
                 var projected = Project(coordinate.Lat, coordinate.Lon, center, radius);
-                if (projected is { } point) segment.Add(point);
+                // The same pixel spacing as the lines: a filled outline pays
+                // per vertex too, and a visited country's is redrawn every
+                // frame the globe turns.
+                if (projected is { } point)
+                {
+                    if (segment.Count == 0 || (point - segment[^1]).Length >= MinimumVertexSpacing) segment.Add(point);
+                }
                 else Flush(segment, context);
             }
             Flush(segment, context);
@@ -228,7 +244,11 @@ public sealed class WorldGlobeControl : FrameworkElement
             {
                 var projected = Project(step.Latitude, step.Longitude, center, radius);
                 var onThisSide = projected is not null;
-                if (onThisSide == visible) run.Add(projected ?? Clamp(step.Latitude, step.Longitude, center, radius));
+                if (onThisSide == visible)
+                {
+                    var point = projected ?? Clamp(step.Latitude, step.Longitude, center, radius);
+                    if (run.Count == 0 || (point - run[^1]).Length >= MinimumVertexSpacing) run.Add(point);
+                }
                 else Flush(run, context);
             }
             Flush(run, context);
@@ -274,6 +294,7 @@ public sealed class WorldGlobeControl : FrameworkElement
         using (var context = geometry.Open())
         {
             var run = new List<Point>();
+            Point? skipped = null;
             foreach (var line in lines)
             {
                 Point? prior = null;
@@ -281,18 +302,29 @@ public sealed class WorldGlobeControl : FrameworkElement
                 {
                     var point = Project(coordinate.Lat, coordinate.Lon, center, radius);
                     if (point is null || (prior is not null && (point.Value - prior.Value).Length >= radius * 0.35))
-                        Flush(run, context);
-                    if (point is not null) run.Add(point.Value);
+                        Flush(run, ref skipped, context);
+                    if (point is { } kept)
+                    {
+                        // Less than a pixel from the last point kept draws
+                        // nothing a reader can see, and the render thread
+                        // pays for every vertex every frame (P3-130). The
+                        // last point of a run is always kept, so a line still
+                        // ends where it ended.
+                        if (run.Count > 0 && (kept - run[^1]).Length < MinimumVertexSpacing) skipped = kept;
+                        else { run.Add(kept); skipped = null; }
+                    }
                     prior = point;
                 }
-                Flush(run, context);
+                Flush(run, ref skipped, context);
             }
         }
         geometry.Freeze();
         return geometry;
 
-        static void Flush(List<Point> run, StreamGeometryContext context)
+        static void Flush(List<Point> run, ref Point? skipped, StreamGeometryContext context)
         {
+            if (skipped is { } last) run.Add(last);
+            skipped = null;
             if (run.Count >= 2)
             {
                 context.BeginFigure(run[0], isFilled: false, isClosed: false);
@@ -301,6 +333,15 @@ public sealed class WorldGlobeControl : FrameworkElement
             run.Clear();
         }
     }
+
+    /// Screen distance below which a projected point is dropped.
+    ///
+    /// One pixel. After the change to one geometry per pen, the rotating
+    /// globe still cost 21.6% of a core at 15 frames a second in a 1800x1304
+    /// window: the render thread strokes every vertex every frame, and at
+    /// that size most of the coastline's points land within a pixel of the
+    /// one before.
+    internal const double MinimumVertexSpacing = 1.0;
 
     private Point? Project(double latitude, double pointLongitude, Point center, double radius)
     {

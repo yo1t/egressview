@@ -141,7 +141,30 @@ internal static class Entry
             if (instructions > 500)
                 throw new InvalidOperationException(
                     $"the globe issues {instructions:N0} drawing instructions a frame; draw each pen's lines as one geometry");
-            Console.WriteLine($"globe: {instructions} drawing instructions a frame");
+            // And how many vertices those instructions carry, since one
+            // geometry can still be expensive: after the change above the
+            // rotating globe still cost 21.6% of a core at 15 frames a second,
+            // stroking every vertex every frame when most of the coastline's
+            // points landed within a pixel of the one before.
+            static int Vertices(Drawing? drawing) => drawing switch
+            {
+                DrawingGroup group => group.Children.Sum(Vertices),
+                GeometryDrawing { Geometry: { } geometry } => PathGeometry.CreateFromGeometry(geometry).Figures
+                    .Sum(figure => 1 + figure.Segments.Sum(segment => segment switch
+                    {
+                        PolyLineSegment poly => poly.Points.Count,
+                        LineSegment => 1,
+                        _ => 1,
+                    })),
+                _ => 0,
+            };
+            var vertices = Vertices(VisualTreeHelper.GetDrawing(globe));
+            // 3,701 with points closer than a pixel dropped, 5,287 without,
+            // for this 330x260 globe. The gate sits between them.
+            if (vertices > 4_500)
+                throw new InvalidOperationException(
+                    $"the globe strokes {vertices:N0} vertices a frame; drop points closer than a pixel to the last one kept");
+            Console.WriteLine($"globe: {instructions} drawing instructions, {vertices:N0} vertices a frame");
         }
 
         var countryMap = new WorldCountryMapControl();
