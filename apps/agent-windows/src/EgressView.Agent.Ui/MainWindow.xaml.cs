@@ -663,7 +663,7 @@ public partial class MainWindow : Window
             (destination.Length == 0 || flow.RemoteAddress.Contains(destination, StringComparison.OrdinalIgnoreCase) ||
                 (flow.RemoteHostname?.Contains(destination, StringComparison.CurrentCultureIgnoreCase) ?? false)) &&
             (port.Length == 0 || flow.RemotePort.ToString(CultureInfo.InvariantCulture).Contains(port, StringComparison.Ordinal)) &&
-            (country == "all" || (country == "unknown" ? string.IsNullOrWhiteSpace(flow.CountryCode) : string.Equals(flow.CountryCode, country, StringComparison.OrdinalIgnoreCase))) &&
+            (country == "all" || string.Equals(FlowRow.CountryKey(flow) ?? "unknown", country, StringComparison.OrdinalIgnoreCase)) &&
             (protocol == "all" || flow.Protocol == protocol) &&
             (volume == "all" || (volume == "measured" ? flow.BytesSent is not null && flow.BytesReceived is not null : flow.BytesSent is null || flow.BytesReceived is null)) &&
             (collector == "all" || flow.Origin == collector)).ToArray();
@@ -739,8 +739,14 @@ public partial class MainWindow : Window
         var selected = SelectedTag(CountryFilter);
         CountryFilter.Items.Clear();
         CountryFilter.Items.Add(new ComboBoxItem { Tag = "all", Content = LocalizationManager.Text("AllCountries") });
-        foreach (var code in rawFlows.Select(flow => flow.CountryCode).Where(code => !string.IsNullOrWhiteSpace(code)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(code => code))
+        var keys = rawFlows.Select(FlowRow.CountryKey).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var code in keys.Where(key => !PrivateAddress.IsNetworkName(key)).OrderBy(code => code))
             CountryFilter.Items.Add(new ComboBoxItem { Tag = code, Content = code });
+        // After the countries and before unknown, in a fixed order, and only
+        // when the log has one: a choice that can only ever show nothing is
+        // not one.
+        foreach (var name in PrivateAddress.NetworkNames.Where(keys.Contains))
+            CountryFilter.Items.Add(new ComboBoxItem { Tag = name, Content = name });
         CountryFilter.Items.Add(new ComboBoxItem { Tag = "unknown", Content = LocalizationManager.Text("UnknownCountry") });
         CountryFilter.SelectedItem = CountryFilter.Items.Cast<ComboBoxItem>().FirstOrDefault(item => string.Equals(item.Tag?.ToString(), selected, StringComparison.OrdinalIgnoreCase)) ?? CountryFilter.Items[0];
     }
@@ -2733,9 +2739,19 @@ public sealed class FlowRow(RecentFlow value, bool spansTime = true, DateTimeOff
         }
     }
     public int Port => value.RemotePort;
-    public string Country => value.CountryCode is { Length: 2 } code
-        ? CountryHistoryDisplayRow.LocalizedCountryName(code, LocalizationManager.EffectiveLanguage)
-        : LocalizationManager.Text("Unknown");
+    public string Country => CountryKey(value) switch
+    {
+        null => LocalizationManager.Text("Unknown"),
+        var name when PrivateAddress.IsNetworkName(name) => name,
+        var code => CountryHistoryDisplayRow.LocalizedCountryName(code, LocalizationManager.EffectiveLanguage),
+    };
+
+    /// What the country column and its filter both go by: "LAN", "loopback"
+    /// or "CGNAT" for those destinations, otherwise the two-letter country,
+    /// otherwise null. The network comes first -- a LAN address has no
+    /// country, whatever a table might say about it (P3-174).
+    public static string? CountryKey(RecentFlow flow) =>
+        PrivateAddress.NetworkName(flow.RemoteAddress) ?? (flow.CountryCode is { Length: 2 } code ? code : null);
     public string Protocol => value.Protocol;
     public string BytesReceivedText => FormatBytes(value.BytesReceived);
     public string BytesSentText => FormatBytes(value.BytesSent);

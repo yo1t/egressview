@@ -26,42 +26,70 @@ public static class PrivateAddress
     /// octet, and six of the Hub's ranges were not in it: 192.88.99.0/24 and,
     /// in IPv6, NAT64, discard-only, Teredo, documentation and 6to4. Nothing
     /// said so, because nothing compared the two.
-    internal static readonly (string Network, int PrefixLength)[] Ranges =
+    ///
+    /// Shown is what the log's country column says for a destination in the
+    /// range (P3-174). A LAN device has no country, and "unknown" put the
+    /// home router beside the addresses nobody could place. The rest of the
+    /// reserved ranges stay unknown: nothing on a LAN is a documentation or
+    /// multicast destination one needs named.
+    internal static readonly (string Network, int PrefixLength, string? Shown)[] Ranges =
     [
-        ("0.0.0.0", 8),          // this network
-        ("10.0.0.0", 8),         // private (RFC 1918)
-        ("100.64.0.0", 10),      // shared address space / CGNAT (RFC 6598)
-        ("127.0.0.0", 8),        // loopback
-        ("169.254.0.0", 16),     // link-local, incl. cloud metadata
-        ("172.16.0.0", 12),      // private (RFC 1918)
-        ("192.0.0.0", 24),       // IETF protocol assignments
-        ("192.0.2.0", 24),       // TEST-NET-1 (documentation)
-        ("192.88.99.0", 24),     // 6to4 relay anycast (deprecated)
-        ("192.168.0.0", 16),     // private (RFC 1918)
-        ("198.18.0.0", 15),      // benchmarking (RFC 2544)
-        ("198.51.100.0", 24),    // TEST-NET-2 (documentation)
-        ("203.0.113.0", 24),     // TEST-NET-3 (documentation)
-        ("224.0.0.0", 4),        // multicast
-        ("240.0.0.0", 4),        // reserved, incl. broadcast
-        ("::", 128),             // unspecified
-        ("::1", 128),            // loopback
-        ("64:ff9b::", 96),       // NAT64
-        ("100::", 64),           // discard-only
-        ("2001::", 32),          // Teredo
-        ("2001:db8::", 32),      // documentation
-        ("2002::", 16),          // 6to4
-        ("fc00::", 7),           // unique local
-        ("fe80::", 10),          // link-local
-        ("fec0::", 10),          // site-local (deprecated; not in the Hub's list, kept from before)
-        ("ff00::", 8),           // multicast
+        ("0.0.0.0", 8, null),            // this network
+        ("10.0.0.0", 8, Lan),            // private (RFC 1918)
+        ("100.64.0.0", 10, Cgnat),       // shared address space / CGNAT (RFC 6598)
+        ("127.0.0.0", 8, Loopback),      // loopback
+        ("169.254.0.0", 16, Lan),        // link-local, incl. cloud metadata
+        ("172.16.0.0", 12, Lan),         // private (RFC 1918)
+        ("192.0.0.0", 24, null),         // IETF protocol assignments
+        ("192.0.2.0", 24, null),         // TEST-NET-1 (documentation)
+        ("192.88.99.0", 24, null),       // 6to4 relay anycast (deprecated)
+        ("192.168.0.0", 16, Lan),        // private (RFC 1918)
+        ("198.18.0.0", 15, null),        // benchmarking (RFC 2544)
+        ("198.51.100.0", 24, null),      // TEST-NET-2 (documentation)
+        ("203.0.113.0", 24, null),       // TEST-NET-3 (documentation)
+        ("224.0.0.0", 4, null),          // multicast
+        ("240.0.0.0", 4, null),          // reserved, incl. broadcast
+        ("::", 128, null),               // unspecified
+        ("::1", 128, Loopback),          // loopback
+        ("64:ff9b::", 96, null),         // NAT64
+        ("100::", 64, null),             // discard-only
+        ("2001::", 32, null),            // Teredo
+        ("2001:db8::", 32, null),        // documentation
+        ("2002::", 16, null),            // 6to4
+        ("fc00::", 7, Lan),              // unique local
+        ("fe80::", 10, Lan),             // link-local
+        ("fec0::", 10, null),            // site-local (deprecated; not in the Hub's list, kept from before)
+        ("ff00::", 8, null),             // multicast
     ];
 
-    private static readonly (byte[] Network, int PrefixLength, AddressFamily Family)[] parsedRanges =
+    private static readonly (byte[] Network, int PrefixLength, AddressFamily Family, string? Shown)[] parsedRanges =
         [.. Ranges.Select(range =>
         {
             var network = IPAddress.Parse(range.Network);
-            return (network.GetAddressBytes(), range.PrefixLength, network.AddressFamily);
+            return (network.GetAddressBytes(), range.PrefixLength, network.AddressFamily, range.Shown);
         })];
+
+    public const string Lan = "LAN";
+    public const string Loopback = "loopback";
+    public const string Cgnat = "CGNAT";
+
+    /// In the order the log's filter lists them.
+    public static readonly IReadOnlyList<string> NetworkNames = [Lan, Loopback, Cgnat];
+
+    public static bool IsNetworkName(string? value) => value is Lan or Loopback or Cgnat;
+
+    /// "LAN", "loopback" or "CGNAT" for a destination in one of those ranges;
+    /// null for everything else, including what does not parse. The same
+    /// words in either language.
+    public static string? NetworkName(string? address)
+    {
+        if (TryParse(address) is not { } parsed) return null;
+        if (parsed.IsIPv4MappedToIPv6) parsed = parsed.MapToIPv4();
+        var bytes = parsed.GetAddressBytes();
+        foreach (var (network, prefix, family, shown) in parsedRanges)
+            if (family == parsed.AddressFamily && Within(bytes, network, prefix)) return shown;
+        return null;
+    }
 
     /// Whether this is an address nothing outside this network can place.
     ///
@@ -76,7 +104,7 @@ public static class PrivateAddress
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
         if (address.AddressFamily is not (AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)) return true;
         var bytes = address.GetAddressBytes();
-        foreach (var (network, prefix, family) in parsedRanges)
+        foreach (var (network, prefix, family, _) in parsedRanges)
             if (family == address.AddressFamily && Within(bytes, network, prefix)) return true;
         return false;
     }
