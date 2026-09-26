@@ -22,6 +22,7 @@
 
 const logger   = require('./logger');
 const fs       = require('fs');
+const { followCheck } = require('./startup-progress');
 const path     = require('path');
 const Database = require('better-sqlite3');
 const {
@@ -1348,7 +1349,7 @@ function runMigrations(db, dbPath, ctx = {}) {
   const pending = MIGRATIONS.filter(m => m.version > currentVersion);
 
   if (pending.length === 0) return;
-  ctx.onProgress?.('migration');
+  ctx.onProgress?.('migration-backup');
 
   const isOnDisk = dbPath && dbPath !== ':memory:';
 
@@ -1368,7 +1369,10 @@ function runMigrations(db, dbPath, ctx = {}) {
     : '';
 
   // Apply each pending migration in its own transaction
-  for (const mig of pending) {
+  for (const [index, mig] of pending.entries()) {
+    // Which step of how many: the only honest measure of a migration's
+    // progress, since its steps take nothing like equal times (P3-173).
+    ctx.onProgress?.('migration', { step: index + 1, total: pending.length, version: mig.version });
     logger.info(`[migrate] Applying v${mig.version}: ${mig.description}`);
     try {
       db.transaction(() => {
@@ -1384,7 +1388,11 @@ function runMigrations(db, dbPath, ctx = {}) {
 
   // Post-migration verification: the DB must be healthy and fully upgraded
   // before normal startup continues.
-  const ic = db.pragma('integrity_check')[0]?.integrity_check;
+  const ic = followCheck(
+    { dbPath: isOnDisk ? dbPath : null, mode: 'full', phase: 'migration-verify', onProgress: ctx.onProgress },
+    () => db.pragma('integrity_check')[0]?.integrity_check,
+    result => result === 'ok'
+  );
   if (ic !== 'ok') {
     const msg = `[migrate] Post-migration integrity_check returned '${ic}'.${recoveryHint}`;
     logger.error(msg);
