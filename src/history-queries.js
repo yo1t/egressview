@@ -4,6 +4,7 @@
 const { BUCKET_MS: FOLDED_WINDOW_MS } = require('./connection-buckets');
 const { createDestinationLabels } = require('./destination-labels');
 const { pollGaps } = require('./router-poll-windows');
+const { countryLikeSql } = require('./special-use-address');
 
 const SORT_COL_SQL = {
   lastSeen: 'lastSeen',
@@ -42,6 +43,14 @@ function buildFilterConditions(filters) {
   for (const column of ['dst', 'dport', 'proto', 'country', 'org']) {
     if (!filters[column]?.value) continue;
     const pattern = makeLikePat(filters[column].mode, filters[column].value);
+    if (column === 'country') {
+      // What the column shows: LAN, loopback or CGNAT for those
+      // destinations, otherwise the country (P3-174).
+      const country = countryLikeSql('dst', "COALESCE(country, '')", pattern);
+      conditions.push(country.sql);
+      params.push(...country.params);
+      continue;
+    }
     if (column === 'dst') conditions.push("(dst LIKE ? ESCAPE '\\' OR dstHost LIKE ? ESCAPE '\\')");
     else if (column === 'dport') conditions.push("CAST(dport AS TEXT) LIKE ? ESCAPE '\\'");
     else conditions.push(`${column} LIKE ? ESCAPE '\\'`);

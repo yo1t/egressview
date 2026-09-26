@@ -216,7 +216,7 @@ function getLogCellValue(c, col) {
     case 'dport':   return String(c.dport);
     case 'app':     return appLabel(c);
     case 'proto':   return c.proto;
-    case 'country': return c.country || '';
+    case 'country': return c.network || c.country || '';
     case 'org':     return c.org || '';
     case 'lastSeen': return String(c.lastSeen || 0);
     default: return '';
@@ -564,7 +564,9 @@ function createLogRow(connection) {
   row.appendChild(createAppCell(connection));
   row.appendChild(createAppTrafficCell(connection));
   appendLogCell(row, connection.proto);
-  appendLogCell(row, `${flag} ${connection.country || ''}`);
+  // LAN, loopback or CGNAT in place of a country the address cannot have
+  // (P3-174), and without a flag.
+  appendLogCell(row, connection.network || `${flag} ${connection.country || ''}`);
   appendLogCell(row, connection.org || '', { className: 'log-org-cell', title: connection.org || '' });
   appendLogCell(row, timeText);
   return row;
@@ -725,7 +727,7 @@ function connectionSignature(c) {
     c.bytes || 0,
     c.threat?.tag || '',
     appLabel(c),
-    c.country || '',
+    c.network || c.country || '',
     c.org || '',
     c.dstHost || '',
   ].join('|');
