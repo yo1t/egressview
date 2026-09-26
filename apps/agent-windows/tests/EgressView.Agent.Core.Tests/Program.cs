@@ -4027,8 +4027,14 @@ try
         // full read rather than the trusting one.
         foreach (var suffix in new[] { "-wal", "-shm" }) File.Delete(damagedDatabase + suffix);
         var damaged = File.ReadAllBytes(damagedDatabase);
-        // Well past the header, in the middle of the content.
-        for (var offset = damaged.Length / 2; offset < damaged.Length / 2 + 512 && offset < damaged.Length; offset++)
+        // Well past the header, in the middle of the content: the start of a
+        // page, where its header and cell pointers are. It had been the
+        // file's middle byte, wherever that fell; when the rows grew smaller
+        // (P3-158) it fell inside a record's values, which no quick check
+        // can tell from data, and the test failed for a reason that was not
+        // the one it states.
+        var middlePage = damaged.Length / 2 / 4096 * 4096;
+        for (var offset = middlePage; offset < middlePage + 512 && offset < damaged.Length; offset++)
             damaged[offset] ^= 0xFF;
         File.WriteAllBytes(damagedDatabase, damaged);
         AssertStoreOpenFails(() => new ObservationStore(damagedDatabase), StoreFailureKind.Corrupt,
@@ -4141,6 +4147,32 @@ try
         Assert(events[0].LastSeen > events[^1].LastSeen, "events are newest first");
         Assert(events.All(row => row.ProcessName == "LongLived" && row.RemotePort == 443),
             "the per-observation reading carries the same identity as the per-conversation one");
+        Assert(events.All(row => row.RemoteAddress == "100.64.0.10" && row.ProcessInstanceId == conversations[0].ProcessInstanceId),
+            "and its destination and process instance (the port and the instance come from the conversation, P3-158)");
+        // The rows no longer repeat the port and the process instance their
+        // flow holds: the instance alone was 61 of about 130 bytes a row
+        // (P3-158). The address stays, for the readers that go row by row.
+        {
+            WinSqlite.Open(logDatabase, out var raw, WinSqlite.OpenReadOnly, 0);
+            try
+            {
+                string Text(string sql)
+                {
+                    WinSqlite.Prepare(raw, sql, -1, out var statement, 0);
+                    try
+                    {
+                        return WinSqlite.Step(statement) == WinSqlite.Row
+                            ? System.Runtime.InteropServices.Marshal.PtrToStringUTF8(WinSqlite.ColumnText(statement, 0)) ?? "" : "(none)";
+                    }
+                    finally { WinSqlite.Finalize(statement); }
+                }
+                Assert(Text("SELECT COUNT(*) FROM observations WHERE remote_address='100.64.0.10' AND remote_port=0 AND process_instance_id=''") == "6",
+                    "an observation keeps its destination address and stores no copy of its flow's port or process instance");
+                Assert(Text("SELECT remote_address||'|'||remote_port||'|'||(process_instance_id<>'') FROM flows") == "100.64.0.10|443|1",
+                    "the flow keeps them");
+            }
+            finally { WinSqlite.Close(raw); }
+        }
         Assert(events.Sum(row => row.BytesSent ?? 0) == 6 * 256 && conversations[0].BytesSent == 6 * 256,
             "both readings account for the same bytes even though the row counts differ");
         Assert(reading.ReadRecentObservations(50, 4).Count == 2,
