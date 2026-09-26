@@ -207,9 +207,9 @@ describe('外れた理由を、外れた数と一緒に記録する（P3-139）'
     const label = connectionsRoutes._summaryRangeLabel;
     const now = Date.now();
     assert.equal(label(null, null), 'all');
-    assert.equal(label(now - 3_600_000, null), '<=1h');
-    assert.equal(label(now - 86_400_000, null), '<=24h');
-    assert.equal(label(now - 14 * 86_400_000, null), '<=14d');
+    assert.equal(label(now - 59 * 60_000, null), '<=1h');
+    assert.equal(label(now - 23 * 3_600_000, null), '<=24h');
+    assert.equal(label(now - 13 * 86_400_000, null), '<=14d');
     assert.equal(label(now - 30 * 86_400_000, null), '>14d');
     assert.equal(label(null, now), 'open-start');
   });
