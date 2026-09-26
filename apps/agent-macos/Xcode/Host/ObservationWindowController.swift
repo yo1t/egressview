@@ -648,7 +648,7 @@ struct AgentMainView: View {
                 .width(min: 180, ideal: 280)
                 TableColumn(L("Country"), value: \.countryName) { row in
                     Text(row.countryName)
-                        .foregroundStyle(row.countryCode == nil ? .secondary : .primary)
+                        .foregroundStyle(row.countryKey == nil ? .secondary : .primary)
                 }
                 .width(min: 90, ideal: 120)
                 TableColumn(L("Data volume"), value: \.bytesSort) { row in
@@ -752,6 +752,12 @@ struct AgentLogFilterBar: View {
             Divider()
             ForEach(model.availableCountries, id: \.code) { entry in
                 Text(entry.name).tag(CountryChoice.code(entry.code))
+            }
+            if !model.availableNetworks.isEmpty {
+                Divider()
+                ForEach(model.availableNetworks, id: \.self) { name in
+                    Text(name).tag(CountryChoice.code(name))
+                }
             }
         }
         .labelsHidden()

@@ -22,6 +22,9 @@ struct AgentObservationRow: Identifiable {
     let id: String
     let observation: ConnectionObservation
     let countryCode: String?
+    /// LAN, loopback or CGNAT for those destinations (P3-174). Held, like
+    /// destinationText, so the column, its menu and its filter agree.
+    let networkName: String?
     /// What the destination column shows. Held rather than recomputed so that
     /// sorting, filtering and display can never disagree about it.
     let destinationText: String
@@ -61,7 +64,12 @@ struct AgentObservationRow: Identifiable {
     var application: String {
         observation.processName.isEmpty ? "PID \(observation.processID)" : observation.processName
     }
+    /// What the country column, its menu and its filter all go by: the
+    /// network first -- a LAN address has no country, whatever a table might
+    /// say -- then the country.
+    var countryKey: String? { networkName ?? countryCode }
     var countryName: String {
+        if let networkName { return networkName }
         guard let countryCode else { return L("Unknown") }
         return Locale.current.localizedString(forRegionCode: countryCode) ?? countryCode
     }
@@ -190,7 +198,7 @@ final class AgentMainViewModel: ObservableObject {
         if key == visibleRowsKey { return cachedVisibleRows }
         let rows = observationRows.filter {
             logFilter.matches(
-                $0.observation, destinationText: $0.destinationText, countryCode: $0.countryCode
+                $0.observation, destinationText: $0.destinationText, countryCode: $0.countryKey
             )
         }.sorted(using: logSort)
         // Caching inside a getter needs the box to be mutable; the model is
@@ -204,10 +212,17 @@ final class AgentMainViewModel: ObservableObject {
     /// Countries actually present, so the menu never offers a choice that
     /// matches nothing.
     var availableCountries: [(code: String, name: String)] {
-        let codes = Set(observationRows.compactMap(\.countryCode))
+        let codes = Set(observationRows.filter { $0.networkName == nil }.compactMap(\.countryCode))
         return codes.map {
             (code: $0, name: Locale.current.localizedString(forRegionCode: $0) ?? $0)
         }.sorted { $0.name < $1.name }
+    }
+
+    /// LAN, loopback and CGNAT, those present, in a fixed order after the
+    /// countries (P3-174).
+    var availableNetworks: [String] {
+        let present = Set(observationRows.compactMap(\.networkName))
+        return NonPublicAddress.networkNames.filter(present.contains)
     }
     @Published private(set) var summary = AgentPeriodSummary()
     @Published private(set) var localInsights: AgentLocalInsightSnapshot?
@@ -722,6 +737,7 @@ final class AgentMainViewModel: ObservableObject {
                                 ?? "\(observation.stableKey)|\(observation.firstObservedAt.timeIntervalSince1970)|\(index)",
                             observation: observation,
                             countryCode: countries[observation.remoteAddress],
+                            networkName: NonPublicAddress.networkName(observation.remoteAddress),
                             destinationText: Self.destinationText(observation, grouping: grouping)
                         )
                     }

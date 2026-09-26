@@ -25,41 +25,51 @@ import Foundation
 /// address range and never a returned name: a name test would miss another
 /// registry answering the same way.
 public enum NonPublicAddress {
-    /// IPv4 special-purpose ranges, as (dotted base, prefix bits).
-    static let ipv4Ranges: [(String, Int)] = [
-        ("0.0.0.0", 8),          // this network
-        ("10.0.0.0", 8),         // private (RFC 1918)
-        ("100.64.0.0", 10),      // shared address space / CGNAT (RFC 6598)
-        ("127.0.0.0", 8),        // loopback
-        ("169.254.0.0", 16),     // link-local, incl. cloud metadata
-        ("172.16.0.0", 12),      // private (RFC 1918)
-        ("192.0.0.0", 24),       // IETF protocol assignments
-        ("192.0.2.0", 24),       // TEST-NET-1 (documentation)
-        ("192.88.99.0", 24),     // 6to4 relay anycast (deprecated)
-        ("192.168.0.0", 16),     // private (RFC 1918)
-        ("198.18.0.0", 15),      // benchmarking (RFC 2544)
-        ("198.51.100.0", 24),    // TEST-NET-2 (documentation)
-        ("203.0.113.0", 24),     // TEST-NET-3 (documentation)
-        ("224.0.0.0", 4),        // multicast
-        ("240.0.0.0", 4),        // reserved, incl. broadcast
+    /// What the connection log's country column calls a destination in a
+    /// range (P3-174). A LAN device has no country, and "Unknown" put the home
+    /// router beside the addresses nobody could place. The same words in every
+    /// language; the Hub and the Windows Agent use them too.
+    public static let lan = "LAN"
+    public static let loopback = "loopback"
+    public static let cgnat = "CGNAT"
+    /// In the order the log's country menu lists them.
+    public static let networkNames = [lan, loopback, cgnat]
+
+    /// IPv4 special-purpose ranges, as (dotted base, prefix bits, shown as).
+    static let ipv4Ranges: [(String, Int, String?)] = [
+        ("0.0.0.0", 8, nil),             // this network
+        ("10.0.0.0", 8, lan),            // private (RFC 1918)
+        ("100.64.0.0", 10, cgnat),       // shared address space / CGNAT (RFC 6598)
+        ("127.0.0.0", 8, loopback),      // loopback
+        ("169.254.0.0", 16, lan),        // link-local, incl. cloud metadata
+        ("172.16.0.0", 12, lan),         // private (RFC 1918)
+        ("192.0.0.0", 24, nil),          // IETF protocol assignments
+        ("192.0.2.0", 24, nil),          // TEST-NET-1 (documentation)
+        ("192.88.99.0", 24, nil),        // 6to4 relay anycast (deprecated)
+        ("192.168.0.0", 16, lan),        // private (RFC 1918)
+        ("198.18.0.0", 15, nil),         // benchmarking (RFC 2544)
+        ("198.51.100.0", 24, nil),       // TEST-NET-2 (documentation)
+        ("203.0.113.0", 24, nil),        // TEST-NET-3 (documentation)
+        ("224.0.0.0", 4, nil),           // multicast
+        ("240.0.0.0", 4, nil),           // reserved, incl. broadcast
     ]
 
-    /// IPv6 special-purpose ranges, as (base, prefix bits).
+    /// IPv6 special-purpose ranges, as (base, prefix bits, shown as).
     ///
     /// IPv4-mapped addresses are absent on purpose: they are unwrapped to the
     /// embedded IPv4 address and answered by the list above, so `::ffff:10.0.0.1`
     /// and `10.0.0.1` cannot disagree.
-    static let ipv6Ranges: [(String, Int)] = [
-        ("::", 128),             // unspecified
-        ("::1", 128),            // loopback
-        ("64:ff9b::", 96),       // NAT64
-        ("100::", 64),           // discard-only
-        ("2001::", 32),          // Teredo
-        ("2001:db8::", 32),      // documentation
-        ("2002::", 16),          // 6to4
-        ("fc00::", 7),           // unique local
-        ("fe80::", 10),          // link-local
-        ("ff00::", 8),           // multicast
+    static let ipv6Ranges: [(String, Int, String?)] = [
+        ("::", 128, nil),                // unspecified
+        ("::1", 128, loopback),          // loopback
+        ("64:ff9b::", 96, nil),          // NAT64
+        ("100::", 64, nil),              // discard-only
+        ("2001::", 32, nil),             // Teredo
+        ("2001:db8::", 32, nil),         // documentation
+        ("2002::", 16, nil),             // 6to4
+        ("fc00::", 7, lan),              // unique local
+        ("fe80::", 10, lan),             // link-local
+        ("ff00::", 8, nil),              // multicast
     ]
 
     /// Whether this address is one nothing outside the network can place.
@@ -74,7 +84,7 @@ public enum NonPublicAddress {
         let bare = trimmed.split(separator: "%", maxSplits: 1).first.map(String.init) ?? trimmed
 
         if let value = ipv4ToUInt32(bare) {
-            return ipv4Ranges.contains { base, bits in
+            return ipv4Ranges.contains { base, bits, _ in
                 guard let start = ipv4ToUInt32(base) else { return false }
                 let size = UInt64(1) << UInt64(32 - bits)
                 return UInt64(value) >= UInt64(start) && UInt64(value) < UInt64(start) + size
@@ -88,10 +98,36 @@ public enum NonPublicAddress {
         }
 
         guard let hex = ipv6ToHex(bare) else { return false }
-        return ipv6Ranges.contains { base, bits in
+        return ipv6Ranges.contains { base, bits, _ in
             guard let baseHex = ipv6ToHex(base) else { return false }
             return sharesPrefix(hex, baseHex, bits: bits)
         }
+    }
+
+    /// "LAN", "loopback" or "CGNAT" for a destination in one of those ranges;
+    /// nil for everything else, including anything that is not an address.
+    public static func networkName(_ address: String) -> String? {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        guard !trimmed.isEmpty else { return nil }
+        let bare = trimmed.split(separator: "%", maxSplits: 1).first.map(String.init) ?? trimmed
+
+        if let value = ipv4ToUInt32(bare) {
+            return ipv4Ranges.first { base, bits, _ in
+                guard let start = ipv4ToUInt32(base) else { return false }
+                let size = UInt64(1) << UInt64(32 - bits)
+                return UInt64(value) >= UInt64(start) && UInt64(value) < UInt64(start) + size
+            }?.2
+        }
+        if let last = bare.split(separator: ":").last, last.contains("."),
+           ipv4ToUInt32(String(last)) != nil {
+            return networkName(String(last))
+        }
+        guard let hex = ipv6ToHex(bare) else { return nil }
+        return ipv6Ranges.first { base, bits, _ in
+            guard let baseHex = ipv6ToHex(base) else { return false }
+            return sharesPrefix(hex, baseHex, bits: bits)
+        }?.2
     }
 
     static func ipv4ToUInt32(_ address: String) -> UInt32? {
