@@ -67,6 +67,21 @@
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
     <Setter Property="LineHeight" Value="21"/>
   </Style>
+  <!-- Faint label over an empty text box, naming what it filters. Tag is the
+       text box; the label steps aside as soon as anything is typed. -->
+  <Style x:Key="FilterPlaceholderStyle" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+    <Setter Property="Opacity" Value="0.8"/>
+    <Setter Property="Margin" Value="11,0,0,0"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="IsHitTestVisible" Value="False"/>
+    <Setter Property="Visibility" Value="Collapsed"/>
+    <Style.Triggers>
+      <DataTrigger Binding="{Binding Tag.Text, RelativeSource={RelativeSource Self}}" Value="">
+        <Setter Property="Visibility" Value="Visible"/>
+      </DataTrigger>
+    </Style.Triggers>
+  </Style>
   <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
     <Setter Property="FontWeight" Value="SemiBold"/>
     <Setter Property="Margin" Value="0,0,0,6"/>
