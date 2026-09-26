@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private bool logStreaming;
     private bool logSnapshotReading;
     private bool refreshingVisible;
+    private DateTimeOffset visibleRefreshDueAt = DateTimeOffset.MinValue;
     private long logOmitted;
     private bool loadingSettings;
     private bool loadingDeliveryState;
@@ -84,7 +85,8 @@ public partial class MainWindow : Window
         IsVisibleChanged += (_, _) => { if (IsVisible) refreshTimer.Start(); else refreshTimer.Stop(); };
         refreshTimer.Tick += async (_, _) =>
         {
-            if (!IsVisible || WindowState == WindowState.Minimized || refreshingVisible) return;
+            if (!IsVisible || WindowState == WindowState.Minimized || refreshingVisible
+                || DateTimeOffset.UtcNow < visibleRefreshDueAt) return;
             refreshingVisible = true;
             try { await RefreshVisibleAsync(); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
@@ -199,7 +201,16 @@ public partial class MainWindow : Window
         RefreshNotifications();
     }
 
-    private Task RefreshVisibleAsync() => MainTabs.SelectedIndex switch
+    /// Every refresh of the shown tab, whatever asked for it, sets when the
+    /// timer may ask next (RefreshPacing).
+    private async Task RefreshVisibleAsync()
+    {
+        var started = Stopwatch.GetTimestamp();
+        try { await RefreshShownTabAsync(); }
+        finally { visibleRefreshDueAt = DateTimeOffset.UtcNow + RefreshPacing.After(Stopwatch.GetElapsedTime(started)); }
+    }
+
+    private Task RefreshShownTabAsync() => MainTabs.SelectedIndex switch
     {
         0 => RefreshNetworkAsync(),
         1 => RefreshInsightsAsync(),
