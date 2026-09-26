@@ -99,9 +99,24 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
     /// a flow, which is what the socket-table collector produces.
     ///
     /// Local only. It keys the queue and is never part of what is sent.
+    ///
+    /// The flow's start is part of it. macOS reuses one flow id for a UDP
+    /// socket that opens and closes again and again -- one rapportd socket
+    /// did so every minute on 2026-09-27 -- and each time is its own
+    /// connection with its own byte counts. Every report of one of those
+    /// times carries the start the extension recorded for it.
     public var deliveryIdentity: String {
-        flowID.map { "flow|\($0.uuidString)" } ?? stableKey
+        flowID.map { "flow|\($0.uuidString)|\(episodeKey)" } ?? stableKey
     }
+
+    /// The start of this time the flow was open, in milliseconds.
+    var episodeKey: Int64 {
+        Int64((firstObservedAt.timeIntervalSince1970 * 1_000).rounded())
+    }
+
+    /// Whether this report carries byte counts, which only a closing report
+    /// does.
+    var hasByteCounts: Bool { bytesIn != nil || bytesOut != nil }
 
     /// Addresses that stand for "not chosen yet" rather than for this Mac.
     public static let unspecifiedAddresses: Set<String> = ["0.0.0.0", "::", ""]

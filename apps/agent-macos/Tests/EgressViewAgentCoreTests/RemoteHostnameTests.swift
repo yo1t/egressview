@@ -218,7 +218,8 @@ final class RemoteHostnameStoreTests: XCTestCase {
             if let database { sqlite3_close(database) }
         }
         let downgrade = """
-        DROP INDEX observations_flow_id;
+        DROP INDEX observations_flow_episode;
+        ALTER TABLE observations DROP COLUMN flow_episode;
         ALTER TABLE observations DROP COLUMN flow_id;
         PRAGMA user_version=9;
         """
