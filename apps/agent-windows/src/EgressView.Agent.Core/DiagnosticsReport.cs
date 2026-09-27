@@ -41,8 +41,12 @@ public static class DiagnosticsReport
             return store.ReadLatestOutboundAnomaly() is not { } latest ? null : new
             {
                 windowStart = latest.WindowStart,
-                kind = latest.Kind == OutboundAnomalyKind.DistributedTransfer ? "distributed-transfer" : "large-transfer",
+                kind = OutboundAnomalyRecord.KindName(latest.Kind),
                 bytesOut = latest.BytesOut,
+                // The whole record, so the notice the window sends can keep
+                // what explains it in the history (P3-180). This answer goes
+                // only to the window on this PC over the local pipe.
+                details = latest,
             };
         }
         catch (Exception) { return null; }

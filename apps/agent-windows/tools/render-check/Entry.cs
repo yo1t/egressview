@@ -553,8 +553,57 @@ internal static class Entry
         notificationPage.SetResourceReference(Control.BackgroundProperty, "AppBackgroundBrush");
         Save(notificationPage, 1400, 900, Path.Combine(output, "notifications-1400x900.png"));
 
+        // What the outbound-anomaly card and a notice show where the pointer
+        // rests (P3-180): one anomaly with its breakdown, one found before
+        // breakdowns were kept, and the notices, in both themes.
+        {
+            var at = new DateTimeOffset(2026, 9, 27, 8, 0, 0, TimeSpan.Zero);
+            var explained = new OutboundAnomalyRecord(OutboundAnomalyKind.LargeTransfer, at, 416_000_000, 7, 31,
+                new OutboundAnomalyBreakdown(38_000_000,
+                    [new("aws.exe", 398_000_000), new("chrome.exe", 9_100_000), new("OneDrive.exe", 4_400_000),
+                     new("Teams.exe", 2_100_000), new("svchost.exe", 900_000)],
+                    [new("egressview-releases.s3.ap-northeast-1.amazonaws.com (52.219.8.10)", 398_000_000),
+                     new("www.google.com (142.250.196.100)", 6_000_000), new("13.107.42.12", 4_400_000),
+                     new("teams.microsoft.com (52.113.194.132)", 2_100_000), new("198.51.100.4", 800_000)], 31));
+            var unexplained = new OutboundAnomalyRecord(OutboundAnomalyKind.DistributedTransfer, at.AddHours(-3), 140_000_000, 4, 18, null);
+            foreach (var (dark, suffix) in new[] { (false, "light"), (true, "dark") })
+            {
+                ThemeManager.ApplyTheme(application.Resources, dark, Color.FromRgb(0x4D, 0x94, 0xFF));
+                SaveDetail(AnomalyDetailView.List([explained, unexplained], 7, true), Path.Combine(output, $"anomaly-card-detail-{suffix}.png"));
+                SaveDetail(AnomalyDetailView.List([], 0, false), Path.Combine(output, $"anomaly-card-learning-{suffix}.png"));
+                SaveDetail(AnomalyDetailView.Notice(new NotificationHistoryEntry(at.AddMinutes(20), "OutboundAnomaly", "EgressView Agent",
+                    "17:00 に通常と異なる外向き通信がありました。送信 396.7 MiB。このPCの通常より大幅に多い量です。Agentを開いて確認してください。",
+                    true, Anomaly: explained)), Path.Combine(output, $"notice-anomaly-{suffix}.png"));
+                SaveDetail(AnomalyDetailView.Notice(new NotificationHistoryEntry(at.AddHours(-2), "OutboundAnomaly", "EgressView Agent",
+                    "14:00 に通常と異なる外向き通信がありました。送信 133.5 MiB。複数のアプリと宛先に分散しています。Agentを開いて確認してください。",
+                    true)), Path.Combine(output, $"notice-anomaly-before-{suffix}.png"));
+                SaveDetail(AnomalyDetailView.Notice(new NotificationHistoryEntry(at.AddMinutes(-5), "HubDelivery", "EgressView Agent",
+                    "Hubへの送信が完了していません。未送信 1,204 件。Agentを開いて確認してください。", false, "suppressed-daily-limit")),
+                    Path.Combine(output, $"notice-other-{suffix}.png"));
+            }
+        }
+
         Console.WriteLine($"wrote {output}");
         return 0;
+    }
+
+    /// A detail panel as its tooltip draws it: the card's ground and edge,
+    /// as tall as its content.
+    private static void SaveDetail(FrameworkElement content, string path)
+    {
+        var tip = new Border { Child = content, Padding = new Thickness(14), BorderThickness = new Thickness(1) };
+        tip.SetResourceReference(Border.BackgroundProperty, "SurfaceBrush");
+        tip.SetResourceReference(Border.BorderBrushProperty, "StrokeBrush");
+        tip.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextPrimaryBrush");
+        tip.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        tip.Arrange(new Rect(tip.DesiredSize));
+        tip.UpdateLayout();
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(tip.ActualWidth), (int)Math.Ceiling(tip.ActualHeight), 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(tip);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using (var stream = File.Create(path)) encoder.Save(stream);
+        Console.WriteLine($"{Path.GetFileName(path)}: {bitmap.PixelWidth}x{bitmap.PixelHeight}");
     }
 
     /// The apps/agent-windows directory, found by walking up from the binary.

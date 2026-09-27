@@ -133,6 +133,10 @@ public sealed record PeriodAnalysis(
     /// needs a day of measured windows before it will say anything at all.
     public int OutboundAnomalies { get; init; }
 
+    /// The newest of them, at most five, with what explains each: the usual
+    /// level, and the applications and destinations that sent the most.
+    public IReadOnlyList<OutboundAnomalyRecord> OutboundAnomalyDetails { get; init; } = [];
+
     /// Whether the detector has enough measured history to have an opinion at
     /// all. Without this the screen cannot tell "nothing unusual happened"
     /// from "not yet able to say", and a zero would state the first while

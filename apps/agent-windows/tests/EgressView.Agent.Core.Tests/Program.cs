@@ -1201,7 +1201,7 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 29, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 30, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
@@ -1627,7 +1627,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 29, "v1 database migrates through v2-v29");
+        Assert(migrated.SchemaVersion == 30, "v1 database migrates through v2-v30");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -1679,7 +1679,7 @@ try
     Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v29.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 29, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 30, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -3159,6 +3159,60 @@ try
             Assert(store.ReadOutboundAnomalyCount(previous, now) == 1 &&
                 store.ReadOutboundAnomalyCount(previous.AddDays(-2), previous.AddDays(-1)) == 0,
                 "a recorded anomaly is counted inside its period and not outside it");
+
+            // What explains it (P3-180). A window flagged without a breakdown
+            // -- as every window before 0.1.140 was -- reads back as one with
+            // none, not as one nobody sent anything in.
+            Assert(store.ReadLatestOutboundAnomaly() is { Breakdown: null, Kind: OutboundAnomalyKind.DistributedTransfer } bare &&
+                bare.WindowStart == previous && bare.BytesOut == 12UL * 8 * 1024 * 1024,
+                "an anomaly recorded without a breakdown says it has none");
+
+            // One more sender with a host name, sending the most of anyone.
+            store.WriteBatch([new NetworkObservation(previous.AddMinutes(2), 900, "TCP", "10.0.0.5", 51_000,
+                "198.51.100.7", 443, 40 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "backup.exe", "upload.example.com")]);
+            var breakdown = store.ReadOutboundAnomalyBreakdown(previous, 3 * 1024 * 1024);
+            Assert(breakdown.UsualBytesOut == 3 * 1024 * 1024 && breakdown.Applications.Count == 5 &&
+                breakdown.Applications[0] == new OutboundContributor("backup.exe", 40UL * 1024 * 1024) &&
+                breakdown.Destinations.Count == 5 &&
+                breakdown.Destinations[0] == new OutboundContributor("upload.example.com (198.51.100.7)", 40UL * 1024 * 1024) &&
+                breakdown.SendingDestinationCount == 13,
+                "the breakdown keeps the five largest senders each way, names a host where one was read, and counts every destination");
+            Assert(store.ReadOutboundAnomalyBreakdown(previous.AddDays(-1), 0) is { Applications.Count: 0, Destinations.Count: 0, SendingDestinationCount: 0 },
+                "a window nobody sent in has an empty breakdown");
+
+            store.RecordOutboundAnomaly(previous, OutboundAnomalyKind.LargeTransfer, breakdown);
+            var kept = store.ReadOutboundAnomalies(previous, now);
+            Assert(kept.Count == 1 && kept[0].Kind == OutboundAnomalyKind.LargeTransfer && kept[0].Breakdown is { } read &&
+                read.UsualBytesOut == breakdown.UsualBytesOut && read.Applications.SequenceEqual(breakdown.Applications) &&
+                read.Destinations.SequenceEqual(breakdown.Destinations) && read.SendingDestinationCount == 13,
+                "the breakdown is kept with the window and reads back as it was written");
+            Assert(store.ReadPeriodAnalysis(previous, now).OutboundAnomalyDetails is [{ Breakdown: not null }],
+                "the overview carries the period's anomalies with their breakdowns");
+            Assert(OutboundAnomalyBreakdown.FromJson("not json") is null && OutboundAnomalyBreakdown.FromJson(null) is null,
+                "a breakdown that does not read back is treated as not recorded");
+        }
+        using (var reopened = new ObservationStore(anomalyDatabase))
+            Assert(reopened.ReadLatestOutboundAnomaly()?.Breakdown?.Applications[0].Name == "backup.exe",
+                "and survives a restart");
+
+        // Newest first, and no more than asked for.
+        var manyAnomalies = Path.Combine(directory, "outbound-anomaly-many.db");
+        using (var store = new ObservationStore(manyAnomalies))
+        {
+            var start = new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero);
+            for (var index = 0; index < 7; index++)
+            {
+                var at = start.AddMinutes(15 * index);
+                store.WriteBatch([new NetworkObservation(at.AddMinutes(1), 700, "TCP", "10.0.0.5", 52_000 + index,
+                    "203.0.113.50", 443, 1024, 0, ObservationLayer.Logical, null, "etw", "app.exe")]);
+                store.CaptureOutboundTrafficWindow(at + TimeSpan.FromMinutes(15));
+                store.RecordOutboundAnomaly(at, OutboundAnomalyKind.LargeTransfer);
+            }
+            var newest = store.ReadOutboundAnomalies(start, start.AddDays(1));
+            Assert(newest.Count == 5 && newest[0].WindowStart == start.AddMinutes(90) && newest[4].WindowStart == start.AddMinutes(30),
+                "the period's anomalies come newest first, five at most");
+            Assert(store.ReadPeriodAnalysis(start, start.AddDays(1)) is { OutboundAnomalies: 7, OutboundAnomalyDetails.Count: 5 },
+                "and the overview still counts all of them");
         }
 
         // One overnight backup in the baseline must not become the new normal.
@@ -4187,7 +4241,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 29 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 30 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }

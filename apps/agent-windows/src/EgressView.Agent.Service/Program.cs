@@ -441,7 +441,13 @@ internal sealed class AgentWindowsService : ServiceBase
                     store.AddCounter("outbound-windows-captured", 1);
                     if (detector.Evaluate(captured.Current, captured.Baseline) is { } finding)
                     {
-                        store.RecordOutboundAnomaly(finding.Window.StartedAt, finding.Kind);
+                        // Who sent it is read now, while the window's
+                        // observations are still there. A failure to read it
+                        // must not cost the anomaly itself.
+                        OutboundAnomalyBreakdown? breakdown = null;
+                        try { breakdown = store.ReadOutboundAnomalyBreakdown(finding.Window.StartedAt, finding.BaselineMedianBytesOut); }
+                        catch { store.AddCounter("outbound-anomaly-breakdown-failure", 1); }
+                        store.RecordOutboundAnomaly(finding.Window.StartedAt, finding.Kind, breakdown);
                         store.AddCounter(finding.Kind == OutboundAnomalyKind.DistributedTransfer
                             ? "outbound-anomaly-distributed" : "outbound-anomaly-large", 1);
                     }
