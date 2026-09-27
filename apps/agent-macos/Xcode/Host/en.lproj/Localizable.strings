@@ -168,6 +168,11 @@
 "Launch at login is unavailable for this build." = "Launch at login is unavailable for this build.";
 "Language" = "Language";
 "Display language" = "Display language";
+"This Mac is in" = "This Mac is in";
+"Follow macOS (%@)" = "Follow macOS (%@)";
+"Follow macOS (not set)" = "Follow macOS (not set)";
+"Where the globe draws connections from. It stays on this Mac: nothing is looked up and nothing is sent to a Hub." = "Where the globe draws connections from. It stays on this Mac: nothing is looked up and nothing is sent to a Hub.";
+"macOS does not say which country this Mac is in, so no lines are drawn. Choose one in Settings > General." = "macOS does not say which country this Mac is in, so no lines are drawn. Choose one in Settings > General.";
 "Globe animation" = "Globe animation";
 "Frame rate" = "Frame rate";
 "Energy saver (3 fps)" = "Energy saver (3 fps)";

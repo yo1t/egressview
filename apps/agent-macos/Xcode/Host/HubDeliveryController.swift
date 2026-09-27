@@ -680,7 +680,14 @@ private struct AgentSettingsView: View {
     @ObservedObject private var language = AgentLanguageSettings.shared
     @AppStorage(AgentGlobeFrameRate.defaultsKey)
     private var globeFrameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
+    @AppStorage(HomeLocation.defaultsKey)
+    private var homeCountry = ""
     @State private var section = AgentSettingsSection.general
+
+    /// Every country the globe can draw, once; the same atlas the globe uses,
+    /// so a country offered here is one it can place.
+    private static let homeCountryChoices: [String] =
+        homeCountryAtlas?.countryCodes ?? []
     @State private var confirmHistoryDeletion = false
     @State private var confirmDatedHistoryDeletion = false
     @State private var deleteHistoryBefore = Calendar.current.startOfDay(
@@ -731,6 +738,26 @@ private struct AgentSettingsView: View {
         }
     }
 
+    private var followSystemTitle: String {
+        if let region = Locale.current.region?.identifier,
+           HomeLocation.coordinate(for: region, atlas: Self.homeCountryAtlas) != nil {
+            return L("Follow macOS (%@)", countryName(region))
+        }
+        return L("Follow macOS (not set)")
+    }
+
+    private static let homeCountryAtlas = try? WorldAtlas.bundled()
+
+    private var sortedHomeCountryChoices: [String] {
+        Self.homeCountryChoices.sorted {
+            countryName($0).localizedStandardCompare(countryName($1)) == .orderedAscending
+        }
+    }
+
+    private func countryName(_ code: String) -> String {
+        language.language.locale.localizedString(forRegionCode: code) ?? code
+    }
+
     private var general: some View {
         VStack(alignment: .leading, spacing: 24) {
             settingsTitle(L("General"), subtitle: L("Collection and startup behavior for this Mac."))
@@ -751,6 +778,19 @@ private struct AgentSettingsView: View {
                     ForEach(AgentLanguage.allCases) { option in Text(option.title).tag(option) }
                 }
                 .frame(width: 240)
+            }
+            settingsGroup(L("Country")) {
+                Picker(L("This Mac is in"), selection: $homeCountry) {
+                    Text(followSystemTitle).tag("")
+                    Divider()
+                    ForEach(sortedHomeCountryChoices, id: \.self) { code in
+                        Text(countryName(code)).tag(code)
+                    }
+                }
+                .frame(width: 360)
+                Text(L("Where the globe draws connections from. It stays on this Mac: nothing is looked up and nothing is sent to a Hub."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             settingsGroup(L("Globe animation")) {
                 Picker(L("Frame rate"), selection: $globeFrameRateRaw) {

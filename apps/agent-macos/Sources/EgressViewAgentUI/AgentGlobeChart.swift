@@ -77,6 +77,12 @@ public struct AgentGlobeChart: View {
     @State private var countryView: CountryView = .globe
     @AppStorage(AgentGlobeFrameRate.defaultsKey)
     private var frameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
+    @AppStorage(HomeLocation.defaultsKey)
+    private var homeCountry = ""
+
+    private var home: HomeLocation.Resolved? {
+        HomeLocation.resolve(chosen: homeCountry, atlas: atlas)
+    }
 
     /// Whether the globe should be turning at all.
     ///
@@ -197,12 +203,24 @@ public struct AgentGlobeChart: View {
                     AgentGlobeNativeView(
                         model: model,
                         atlas: atlas,
+                        home: home,
                         degreesPerSecond: speed.degreesPerSecond,
                         framesPerSecond: frameRate.rawValue,
                         isRotating: isRunning,
                         isAnimating: isAnimating
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .top) {
+                        if home == nil {
+                            Text(L("macOS does not say which country this Mac is in, so no lines are drawn. Choose one in Settings > General."))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(8)
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                .padding(8)
+                        }
+                    }
                     .overlay(alignment: .bottomTrailing) {
                         // Overlaid rather than stacked below: the globe is drawn
                         // from the smaller side of its box, so every point of
@@ -288,6 +306,7 @@ public struct AgentGlobeChart: View {
 private struct AgentGlobeNativeView: NSViewRepresentable {
     let model: GlobeModel
     let atlas: WorldAtlas?
+    let home: HomeLocation.Resolved?
     let degreesPerSecond: Double
     let framesPerSecond: Int
     let isRotating: Bool
@@ -301,6 +320,7 @@ private struct AgentGlobeNativeView: NSViewRepresentable {
         view.configure(
             model: model,
             atlas: atlas,
+            home: home,
             degreesPerSecond: degreesPerSecond,
             framesPerSecond: framesPerSecond,
             isRotating: isRotating,
@@ -312,8 +332,11 @@ private struct AgentGlobeNativeView: NSViewRepresentable {
 private final class AgentGlobeDrawingView: NSView {
     private var model: GlobeModel?
     private var atlas: WorldAtlas?
-    private var home = HomeLocation.current()
-    private var tilt = HomeLocation.preferredTilt(latitude: HomeLocation.current().latitude)
+    /// Nil when neither the person nor macOS has said which country this is.
+    /// Then no arcs are drawn: an arc from a guessed country is a claim about
+    /// where this Mac is that nobody made.
+    private var home: HomeLocation.Resolved?
+    private var tilt = HomeLocation.preferredTilt(latitude: 0)
     private var baseSpin = 0.0
     private var anchor = Date()
     private var resumeAt = Date.distantPast
@@ -348,12 +371,18 @@ private final class AgentGlobeDrawingView: NSView {
     func configure(
         model: GlobeModel,
         atlas: WorldAtlas?,
+        home: HomeLocation.Resolved?,
         degreesPerSecond: Double,
         framesPerSecond: Int,
         isRotating: Bool,
         isAnimating: Bool
     ) {
-        let contentChanged = self.model != model
+        let homeChanged = self.home != home
+        if homeChanged {
+            self.home = home
+            tilt = HomeLocation.preferredTilt(latitude: home?.latitude ?? 0)
+        }
+        let contentChanged = self.model != model || homeChanged
         let speedChanged = self.degreesPerSecond != degreesPerSecond
         let rotationChanged = self.isRotating != isRotating
         if speedChanged || rotationChanged { freeze() }
@@ -443,7 +472,7 @@ private final class AgentGlobeDrawingView: NSView {
         )
         let projection = OrthographicProjection(
             centerLatitude: tilt,
-            centerLongitude: home.longitude - spin
+            centerLongitude: (home?.longitude ?? 0) - spin
         )
 
         context.setFillColor(NSColor.systemBlue.withAlphaComponent(0.10).cgColor)
@@ -504,15 +533,14 @@ private final class AgentGlobeDrawingView: NSView {
             context.strokePath()
         }
 
-        let homePoint = projection.project(
-            latitude: home.latitude,
-            longitude: home.longitude,
-            in: rect
-        )
+        let homePoint = home.flatMap {
+            projection.project(latitude: $0.latitude, longitude: $0.longitude, in: rect)
+        }
 
         for point in model.points {
+            guard let home else { break }
             let arc = GreatCircle.path(
-                from: home,
+                from: home.coordinate,
                 to: (latitude: point.latitude, longitude: point.longitude)
             )
             let visible = CGMutablePath()

@@ -126,4 +126,50 @@ public struct WorldAtlas: Sendable {
         }
         countries = decodedCountries
     }
+
+    /// Countries that can be named, once each, for a list a person picks from.
+    public var countryCodes: [String] {
+        Array(Set(countries.compactMap(\.code))).sorted()
+    }
+
+    /// The middle of a country's largest outline.
+    ///
+    /// The largest, because a country's islands and exclaves would otherwise
+    /// pull the point into the sea. The area-weighted centre of that ring, not
+    /// the middle of its bounding box, which for a crescent can fall outside
+    /// the country altogether. Longitudes are unwrapped around the first point
+    /// so a ring that crosses the date line is not averaged across the globe.
+    public func center(ofCountry code: String) -> (latitude: Double, longitude: Double)? {
+        let rings = countries.filter { $0.code == code }.flatMap(\.rings)
+        var best: (area: Double, latitude: Double, longitude: Double)?
+        for ring in rings {
+            guard let first = ring.first else { continue }
+            let points = ring.map { point -> (x: Double, y: Double) in
+                var x = point.longitude
+                while x - first.longitude > 180 { x -= 360 }
+                while x - first.longitude < -180 { x += 360 }
+                return (x, point.latitude)
+            }
+            var twiceArea = 0.0
+            var cx = 0.0
+            var cy = 0.0
+            for index in points.indices {
+                let a = points[index]
+                let b = points[(index + 1) % points.count]
+                let cross = a.x * b.y - b.x * a.y
+                twiceArea += cross
+                cx += (a.x + b.x) * cross
+                cy += (a.y + b.y) * cross
+            }
+            let area = abs(twiceArea) / 2
+            guard area > 0 else { continue }
+            if best == nil || area > best!.area {
+                var longitude = cx / (3 * twiceArea)
+                while longitude > 180 { longitude -= 360 }
+                while longitude < -180 { longitude += 360 }
+                best = (area, cy / (3 * twiceArea), longitude)
+            }
+        }
+        return best.map { ($0.latitude, $0.longitude) }
+    }
 }
