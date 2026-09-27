@@ -30,6 +30,13 @@ public partial class MainWindow : Window
     /// enrichment change rows that no event mentions, so a view built only
     /// from the stream would drift away from the store.
     internal static readonly TimeSpan LogStreamInterval = TimeSpan.FromSeconds(2);
+    /// Behind another window the log still follows, five times less often
+    /// (P3-107). Measured on one PC 2026-09-27: following costs the window
+    /// about 6% of a core whether traffic is quiet or at 90 connections a
+    /// second, and 0.7% when a filter hides every row -- the cost is redrawing
+    /// the rows that change, not fetching them. Nobody reads a log behind
+    /// another window at two-second resolution; the globe slows the same way.
+    internal static readonly TimeSpan LogStreamBackgroundInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan EnrichmentRefreshInterval = TimeSpan.FromSeconds(30);
     private const int LogStreamBatch = 500;
     private readonly DispatcherTimer refreshTimer = new() { Interval = LogRefreshInterval };
@@ -53,6 +60,9 @@ public partial class MainWindow : Window
     /// Something that scrolls cannot be read unless it can be held still, and
     /// a held view that does not admit it is held is worse than a stale one.
     private bool logPaused;
+    /// Paused because a row is selected, not because the reader pressed
+    /// pause: clearing the selection resumes.
+    private bool logHeldBySelection;
     private DateTimeOffset? logPausedAt;
     private PeriodAnalysis? currentAnalysis;
     private PeriodAnalysis? previousAnalysis;
@@ -98,7 +108,9 @@ public partial class MainWindow : Window
         // Nothing streams towards a window nobody is looking at. A background
         // window that kept asking every two seconds would spend a laptop's
         // battery to update a picture no one can see.
-        Activated += (_, _) => ReconcileLogStream();
+        // Back in front, the next tick refreshes rather than waiting out the
+        // background interval.
+        Activated += (_, _) => { visibleRefreshDueAt = DateTimeOffset.MinValue; ReconcileLogStream(); };
         Deactivated += (_, _) => ReconcileLogStream();
         IsVisibleChanged += (_, _) => ReconcileLogStream();
         StateChanged += (_, _) => ReconcileLogStream();
@@ -207,7 +219,7 @@ public partial class MainWindow : Window
     {
         var started = Stopwatch.GetTimestamp();
         try { await RefreshShownTabAsync(); }
-        finally { visibleRefreshDueAt = DateTimeOffset.UtcNow + RefreshPacing.After(Stopwatch.GetElapsedTime(started)); }
+        finally { visibleRefreshDueAt = DateTimeOffset.UtcNow + RefreshPacing.After(Stopwatch.GetElapsedTime(started), IsActive); }
     }
 
     private Task RefreshShownTabAsync() => MainTabs.SelectedIndex switch
@@ -645,7 +657,7 @@ public partial class MainWindow : Window
     private async void LogGrain_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded) return;
-        if (logPaused) { logPaused = false; logPausedAt = null; PauseLogButton.SetResourceReference(ContentProperty, "PauseUpdates"); }
+        if (logPaused) { logPaused = false; logHeldBySelection = false; logPausedAt = null; PauseLogButton.SetResourceReference(ContentProperty, "PauseUpdates"); }
         await RefreshFlowsAsync();
     }
     private void ApplyLogFilter()
@@ -681,7 +693,7 @@ public partial class MainWindow : Window
                 LocalizationManager.Text("LogOmittedStatus"), logOmitted);
         if (logPaused && logPausedAt is { } heldAt)
             LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
-                LocalizationManager.Text("LogPausedStatus"), heldAt.LocalDateTime.ToString("g"));
+                LocalizationManager.Text(logHeldBySelection ? "LogHeldBySelectionStatus" : "LogPausedStatus"), heldAt.LocalDateTime.ToString("g"));
         else if (ObservationGrain)
             LogStatus.Text += " · " + LocalizationManager.Text("LogGrainObservationsHint");
         else if (RecentFlows.Any(row => row.StateText.Length > 0))
@@ -691,12 +703,58 @@ public partial class MainWindow : Window
 
     private async void PauseLog_Click(object sender, RoutedEventArgs e)
     {
+        if (logHeldBySelection)
+        {
+            // Resuming from a hold the selection made lets go of the row too;
+            // otherwise the next click on it would hold again at once.
+            logHeldBySelection = false;
+            ConnectionGrid.SelectedItem = null;
+        }
         logPaused = !logPaused;
         logPausedAt = logPaused ? DateTimeOffset.UtcNow : null;
         PauseLogButton.SetResourceReference(ContentProperty, logPaused ? "ResumeUpdates" : "PauseUpdates");
         ReconcileLogStream();
         if (logPaused) ApplyLogFilter();
         else await RefreshFlowsAsync();
+    }
+
+    /// A selected row holds the log where it is (P3-107).
+    ///
+    /// Following inserts the newest rows at the top, so a row someone had
+    /// clicked to read was pushed out of view within seconds -- at eighteen
+    /// connections a second, measured 2026-09-27. Selecting now pauses the
+    /// log as the pause button does, and says so; clearing the selection
+    /// (Esc) or pressing resume catches up. A pause the reader made stays
+    /// theirs: selecting within it, and clearing, change nothing.
+    private async void ConnectionGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        var selected = ConnectionGrid.SelectedItem is not null;
+        if (selected && !logPaused)
+        {
+            logHeldBySelection = true;
+            logPaused = true;
+            logPausedAt = DateTimeOffset.UtcNow;
+            PauseLogButton.SetResourceReference(ContentProperty, "ResumeUpdates");
+            ReconcileLogStream();
+            ApplyLogFilter();
+        }
+        else if (!selected && logHeldBySelection)
+        {
+            logHeldBySelection = false;
+            logPaused = false;
+            logPausedAt = null;
+            PauseLogButton.SetResourceReference(ContentProperty, "PauseUpdates");
+            ReconcileLogStream();
+            await RefreshFlowsAsync();
+        }
+    }
+
+    private void ConnectionGrid_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Escape || ConnectionGrid.SelectedItem is null) return;
+        ConnectionGrid.SelectedItem = null;
+        e.Handled = true;
     }
 
     /// Bring the visible list to the given rows without rebuilding it.
@@ -1344,6 +1402,7 @@ public partial class MainWindow : Window
     private void ReconcileLogStream()
     {
         var live = IsVisible && WindowState != WindowState.Minimized && !logPaused && MainTabs.SelectedIndex == 2;
+        logStreamTimer.Interval = IsActive ? LogStreamInterval : LogStreamBackgroundInterval;
         if (live) logStreamTimer.Start(); else logStreamTimer.Stop();
     }
 
