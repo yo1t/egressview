@@ -9,8 +9,8 @@ centre of this page.
 
 - **Observations stay on this PC.** Connection metadata is written to a SQLite
   database on this machine.
-- **The developer receives none of it.** There is no analytics endpoint, no
-  crash reporter, and no telemetry of any kind.
+- **There is no developer telemetry.** There is no analytics endpoint or crash
+  reporter. Optional third-party lookups and cloud AI are listed below.
 - **Payloads are never read.** Monitoring is done through ETW (Event Tracing
   for Windows), which **never hands over packet contents**. It records who
   connected to what, not what was said.
@@ -28,16 +28,18 @@ centre of this page.
 | **`ipwho.is`** | **Only if you choose "Ask the Hub, then ipwho.is"** | **The IP addresses of destinations you observed**, at most 500 a day | The country and coordinates for that address |
 | **`api.openai.com` / `api.anthropic.com`** | **Only if you enable a cloud AI provider and confirm each question** | Exactly the bounded preview shown on screen | The answer |
 
-There is no seventh category. **If you ever see the agent connect somewhere
-that is not in this table, that is a bug worth reporting.**
+These are service categories, not an allowlist of every network hostname:
+downloads can redirect to a CDN. Report an unexpected connection so its
+purpose can be checked.
 
 ### Two things this table cannot hide
 
-**First.** The `ipwho.is` row is the only one that **sends a destination you
-observed out of this network.** No other row does. It is not the default: the
+**First.** The `ipwho.is` row sends observed destination IPs to a location
+service. Cloud AI can also receive destination aggregates included in the
+preview you confirm. Neither is enabled by default. The location setting
 settings screen offers it as one of three choices, in a warning colour, with
 the sentence saying so and the remaining daily allowance beside it. Unless you
-choose it, no destination of yours leaves this PC.
+choose it, no destination IP is sent to that location service.
 
 **Second.** Connecting to `dl.egressview.com` tells that host's CDN your IP
 address, exactly as visiting any website does, and CloudFront writes an access
