@@ -118,6 +118,16 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
     /// does.
     var hasByteCounts: Bool { bytesIn != nil || bytesOut != nil }
 
+    /// A closing report whose flow the extension did not remember.
+    ///
+    /// It then says the flow started when it ended, so the two times are the
+    /// same. A closing report for a time the extension did see starts earlier.
+    /// Only such a report may complete an earlier open row: on 2026-09-27 the
+    /// rule applied to every closing report, and a UDP socket that opened again
+    /// to receive only -- so no opening report was made for that time -- had
+    /// its ending folded into an older open row (46 rows in 80 minutes).
+    var startIsUnknown: Bool { hasByteCounts && firstObservedAt == lastObservedAt }
+
     /// Addresses that stand for "not chosen yet" rather than for this Mac.
     public static let unspecifiedAddresses: Set<String> = ["0.0.0.0", "::", ""]
 
