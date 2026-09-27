@@ -65,6 +65,9 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     private struct SentOpening: Codable {
         let flowID: UUID
         let observationID: UUID
+        /// When the time the flow was open started. Optional so queue files
+        /// written before it still load; such an entry matches as it used to.
+        var startedAt: Date?
     }
 
     private struct ActiveBatch: Codable {
@@ -378,7 +381,18 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         guard hubCompletesObservations,
               observation.bytesIn != nil || observation.bytesOut != nil,
               let flowID = observation.flowID,
-              let index = state.sentOpenings?.firstIndex(where: { $0.flowID == flowID }),
+              // The opening of this same time the flow was open. A flow id
+              // macOS reuses has one opening per time, and a closing report
+              // must not complete an earlier time's row: on 2026-09-27 a
+              // socket that reopened only to receive (so made no opening
+              // report) borrowed the last time's id, and the Hub folded 23
+              // times into older rows in half an hour. A report with no known
+              // start still takes the latest one, as the local history does.
+              let index = state.sentOpenings?.lastIndex(where: {
+                  $0.flowID == flowID
+                      && (observation.startIsUnknown || $0.startedAt == nil
+                          || $0.startedAt == observation.firstObservedAt)
+              }),
               let observationID = state.sentOpenings?[index].observationID,
               !state.pending.contains(where: { $0.observationID == observationID })
         else { return nil }
@@ -395,7 +409,10 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             openings.removeAll { $0.flowID == flowID }
             let hasByteCounts = entry.observation.bytesIn != nil || entry.observation.bytesOut != nil
             if !hasByteCounts {
-                openings.append(SentOpening(flowID: flowID, observationID: entry.observationID))
+                openings.append(SentOpening(
+                    flowID: flowID, observationID: entry.observationID,
+                    startedAt: entry.observation.firstObservedAt
+                ))
             }
         }
         if openings.count > sentOpeningLimit {
