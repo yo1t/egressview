@@ -92,16 +92,17 @@ describe('the Windows privacy note', () => {
     }
   });
 
-  it('外部へ宛先を送る唯一の経路を名指しする', () => {
-    // ipwho.is is the only row in the table that sends a watched address
-    // outside. A privacy note that lists it among the others without saying
-    // so would be technically complete and practically useless.
+  it('位置情報照会とクラウドAIへの宛先情報の送信を区別する', () => {
+    // A location lookup sends destination IPs. Cloud AI may receive
+    // destination aggregates in the preview the user confirms.
     for (const doc of [windowsEn, windowsJa]) {
       assert.match(doc, /ipwho\.is/);
       assert.match(doc, /download\.maxmind\.com/);
     }
-    assert.match(windowsEn, /only one that \*\*sends a destination you\s+observed out of this network/);
-    assert.match(windowsJa, /観測した宛先そのものを外部へ送ります/);
+    assert.match(windowsEn, /sends observed destination IPs to a location/);
+    assert.match(windowsEn, /destination aggregates included in the/);
+    assert.match(windowsJa, /観測した宛先IPを位置情報サービスへ送ります/);
+    assert.match(windowsJa, /previewに含まれる宛先の集計情報/);
   });
 
   it('未署名であることを述べる', () => {

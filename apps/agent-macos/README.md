@@ -5,9 +5,11 @@ your Mac** sent it. This agent fills that gap: it reports the process behind eac
 outbound connection to your EgressView Hub, so a connection to an address you do
 not recognise comes with the name of the program that made it.
 
-It reads connection metadata only — addresses, ports, process names. **It never
-reads payloads, never decrypts traffic, and never blocks anything.** Byte counts
-are reported as unavailable rather than guessed at.
+It reads connection metadata: addresses, ports, process names, and byte counts
+when available. **It never reads application payloads or blocks traffic.** If
+you enable destination-name capture, it decrypts only the QUIC Initial message
+needed to read the name, not the subsequent conversation. Missing byte counts
+are shown as unavailable rather than guessed at.
 
 It also shows you that traffic: where it went on a globe, which application sent
 it where, when it happened, and whether the destination appears on a threat
@@ -16,9 +18,10 @@ dangerous?" would tell that service exactly which addresses worry you, so the
 indicators come here and the questions never leave.
 
 The host app and its Network Extension run inside the macOS App Sandbox. The
-host is allowed to initiate outbound connections for Hub delivery and signed
-update checks; the extension is not given general outbound or inbound network
-access. Both share only the dedicated EgressView App Group storage. No
+host is allowed to initiate outbound connections for Hub delivery, update
+checks, and the optional services described below; the extension is not given
+general outbound or inbound network access. Both share only the dedicated
+EgressView App Group storage. No
 filesystem exception grants access to your home directory or AWS CLI files.
 
 ## Is this for you?
@@ -96,8 +99,8 @@ That is expected; keep updating it from the agent.
 ### Connecting it to a Hub, if you have one
 
 Only if you want this Mac's observations stored alongside the rest of your
-network. Nothing has left the Mac up to this point, and nothing will until you
-finish this.
+network. No observations are delivered to a Hub until you enrol and enable
+delivery. Update checks and any optional services you enabled are separate.
 
 4. In the Hub's settings, under the L3/L4 data source, choose **Issue an
    enrolment code**. You get six characters.
@@ -106,8 +109,8 @@ finish this.
 6. Approve the request in the Hub. Your Mac appears once you do — **it does not
    appear before**, which is the point: a machine cannot add itself.
 
-Sending is off until you complete step 5. The agent shows you the exact
-destination and what will and will not be sent before anything leaves.
+Hub observation delivery is off until you enrol and enable it. The agent shows
+you the destination and fields before that delivery starts.
 
 If the code is refused, it has probably expired — they last ten minutes. Issue
 another one.
@@ -117,17 +120,17 @@ installer for you. The System Extension does not need approving again.
 
 ## What leaves your Mac, and when
 
-Three things, and nothing else. Each is listed so you can check the claim rather
-than trust it.
+The main destinations are listed below. Optional third-party services are
+described immediately afterward and in the [privacy details](../../docs/agent-privacy.md).
 
 | | Goes to | Contains |
 |---|---|---|
-| **Observations** | Your Hub | This Mac's host name; local/remote addresses and ports; protocol; process name and ID; bundle ID when available; timestamps; byte counts; collector and confidence. **Not destination host names** — the name your app asked for stays local |
-| **Update checks** | The signed distribution host | The agent's version. Disclosed on first launch |
+| **Observations** | Your Hub, only with delivery enabled | This Mac's host name; local/remote addresses and ports; protocol; process name and ID; bundle ID when available; timestamps; byte counts; collector and confidence. A destination host name is included only if observed and the Hub advertises support for it |
+| **Update checks** | The signed distribution host | An HTTPS request with the agent and OS versions, but no observation data |
 | **Threat indicators and locations** | Your Hub | **Nothing about your traffic.** The whole list comes down and the matching happens here |
 
-**No destination you connected to is ever sent anywhere to be looked up.** That
-is a design constraint, not a setting.
+Threat-feed matching is local. Location lookup is different: the optional
+`ipwho.is` setting below sends unresolved destination IP addresses there.
 
 ### Two things you can turn on, both off by default
 
@@ -135,8 +138,8 @@ Without a Hub the agent has no locations and no threat feeds, so it can offer to
 fetch them itself. Both are off unless you switch them on, in Settings.
 
 - **Location lookups** send destination IP addresses to `ipwho.is`, at most 500
-  a day, and only for addresses your Hub could not place. This is the one place
-  the agent would send the addresses it is watching to someone else, which is
+  a day, and only for addresses your Hub could not place. This setting sends
+  observed destination addresses to a third-party location service, which is
   why it is off. (Through 0.5.68 this setting named `ip-api.com`, whose free
   tier answers over plain HTTP only; macOS refused every such request, so no
   lookup ever happened and no address ever left the Mac.)
@@ -146,9 +149,15 @@ fetch them itself. Both are off unless you switch them on, in Settings.
   from them directly, so their terms are linked next to the setting — you are
   the one agreeing to them.
 
-**With a Hub, the standalone setting is not offered.** The Hub already supplies
-both, and having two paths running would quietly make "nothing leaves this Mac"
-untrue.
+You can also configure a local GeoLite2 country table, which downloads the
+database using your MaxMind credentials without sending observed destinations.
+If you choose OpenAI or Anthropic and submit an AI question, the provider
+receives the bounded context shown in the preview and your question. Neither
+cloud AI nor a third-party location lookup is required to monitor traffic.
+
+**With a Hub, the standalone feed setting is not offered.** A separate,
+explicit long-outage fallback is described below; it does not silently switch
+to public feeds on a brief Hub outage.
 
 **The agent never switches to public feeds on its own.** A Hub that goes down
 for an hour must not change what your Mac sends while you are not looking. The

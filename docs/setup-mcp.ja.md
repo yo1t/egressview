@@ -189,8 +189,7 @@ OAuth modeは`egv_...`形式のscoped identityだけを受け付け、
 `EGRESSVIEW_TOKEN`へfallbackしません。`.env.mcp`をmode `0600`で保護し、
 期限前にidentityをrotationして、確認後に旧identityを失効してください。
 監査鍵は`openssl rand -hex 32`で一度だけ生成し、service identityをrotation
-しても同じ値を維持します。Internet公開gateは次のP2-60で実装します。
-現段階のendpointをInternetへ公開しないでください。
+しても同じ値を維持します。Internetへ公開する前に、[公開前gate](#公開前gate)を実行し、証跡とnetwork controlを確認してください。gateの成功だけでDNSは公開されません。
 
 ### Step 2a — Apache (httpd) の設定
 

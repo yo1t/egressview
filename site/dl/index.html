@@ -236,8 +236,8 @@
       <p data-ja="監視できなかった期間は、欠落として表示します。何も照合していないのに「見つかりませんでした」とは表示しません。">Gaps in monitoring are shown as gaps. An empty threat list is never presented as &quot;nothing found&quot; unless something was actually checked.</p>
     </div>
     <div class="card">
-      <h3 data-ja="問い合わせのために何も送りません">Nothing is sent to be looked up</h3>
-      <p data-ja="脅威情報も位置情報も、一覧ごとこの端末へ届き、照合はここで行います。あなたの通信先を、身元確認のために外へ送ることはありません。Hubへ送る項目の一覧を含め、何をどこへ送るかは全て書いてあります: &lt;a href=&quot;https://www.egressview.com/docs/agent-privacy.ja.html&quot;&gt;macOS版&lt;/a&gt; · &lt;a href=&quot;https://www.egressview.com/docs/agent-privacy-windows.ja.html&quot;&gt;Windows版&lt;/a&gt;。">Threat lists and locations come to your machine and the matching happens there. No destination of yours is sent anywhere to be identified. What is sent, and where, for <a href="https://www.egressview.com/docs/agent-privacy.html">macOS</a> and <a href="https://www.egressview.com/docs/agent-privacy-windows.html">Windows</a>: every connection the agent makes and every field a Hub receives.</p>
+      <h3 data-ja="脅威照合は端末内で行います">Threat matching stays on your device</h3>
+      <p data-ja="脅威情報の一覧を端末へ取得し、観測した通信先と端末内で照合します。任意の位置情報照会を有効にすると、宛先IPアドレスがipwho.isへ送られます。クラウドAIを選んで質問すると、画面に示したデータが選択した提供者へ送られます。送信先と条件: &lt;a href=&quot;https://www.egressview.com/docs/agent-privacy.ja.html&quot;&gt;macOS版&lt;/a&gt; · &lt;a href=&quot;https://www.egressview.com/docs/agent-privacy-windows.ja.html&quot;&gt;Windows版&lt;/a&gt;。">Threat lists are downloaded and matched against observed destinations on your device. If you enable optional location lookups, destination IP addresses are sent to ipwho.is. If you choose cloud AI and submit a question, the previewed data goes to that provider. See the conditions and destinations for <a href="https://www.egressview.com/docs/agent-privacy.html">macOS</a> and <a href="https://www.egressview.com/docs/agent-privacy-windows.html">Windows</a>.</p>
     </div>
     <div class="card">
       <h3 data-ja="単体でも使えます">Works on its own</h3>
@@ -276,7 +276,7 @@
       <p class="req" data-ja="macOS版・Windows版とも同じ">The same on both</p>
       <ol>
         <li data-ja="EgressView Hubが自分の環境にあるなら、Agentを登録できます。&lt;strong&gt;Agentは単独でも動作するので、なくても問題ありません。&lt;/strong&gt;">If you run an EgressView Hub, you can enrol this agent with it. <strong>The agent works on its own, so you do not need one.</strong></li>
-        <li data-ja="登録を終えるまで&lt;strong&gt;外部への送信は無効&lt;/strong&gt;です。送信先と「何を送り、何を送らないか」を先に画面で示し、&lt;strong&gt;内容を理解したことを確認してから&lt;/strong&gt;でなければ登録できません。">Until you finish enrolling, <strong>nothing is sent anywhere</strong>. The agent shows the destination and exactly what will and will not be sent, and <strong>you confirm you have read it</strong> before enrolment can start.</li>
+        <li data-ja="Hubへの観測結果の送信は、登録して送信を有効にするまで始まりません。送信先と送信項目を事前に表示します。更新確認や利用者が有効にした外部サービスへの接続は別です。">Observation delivery to a Hub does not start until you enrol and enable it. The agent shows the destination and fields first. Update checks and any external services you choose to enable are separate.</li>
       </ol>
     </div>
   </div>

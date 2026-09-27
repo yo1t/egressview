@@ -1,6 +1,6 @@
 # What the EgressView Agent for macOS sends, and where
 
-This page lists **every** outbound connection the macOS agent makes. For
+This page lists the outbound services the macOS agent uses. For
 Windows, see [the other one](agent-privacy-windows.md). They are the same
 product, but **they read destination names differently**.
 
@@ -10,8 +10,8 @@ The agent watches outbound connections on your Mac. A tool with that job has to
 be specific about its own outbound connections, because "trust us" is not an
 answer a person can check.
 
-This page lists **every host the agent contacts, why, and what leaves your
-machine when it does.** It is the prose counterpart to the
+This page lists the agent's service destinations, why it contacts them, and what
+leaves your machine. It is the prose counterpart to the
 `PrivacyInfo.xcprivacy` manifest shipped inside both the app and its system
 extension.
 
@@ -19,29 +19,34 @@ extension.
 
 - **Observations stay on your hardware.** Connection metadata is written to a
   store inside the app group container on your Mac.
-- **The developer receives none of it.** There is no analytics endpoint, no
-  crash reporter, and no telemetry of any kind.
+- **There is no developer telemetry.** The agent has no analytics endpoint or
+  crash reporter. Optional third-party lookups and cloud AI have separate,
+  explicit controls below.
 - **Payloads are never read.** The system extension is a content filter that
   passes every flow through unmodified; it records who connected to what, not
   what was said.
 - **If you enrol with a Hub, observations go to that Hub — which is yours.**
   You run it. The developer has no access to it.
 
-This is why `NSPrivacyCollectedDataTypes` in the manifest is an **empty array**
-rather than a short list. Apple defines collection as transmitting data off the
-device where the developer or a third party can access it. By that definition
-the agent collects nothing.
+The shipped `PrivacyInfo.xcprivacy` manifest currently has an empty
+`NSPrivacyCollectedDataTypes` array. That declaration does not mean the agent
+never sends data off-device: the optional transfers below must be considered
+separately when reviewing privacy settings and distribution requirements.
 
 ## Every outbound connection the agent makes
 
 | Host | When | What is sent | What comes back |
 |---|---|---|---|
 | **Your Hub** (the address you entered) | Only after you enrol, and only if delivery is on | This Mac's host name and observed connection metadata: local/remote addresses and ports, protocol, process name and ID, bundle ID when available, timestamps, byte counts, collector and confidence, and the destination host name when one was observed | Acknowledgement; threat feed data; map locations for addresses you have already observed |
-| **`dl.egressview.com`** | Update check on a schedule, and when you press Check for Updates | An ordinary HTTPS GET. No identifier, no account, no observation data | A release manifest, and the `.pkg` if you choose to install |
+| **`dl.egressview.com`** | Update check on a schedule, and when you press Check for Updates | An HTTPS GET with the agent and OS versions. No identifier, no account, no observation data | A release manifest, and the `.pkg` if you choose to install |
 | **`feodotracker.abuse.ch`, `threatfox.abuse.ch`, `urlhaus.abuse.ch`, `www.spamhaus.org`** | **Only if you turn on direct feed download**, which is off when a Hub supplies feeds | An ordinary HTTPS GET for the whole public list. **Your observations are not sent** — matching happens on your Mac, against the downloaded list | The public indicator lists |
+| **`download.maxmind.com`** | Only if you configure a local GeoLite2 country table | Your MaxMind account ID and licence key; no observed destination address | The GeoLite2 database |
+| **`ipwho.is`** | Only if you enable fallback location lookups | Observed destination IP addresses, up to 500 a day | Location for each queried address |
+| **`api.openai.com`, `api.anthropic.com`** | Only if you configure that cloud AI provider and submit a question | The bounded context shown in the preview and your question | The model's answer |
 
-There is no fourth category. If you see the agent connecting somewhere not on
-this table, that is a bug worth reporting.
+These are the configured service categories, not an allowlist of every network
+hostname: for example, a download host may redirect to a CDN. Report an
+unexpected connection so its purpose can be checked.
 
 ### The one thing this table cannot hide
 
@@ -122,10 +127,11 @@ protect it.
 
 ## Locations on the globe
 
-The globe places destinations you have already observed. Those lookups go to
-**your own Hub** at `api/agent/geo-cache`, not to a geolocation service, and the
-results are cached. If you have not enrolled with a Hub, the globe has nothing
-to place and says so.
+The globe places destinations you have already observed. It can use your
+**own Hub** at `api/agent/geo-cache` or a locally downloaded GeoLite2 country
+table. If you opt in to fallback lookups, an unresolved destination IP can be
+sent to `ipwho.is`. Without a location source, the globe cannot place it;
+the agent does not silently query a third party.
 
 ## Required-reason API declarations
 

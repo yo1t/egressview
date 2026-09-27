@@ -72,19 +72,21 @@ modelを使用します。
 
 ## AWS mapping
 
-週末に予定しているAWS構成は`public-oauth` profileの実装であり、別editionでは
-ありません。
+AWSで`public-oauth` profileを構成する場合の参照例です。別editionではなく、
+すべての部品が配備済みという意味でもありません。
 
 - 既存EC2でEgressViewとloopback MCP processを実行
-- ECS Fargate + RDS PostgreSQLで選定したKeycloakを実行
+- Amazon CognitoなどのOAuth/OIDC providerを利用。ECS Fargate +
+  PostgreSQL上のKeycloakは自己ホスト型のfallbackであり、AWS構成の必須要素ではない
 - ALB + ACMでTLS終端
 - WAFとproxy上限でpublic boundaryを保護
 - Route 53で`www`、`mcp`、`auth`を管理
 - Security GroupでEgressView/MCPへのInternet direct ingressを禁止
 
 同じapplicationをオンプレミスのreverse proxy・内部Keycloak、または他CSPの同等
-serviceでも利用できます。AWS構築はMCP protocol/publication gate完了まで
-`publishDns=false`を維持します。
+serviceでも利用できます。**新規**配備ではMCP protocol/publication gateの
+合格までDNSを非公開にし、DNS公開は別途レビューします。providerごとの互換性の
+注意点は[MCP OAuth評価](remote-mcp-oauth-evaluation.ja.md)を参照してください。
 
 ## オフラインモード
 

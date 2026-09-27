@@ -193,8 +193,9 @@ OAuth mode accepts only an `egv_...` scoped identity and never falls back to
 `EGRESSVIEW_TOKEN`. Store `.env.mcp` with mode `0600`, rotate the identity
 before expiry, and revoke the previous identity after validation. Generate the
 audit key once with `openssl rand -hex 32` and keep it unchanged when rotating
-the service identity. The Internet publication gate is delivered by the next
-P2-60 phase. Do not publish this endpoint to the Internet yet.
+the service identity. Before publishing an Internet-facing endpoint, complete
+the [pre-publication gate](#pre-publication-gate) and review its evidence and
+network controls. A passing gate does not publish DNS automatically.
 
 ### Step 2a — Apache (httpd) config
 
