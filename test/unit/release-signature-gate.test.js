@@ -39,6 +39,22 @@ describe('release signature gate', () => {
     }
   });
 
+  it('Agentのタグはどの形でもHubのリリースとして検査しない', () => {
+    // agent-macos/v* and agent-windows/v* failed this gate on every Mac
+    // release from 0.5.83, and the weekly sweep took agent-macos/v0.5.82 for
+    // the newest Hub release, so it stopped checking any Hub release at all.
+    const { isAgentTag } = require('../../scripts/verify-published-release');
+    for (const tag of ['agent-v0.5.81', 'agent-macos/v0.5.96', 'agent-windows/v0.1.140']) {
+      assert.equal(isAgentTag(tag), true, tag);
+    }
+    for (const tag of ['v2.0.3', 'v10.1.0-rc.1']) {
+      assert.equal(isAgentTag(tag), false, tag);
+    }
+    const yaml = fs.readFileSync(workflow, 'utf8');
+    assert.match(yaml, /!startsWith\(github\.event\.release\.tag_name, 'agent-'\)/);
+    assert.doesNotMatch(yaml, /startsWith\(github\.event\.release\.tag_name, 'agent-v'\)/);
+  });
+
   it('ゲートはreleaseの公開と編集の両方で走る', () => {
     // Publication alone is not enough: an asset removed or replaced afterwards
     // leaves a release that no longer verifies.

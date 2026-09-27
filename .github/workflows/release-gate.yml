@@ -39,9 +39,11 @@ jobs:
   verify:
     # Agent releases carry a notarised .pkg signed by Apple rather than an
     # offline source bundle, and are checked by their own publication path.
+    # Every agent tag family: `agent-v*` before 0.5.83, `agent-macos/v*` and
+    # `agent-windows/v*` since. Hub tags start with `v`.
     if: >-
       github.event_name != 'release'
-      || !startsWith(github.event.release.tag_name, 'agent-v')
+      || !startsWith(github.event.release.tag_name, 'agent-')
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
