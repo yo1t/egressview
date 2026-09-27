@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Japanese, applied by Windows Installer when Windows's display language is
+     Japanese. See Package.en-us.wxl. -->
+<WixLocalization Culture="ja-JP" Codepage="932" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+  <String Id="PackageLanguage" Value="1041" />
+  <String Id="PackageDescription" Value="EgressView Agent for Windows" />
+  <String Id="DowngradeError" Value="新しいバージョンの EgressView Agent が既にインストールされています。" />
+  <String Id="ServiceDescription" Value="EgressView のために、このPCの外向きの通信を観測します。" />
+  <String Id="ShortcutDescription" Value="EgressView Agent を開く" />
+</WixLocalization>

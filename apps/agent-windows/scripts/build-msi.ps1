@@ -98,15 +98,78 @@ foreach ($publishedExe in @(
 # seconds and removes an error that reads like a WiX fault.
 $installerObj = Join-Path $agentRoot 'installer\obj\Release'
 if (Test-Path -LiteralPath $installerObj) { Remove-Item -LiteralPath $installerObj -Recurse -Force }
-dotnet build (Join-Path $agentRoot 'installer\EgressView.Agent.Installer.wixproj') -c Release `
-    -p:ProductVersion=$Version `
-    -p:ServicePublishDir=$servicePublish `
-    -p:UiPublishDir=$uiPublish `
-    -p:LicenseRtf=$licenseRtf `
-    -p:PackageArch=$arch `
-    -p:OutputPath=$outputPath
-if ($LASTEXITCODE -ne 0) { throw "MSI build failed: $LASTEXITCODE" }
+
+# One MSI that speaks the language Windows does.
+#
+# It is built twice, in English and in Japanese; the difference is written as
+# a language transform and embedded in the English package under its language
+# id, 1041, and the package is marked as offering both. Windows Installer then
+# applies the transform itself when Windows's display language is Japanese:
+# no second download, and no way to pick the wrong one. The installer's own
+# words are in installer\Package.*.wxl; the dialogs come from WixToolset.UI.
+$cultureRoot = Join-Path $installerObj 'cultures'
+$builtByCulture = @{}
+foreach ($culture in 'en-US', 'ja-JP') {
+    $cultureOut = Join-Path $cultureRoot "out-$culture"
+    dotnet build (Join-Path $agentRoot 'installer\EgressView.Agent.Installer.wixproj') -c Release `
+        -p:ProductVersion=$Version `
+        -p:ServicePublishDir=$servicePublish `
+        -p:UiPublishDir=$uiPublish `
+        -p:LicenseRtf=$licenseRtf `
+        -p:PackageArch=$arch `
+        -p:Cultures=$culture `
+        -p:OutputPath="$cultureOut\" `
+        -p:IntermediateOutputPath="$(Join-Path $cultureRoot "obj-$culture")\"
+    if ($LASTEXITCODE -ne 0) { throw "MSI build failed ($culture): $LASTEXITCODE" }
+    $built = Get-ChildItem -LiteralPath $cultureOut -Recurse -Filter $msiName | Select-Object -First 1
+    if (-not $built) { throw "MSI was not produced for $culture under $cultureOut" }
+    $builtByCulture[$culture] = $built.FullName
+}
+
+[xml]$installerProject = Get-Content -LiteralPath (Join-Path $agentRoot 'installer\EgressView.Agent.Installer.wixproj')
+$wixVersion = ($installerProject.Project.Sdk -split '/')[1]
+$nugetRoot = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget\packages' }
+$hostArch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'x64' }
+$wix = Join-Path $nugetRoot "wixtoolset.sdk\$wixVersion\tools\net472\$hostArch\wix.exe"
+if (-not (Test-Path -LiteralPath $wix -PathType Leaf)) { throw "wix.exe not found at $wix" }
+$transform = Join-Path $cultureRoot '1041.mst'
+& $wix msi transform -t language $builtByCulture['en-US'] $builtByCulture['ja-JP'] -out $transform -intermediateFolder (Join-Path $cultureRoot 'transform')
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $transform -PathType Leaf)) { throw "Language transform failed: $LASTEXITCODE" }
 
 $msi = Join-Path $outputPath $msiName
-if (-not (Test-Path -LiteralPath $msi -PathType Leaf)) { throw "MSI was not produced: $msi" }
+New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
+Copy-Item -LiteralPath $builtByCulture['en-US'] -Destination $msi
+$windowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+$database = $windowsInstaller.OpenDatabase($msi, 1)
+$storages = $database.OpenView('SELECT `Name`,`Data` FROM _Storages')
+$storages.Execute($null)
+$record = $windowsInstaller.CreateRecord(2)
+$record.StringData(1) = '1041'
+$record.SetStream(2, $transform)
+$storages.Modify(3, $record)
+$storages.Close()
+$summary = $database.SummaryInformation(4)
+$template = [string]$summary.Property(7)
+if ($template -notmatch ';1033$') { throw "Unexpected package template: $template" }
+$summary.Property(7) = "$template,1041"
+$summary.Persist()
+$database.Commit()
+[void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($summary)
+[void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($storages)
+[void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($database)
+[System.GC]::Collect(); [System.GC]::WaitForPendingFinalizers()
+
+# Read it back: a package that claims Japanese without carrying it would open
+# in English on a Japanese PC and nobody would be told.
+$check = $windowsInstaller.OpenDatabase($msi, 0)
+$checkTemplate = [string]$check.SummaryInformation(0).Property(7)
+$view = $check.OpenView("SELECT ``Name`` FROM _Storages WHERE ``Name``='1041'")
+$view.Execute($null)
+$embedded = $null -ne $view.Fetch()
+$view.Close()
+[void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($view)
+[void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($check)
+[System.GC]::Collect(); [System.GC]::WaitForPendingFinalizers()
+if (-not $embedded -or $checkTemplate -notmatch ';1033,1041$') { throw "Japanese transform not embedded: template '$checkTemplate', embedded $embedded" }
+"languages: $checkTemplate (Japanese applied by Windows Installer on a Japanese display language)"
 Get-FileHash -Algorithm SHA256 -LiteralPath $msi | Select-Object Path, Hash

@@ -7,14 +7,18 @@
            Version="$(var.ProductVersion)"
            UpgradeCode="4B0D9169-55BA-48E8-AE1B-9F70AB610251"
            Scope="perMachine"
-           Language="1033"
+           Language="!(loc.PackageLanguage)"
            Compressed="yes">
-    <SummaryInformation Description="EgressView Agent for Windows" Manufacturer="EgressView" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of EgressView Agent is already installed."
+    <SummaryInformation Description="!(loc.PackageDescription)" Manufacturer="EgressView" />
+    <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)"
                   Schedule="afterInstallInitialize" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+    <!-- The product's mark instead of WiX's stock artwork. Drawn by
+         Assets\make-installer-bitmaps.ps1 from the EgressView mark. -->
+    <WixVariable Id="WixUIDialogBmp" Value="Assets\installer-dialog.bmp" />
+    <WixVariable Id="WixUIBannerBmp" Value="Assets\installer-banner.bmp" />
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
@@ -34,7 +38,7 @@
       <ServiceInstall Id="AgentServiceInstall"
                       Name="EgressViewAgent"
                       DisplayName="EgressView Agent"
-                      Description="Observes outbound network connections for EgressView."
+                      Description="!(loc.ServiceDescription)"
                       Type="ownProcess"
                       Start="auto"
                       ErrorControl="normal"
@@ -97,7 +101,7 @@
              the Icon table. Without it the shortcut installed with an empty
              IconLocation and drew the generic default. -->
         <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuEgressView" Name="EgressView Agent"
-                  Description="Open EgressView Agent" WorkingDirectory="UIFOLDER" Advertise="yes"
+                  Description="!(loc.ShortcutDescription)" WorkingDirectory="UIFOLDER" Advertise="yes"
                   Icon="AgentIcon.ico" IconIndex="0" />
       </File>
     </Component>
