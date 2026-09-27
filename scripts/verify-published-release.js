@@ -30,7 +30,17 @@ const DNS_ANCHOR = '_egressview-release.egressview.com';
 // Agent releases carry a notarised .pkg signed by Apple, which is a real and
 // independently checkable signature. They are not offline source bundles and
 // this gate does not apply to them.
-const AGENT_TAG = /^agent-v/;
+//
+// Every agent tag family, not only the first one. Agent tags were `agent-v*`
+// until 0.5.82 and have been `agent-macos/v*` and `agent-windows/v*` since; the
+// old prefix alone let every later Mac release fail this gate, and let the
+// weekly sweep pick `agent-macos/v0.5.82` as the newest "Hub" release and fail
+// on it -- so from 2026-09-21 the sweep checked no Hub release at all.
+const AGENT_TAG = /^agent-/;
+
+function isAgentTag(tag) {
+  return AGENT_TAG.test(tag);
+}
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -69,7 +79,7 @@ function releasesToCheck(options) {
     '--json', 'tagName,isDraft',
   ]));
   const hubReleases = listed
-    .filter((release) => !release.isDraft && !AGENT_TAG.test(release.tagName))
+    .filter((release) => !release.isDraft && !isAgentTag(release.tagName))
     .map((release) => release.tagName);
   if (!hubReleases.length && listed.length === 100) {
     throw new Error('Found no Hub release in the most recent 100; widen the listing');
@@ -193,4 +203,4 @@ function main(argv = process.argv.slice(2)) {
 
 if (require.main === module) main();
 
-module.exports = { main, parseArgs, checkRelease, releasesToCheck, knownReleaseExceptions };
+module.exports = { main, parseArgs, checkRelease, releasesToCheck, knownReleaseExceptions, isAgentTag };
