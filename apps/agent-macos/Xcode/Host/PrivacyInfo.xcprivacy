@@ -2,22 +2,65 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- EgressView observes outbound connection metadata and keeps it on the
-	     user's own hardware. Nothing is sent to the developer. When the user
-	     enrols the agent with a Hub, observations go to that Hub, which the
-	     user runs themselves; the developer has no access to it.
-
-	     Apple's definition of collection is transmitting data off the device
-	     where the developer or a third party can access it. By that
-	     definition this app collects nothing, which is why the list below is
-	     empty rather than merely short. See docs/agent-privacy.md for what
-	     each outbound connection the app makes is for. -->
+	<!-- Observations stay local unless the user enrols with a self-managed
+	     Hub or explicitly enables an external lookup or cloud AI. The
+	     developer cannot access a self-managed Hub. The distribution CDN
+	     retains update-request access logs. Optional providers may retain
+	     submitted data beyond the request. See docs/agent-privacy.md. -->
 	<key>NSPrivacyTracking</key>
 	<false/>
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
 	<key>NSPrivacyCollectedDataTypes</key>
-	<array/>
+	<array>
+		<!-- Update-request IP addresses and optional destination IPs and
+		     connection aggregates sent to external providers. The AI provider
+		     can associate submitted data with the user's API account. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherDataTypes</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+		</dict>
+		<!-- Cloud AI context can include websites the user visited. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeBrowsingHistory</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+		</dict>
+		<!-- Questions and prior conversation sent to a configured cloud AI. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+		</dict>
+		<!-- A configured MaxMind account ID identifies the download account;
+		     cloud AI requests are also authenticated to a provider account. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeUserID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array><string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string></array>
+		</dict>
+	</array>
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
 		<dict>

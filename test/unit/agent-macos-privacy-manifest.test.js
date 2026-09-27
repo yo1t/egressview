@@ -18,8 +18,8 @@ function read(file) {
 }
 
 // The manifest is a plist, and this repository has no plist parser. These
-// readers cover the three shapes the file actually uses; anything else in it
-// would be undeclared and should fail loudly rather than be skipped silently.
+// readers cover the shapes the file actually uses; anything else in it should
+// fail loudly rather than be skipped silently.
 function boolValue(plist, key) {
   const match = plist.match(new RegExp(`<key>${key}</key>\\s*<(true|false)\\s*/>`));
   return match ? match[1] === 'true' : null;
@@ -27,6 +27,17 @@ function boolValue(plist, key) {
 
 function isEmptyArray(plist, key) {
   return new RegExp(`<key>${key}</key>\\s*<array\\s*/>`).test(plist);
+}
+
+function collectedDataEntries(plist) {
+  const section = plist.match(/<key>NSPrivacyCollectedDataTypes<\/key>\s*<array>([\s\S]*?)<\/array>\s*<key>NSPrivacyAccessedAPITypes<\/key>/);
+  if (!section) return null;
+  return [...section[1].matchAll(/<dict>([\s\S]*?)<\/dict>/g)].map(([, entry]) => ({
+    type: entry.match(/<key>NSPrivacyCollectedDataType<\/key>\s*<string>([^<]+)<\/string>/)?.[1],
+    linked: boolValue(entry, 'NSPrivacyCollectedDataTypeLinked'),
+    tracking: boolValue(entry, 'NSPrivacyCollectedDataTypeTracking'),
+    appFunctionality: /<key>NSPrivacyCollectedDataTypePurposes<\/key>\s*<array>\s*<string>NSPrivacyCollectedDataTypePurposeAppFunctionality<\/string>\s*<\/array>/.test(entry),
+  }));
 }
 
 function accessedApiReasons(plist, category) {
@@ -88,16 +99,24 @@ describe('macOS Agent privacy manifest', () => {
     }
   });
 
-  it('収集するデータ種別を持たない', () => {
-    // The product's central claim is that observations stay on the user's own
-    // hardware. If this list ever stops being empty, the claim has changed and
-    // the documentation has to change with it.
-    for (const [name, file] of Object.entries(manifests)) {
-      assert.ok(
-        isEmptyArray(read(file), 'NSPrivacyCollectedDataTypes'),
-        `${name} declares collected data; docs/agent-privacy.md must be revisited`
-      );
+  it('ホストの外部送信と拡張のローカル転送を区別して宣言する', () => {
+    const entries = collectedDataEntries(read(manifests.host));
+    assert.ok(entries, 'host must declare collected data types');
+    assert.deepEqual(
+      entries.map(({ type }) => type).sort(),
+      [
+        'NSPrivacyCollectedDataTypeBrowsingHistory',
+        'NSPrivacyCollectedDataTypeOtherDataTypes',
+        'NSPrivacyCollectedDataTypeOtherUserContent',
+        'NSPrivacyCollectedDataTypeUserID',
+      ].sort()
+    );
+    for (const entry of entries) {
+      assert.equal(entry.linked, true, `${entry.type} must account for provider identity`);
+      assert.equal(entry.tracking, false, `${entry.type} must not be used for tracking`);
+      assert.equal(entry.appFunctionality, true, `${entry.type} needs an app functionality purpose`);
     }
+    assert.ok(isEmptyArray(read(manifests.extension), 'NSPrivacyCollectedDataTypes'));
   });
 
   it('UserDefaultsの利用に理由を宣言している', () => {

@@ -8,6 +8,8 @@
 
 > This is a historical assessment through commit `95e4ef0`, not an assessment of today's main branch. Later changes, including the Windows update-manifest client, are not reflected in the findings below. SonarQube and OpenSSF scores are repository-based estimates; neither official scanner was run. No penetration test was performed. The platform-specific builds and signing pipelines were assessed from source and CI evidence; the macOS Swift tests were also run on macOS for this review.
 
+> **Privacy-manifest correction (2026-09-27):** The empty collected-data list described below records the historical state, not the current declaration. The host app now declares data potentially retained by the distribution CDN and optional external providers; the system extension's list remains empty. See [the current macOS agent privacy inventory](agent-privacy.md).
+
 ---
 
 ## Executive Summary

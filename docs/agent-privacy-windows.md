@@ -7,8 +7,9 @@ centre of this page.
 
 ## The short version
 
-- **Observations stay on this PC.** Connection metadata is written to a SQLite
-  database on this machine.
+- **Observations are stored on this PC by default.** Connection metadata is
+  written to a SQLite database here. Enrolment with your own Hub, optional
+  location lookups, and cloud AI can send selected data off-device as below.
 - **There is no developer telemetry.** There is no analytics endpoint or crash
   reporter. Optional third-party lookups and cloud AI are listed below.
 - **Payloads are never read.** Monitoring is done through ETW (Event Tracing
@@ -22,11 +23,11 @@ centre of this page.
 | Host | When | What is sent | What comes back |
 |---|---|---|---|
 | **Your Hub** (the address you entered) | Only after enrolling, and only while delivery is enabled | This PC's host name and the connection metadata it observed | An acknowledgement, threat feed data, map positions for addresses already observed |
-| **`dl.egressview.com`** | On the periodic update check, and when you press "Check for updates" | An ordinary HTTPS GET. No identifier, no account, no observations | The release manifest |
+| **`dl.egressview.com`** | On the periodic update check, and when you press "Check for updates" | An HTTPS GET with the Agent and Windows versions in its User-Agent. No installation ID, account, or observations | The release manifest |
 | **`feodotracker.abuse.ch` / `threatfox.abuse.ch` / `urlhaus.abuse.ch` / `www.spamhaus.org`** | **Only if you enable public feed downloads** | An ordinary HTTPS GET for the whole public list. **None of your observations are sent** | The published indicator lists |
 | **`download.maxmind.com`** | **Only if you enable the country table** | Your MaxMind account ID and licence key. **No observed destination is sent** | The GeoLite2-Country database |
 | **`ipwho.is`** | **Only if you choose "Ask the Hub, then ipwho.is"** | **The IP addresses of destinations you observed**, at most 500 a day | The country and coordinates for that address |
-| **`api.openai.com` / `api.anthropic.com`** | **Only if you enable a cloud AI provider and confirm each question** | Exactly the bounded preview shown on screen | The answer |
+| **`api.openai.com` / `api.anthropic.com`** | **Only if you enable a cloud AI provider and confirm each question** | The bounded preview shown on screen, your question, and conversation context | The answer |
 
 These are service categories, not an allowlist of every network hostname:
 downloads can redirect to a CDN. Report an unexpected connection so its
@@ -47,8 +48,19 @@ log. **That is a property of making an HTTPS request at all, not something the
 agent adds.** It is written here because a privacy page that only lists the
 convenient facts is not worth reading.
 
-Nothing in that request identifies you beyond the request itself. There is no
-installation ID, no account, and no observations attached.
+There is no installation ID, account, or observation data attached. The CDN's
+access log still retains the requester's IP address; absence of an installation
+ID does not make the log anonymous.
+
+Cloud AI is optional, but its inputs are not necessarily discarded after the
+reply. OpenAI's Responses API retains response state by default, and
+Anthropic's API normally retains inputs and outputs after processing. The
+preview can include destination aggregates and websites; the question can
+contain whatever the user types. `ipwho.is` receives observed destination IPs
+only when enabled; its retention policy has not been verified. Your own Hub is
+separate: it is not operated for or accessible to the developer. See
+[OpenAI's API data controls](https://platform.openai.com/docs/models/default-usage-policies-by-endpoint)
+and [Anthropic's retention policy](https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data).
 
 ### The fields sent to a Hub
 

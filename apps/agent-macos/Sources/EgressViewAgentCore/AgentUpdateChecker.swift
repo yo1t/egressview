@@ -25,8 +25,8 @@ public struct URLSessionAgentUpdateTransport: AgentUpdateTransport {
 /// What is sent is the whole story of this feature: a GET, a User-Agent naming
 /// the product, its version and the OS version, and nothing else. There is no
 /// agent ID, no install ID, and no cookie -- the session is ephemeral with
-/// cookies disabled. Two runs on the same Mac are indistinguishable from two
-/// runs on different Macs holding the same version.
+/// cookies disabled. The distribution CDN still records the requester's IP
+/// address in its access logs; requests must not be described as anonymous.
 ///
 /// The agent watches its own outbound traffic, so the user will see this
 /// request in their own logs. It has to be something we can explain.
