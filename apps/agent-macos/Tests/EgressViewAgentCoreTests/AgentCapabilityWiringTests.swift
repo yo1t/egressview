@@ -13,17 +13,25 @@ private final class WiringCredentialStore: AgentCredentialStoring, @unchecked Se
 private actor WiringTransport: AgentIngestTransport {
     private(set) var paths: [String] = []
     private(set) var bodies: [Data] = []
-    let capabilities: (status: Int, body: Data)
+    /// One status per capability ask; the last one repeats.
+    private var statuses: [Int]
+    let body: Data
 
     init(capabilitiesStatus: Int = 200, capabilitiesBody: String = #"{"schemaVersions":[1],"maxObservationsPerBatch":3}"#) {
-        capabilities = (capabilitiesStatus, Data(capabilitiesBody.utf8))
+        self.init(capabilitiesStatuses: [capabilitiesStatus], capabilitiesBody: capabilitiesBody)
+    }
+
+    init(capabilitiesStatuses: [Int], capabilitiesBody: String = #"{"schemaVersions":[1],"maxObservationsPerBatch":3}"#) {
+        statuses = capabilitiesStatuses
+        body = Data(capabilitiesBody.utf8)
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let path = request.url?.path ?? ""
         paths.append(path)
         if path.hasSuffix("capabilities") {
-            return (capabilities.body, HTTPURLResponse(url: request.url!, statusCode: capabilities.status, httpVersion: nil, headerFields: nil)!)
+            let status = statuses.count > 1 ? statuses.removeFirst() : statuses[0]
+            return (body, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
         }
         bodies.append(request.httpBody ?? Data())
         return (
@@ -88,6 +96,53 @@ final class AgentCapabilityWiringTests: XCTestCase {
         XCTAssertGreaterThan(second, first, "失敗したまま二度と聞き直していない")
     }
 
+    func test起動直後に聞けなくても一時間待たずに聞き直す() async throws {
+        // P3-179: the ask three seconds after an update failed, and the next
+        // one came an hour later.
+        let clock = TestClock()
+        let (sender, transport, queue) = try make(capabilitiesStatuses: [503, 200], clock: clock)
+        try queue.enqueue([observation()])
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        try await Task.sleep(for: .milliseconds(300))
+        let asked1 = await transport.capabilityRequests()
+        XCTAssertEqual(asked1, 1)
+
+        // Ten seconds on: too soon to ask again.
+        clock.advance(by: 10)
+        try queue.enqueue([observation()])
+        await sender.setConnectivityAvailable(false)
+        await sender.setConnectivityAvailable(true)
+        try await Task.sleep(for: .milliseconds(300))
+        let asked2 = await transport.capabilityRequests()
+        XCTAssertEqual(asked2, 1, "失敗の直後に聞き直し続けている")
+
+        // Half a minute after the failure: asked again, not an hour later.
+        clock.advance(by: 25)
+        try queue.enqueue([observation()])
+        await sender.setConnectivityAvailable(false)
+        await sender.setConnectivityAvailable(true)
+        try await Task.sleep(for: .milliseconds(300))
+        let asked3 = await transport.capabilityRequests()
+        XCTAssertEqual(asked3, 2, "30秒たっても聞き直していない")
+
+        // Answered: not asked again.
+        clock.advance(by: 3_601)
+        try queue.enqueue([observation()])
+        await sender.setConnectivityAvailable(false)
+        await sender.setConnectivityAvailable(true)
+        try await Task.sleep(for: .milliseconds(300))
+        let asked4 = await transport.capabilityRequests()
+        XCTAssertEqual(asked4, 2)
+    }
+
+    func test聞き直す間隔は倍々で一時間まで() {
+        let intervals = (1...9).map { AgentIngestSender.capabilityRetryInterval(afterFailures: $0) }
+        XCTAssertEqual(intervals, [30, 60, 120, 240, 480, 960, 1_920, 3_600, 3_600])
+        XCTAssertEqual(AgentIngestSender.capabilityRetryInterval(afterFailures: 0), 0)
+        XCTAssertEqual(AgentIngestSender.capabilityRetryInterval(afterFailures: 1_000), 3_600)
+    }
+
     func testHubの上限を超えて送らない() async throws {
         // The stub Hub accepts three per batch; the agent's own limit is 200.
         let (sender, transport, queue) = try make()
@@ -128,9 +183,10 @@ final class AgentCapabilityWiringTests: XCTestCase {
 
     private func make(
         capabilitiesStatus: Int = 200,
+        capabilitiesStatuses: [Int]? = nil,
         clock: TestClock? = nil
     ) throws -> (AgentIngestSender, WiringTransport, AgentDeliveryQueue) {
-        let transport = WiringTransport(capabilitiesStatus: capabilitiesStatus)
+        let transport = WiringTransport(capabilitiesStatuses: capabilitiesStatuses ?? [capabilitiesStatus])
         let queue = try AgentDeliveryQueue(
             fileURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("egressview-wiring-\(UUID().uuidString).json")

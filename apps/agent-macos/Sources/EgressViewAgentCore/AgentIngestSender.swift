@@ -97,6 +97,22 @@ public actor AgentIngestSender {
     /// request an hour and keeps the two in step.
     private var capabilitiesAskedAt: Date?
     private static let capabilitiesRefreshInterval: TimeInterval = 60 * 60
+    /// Failed asks in a row since the last answer.
+    private var capabilityFailures = 0
+
+    /// How long to wait before asking again after `failures` failed asks.
+    ///
+    /// Starts at thirty seconds and doubles up to the hour. It used to be the
+    /// hour from the first failure: on 2026-09-27 the ask made three seconds
+    /// after an update failed, and for the next hour the agent treated the Hub
+    /// as unable to complete a row or take a hostname -- 163 connections
+    /// became two rows each and no names were sent (P3-179). A Hub too old to
+    /// answer at all still reaches the hourly beat after seven asks.
+    static func capabilityRetryInterval(afterFailures failures: Int) -> TimeInterval {
+        guard failures > 0 else { return 0 }
+        let doubled = 30 * pow(2, Double(min(failures, 16) - 1))
+        return min(doubled, capabilitiesRefreshInterval)
+    }
 
     private let logger = Logger(subsystem: "com.egressview.agent.macos", category: "hub-capabilities")
 
@@ -348,10 +364,13 @@ public actor AgentIngestSender {
     @discardableResult
     private func askCapabilities(credential: AgentCredential) async -> Bool {
         if let askedAt = capabilitiesAskedAt,
-           hubCapabilities != nil || now().timeIntervalSince(askedAt) < Self.capabilitiesRefreshInterval {
+           hubCapabilities != nil
+            || now().timeIntervalSince(askedAt) < Self.capabilityRetryInterval(afterFailures: capabilityFailures) {
             return false
         }
         capabilitiesAskedAt = now()
+        // Counted as a failure until an answer is decoded below.
+        capabilityFailures += 1
 
         guard AgentEnrollmentService.isAllowedHubURL(credential.hubURL) else {
             logger.notice("hub-capabilities: refused=hub-url-not-allowed")
@@ -366,7 +385,7 @@ public actor AgentIngestSender {
         do {
             result = try await transport.send(request)
         } catch {
-            logger.notice("hub-capabilities: request failed, will ask again within the hour")
+            logger.notice("hub-capabilities: request failed, will ask again in \(Int(Self.capabilityRetryInterval(afterFailures: self.capabilityFailures)), privacy: .public)s")
             return true
         }
         guard result.1.statusCode == 200 else {
@@ -378,6 +397,7 @@ public actor AgentIngestSender {
             return true
         }
         hubCapabilities = decoded
+        capabilityFailures = 0
         let fields = decoded.observationFields?.joined(separator: ",") ?? "(none)"
         let versions = decoded.schemaVersions.map(String.init).joined(separator: ",")
         logger.notice(
@@ -426,6 +446,7 @@ public actor AgentIngestSender {
     private func forgetCapabilities() {
         hubCapabilities = nil
         capabilitiesAskedAt = nil
+        capabilityFailures = 0
     }
 
     /// Halve the refused batch and try again promptly.
