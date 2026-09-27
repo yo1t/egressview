@@ -32,6 +32,13 @@ public partial class App : System.Windows.Application
     private readonly DispatcherTimer trayRefresh = new() { Interval = TimeSpan.FromSeconds(15) };
     internal MonitoringStatusTracker MonitoringStatus { get; } = new();
     internal LocalNotificationService Notifications { get; } = new();
+    private readonly ThreatNotificationPlanner threatNotices = new();
+    /// From when the next scan looks for new matches. Starts now, so opening
+    /// the Agent does not announce the week before it.
+    private DateTimeOffset threatScanFrom = DateTimeOffset.UtcNow;
+    private DateTimeOffset nextThreatScanAt = DateTimeOffset.UtcNow + ThreatScanInterval;
+    private static readonly TimeSpan ThreatScanInterval = TimeSpan.FromMinutes(1);
+    private bool hubDeliveryHealthy;
     internal AgentUpdateController Updates { get; } = new();
 
     internal bool IsExiting { get; private set; }
@@ -76,6 +83,7 @@ public partial class App : System.Windows.Application
         {
             await RefreshTrayStateAsync();
             await RefreshDeliveryNotificationAsync();
+            if (DateTimeOffset.UtcNow >= nextThreatScanAt) await ScanForNewThreatsAsync();
         };
         trayRefresh.Start();
         activationRegistration = ThreadPool.RegisterWaitForSingleObject(
@@ -324,16 +332,49 @@ public partial class App : System.Windows.Application
             static DateTimeOffset? DateValue(JsonElement source, string property) =>
                 source.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String &&
                 DateTimeOffset.TryParse(value.GetString(), out var parsed) ? parsed : null;
-            Notifications.ObserveHubDelivery(new(
+            var sample = new DeliveryNotificationSample(
                 DateTimeOffset.Now,
                 data.GetProperty("enrolled").GetBoolean() && data.GetProperty("enabled").GetBoolean(),
                 data.GetProperty("state").GetString() ?? "idle",
                 data.GetProperty("pending").GetInt64(),
                 DateValue(data, "oldestPendingAt"),
-                DateValue(data, "lastAcknowledgedAt")),
-                ShowNotification);
+                DateValue(data, "lastAcknowledgedAt"));
+            hubDeliveryHealthy = ThreatNotificationPlanner.HubDeliveryHealthy(sample);
+            Notifications.ObserveHubDelivery(sample, ShowNotification);
         }
         catch { /* Status availability is represented separately; it is not a Hub outage. */ }
+    }
+
+    /// Tells the person about destinations that newly matched threat
+    /// information, as the Mac Agent does (P3-180). Until this, the setting
+    /// "New threat matches" existed and nothing ever sent one.
+    ///
+    /// The notice says how many and nothing else, because it can show on the
+    /// lock screen; which destinations, applications and feeds is kept in the
+    /// history inside the Agent.
+    private async Task ScanForNewThreatsAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        nextThreatScanAt = now + ThreatScanInterval;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"threats","minutes":60}""");
+            using var document = JsonDocument.Parse(response);
+            var report = document.RootElement.GetProperty("data").Deserialize<ThreatReport>();
+            if (report is null) return;
+            // Moved on only once the scan has been read, so a request that
+            // failed leaves its matches for the next one.
+            var since = threatScanFrom;
+            threatScanFrom = now;
+            if (threatNotices.Plan(report, since, now, hubDeliveryHealthy) is not { } notice) return;
+            var body = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                LocalizationManager.Text("ThreatNoticeFormat"), notice.Addresses.Count);
+            if (Notifications.Notify("Threat", $"threat-scan-{now.ToUnixTimeSeconds() / 60}",
+                    LocalizationManager.Text("ThreatNoticeTitle"), body, ShowNotification,
+                    threats: notice.Kept, moreThreats: notice.More))
+                threatNotices.Accept(notice, now);
+        }
+        catch { /* The next scan tries again; the Threats tab reports availability itself. */ }
     }
 
     /// Settings asks for the same toggle the tray menu uses. The tray item is

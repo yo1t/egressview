@@ -74,4 +74,8 @@
   <system:String x:Key="NoticeDetailsNotRecorded">The details were not recorded for this notice. It was sent before EgressView Agent 0.1.140, which began keeping them.</system:String>
   <system:String x:Key="OpenThreatsTab">Open the Threats tab</system:String>
   <system:String x:Key="NotificationKindOutboundAnomaly">Outbound anomaly</system:String>
+  <system:String x:Key="ThreatNoticeTitle">New threat match detected</system:String>
+  <system:String x:Key="ThreatNoticeFormat">The latest scan found {0:N0} previously unnotified destinations that matched threat information. Open the Threats tab to review them. Addresses and host names are not shown in notifications.</system:String>
+  <system:String x:Key="MoreThreatsFormat">{0:N0} more matches in this notice are in the Threats tab.</system:String>
+  <system:String x:Key="FeedNotProof">A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point.</system:String>
 </ResourceDictionary>

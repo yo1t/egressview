@@ -74,4 +74,8 @@
   <system:String x:Key="NoticeDetailsNotRecorded">この通知の詳細は記録されていません。詳細の記録を始めたEgressView Agent 0.1.140より前に送られた通知です。</system:String>
   <system:String x:Key="OpenThreatsTab">「脅威」タブを開く</system:String>
   <system:String x:Key="NotificationKindOutboundAnomaly">外向き通信の異常</system:String>
+  <system:String x:Key="ThreatNoticeTitle">新しい脅威の一致を検出しました</system:String>
+  <system:String x:Key="ThreatNoticeFormat">直近の照合で、まだ通知していない{0:N0}件の宛先が脅威情報と一致しました。脅威タブを開いて確認してください。アドレスとホスト名は通知に表示しません。</system:String>
+  <system:String x:Key="MoreThreatsFormat">この通知にはほかに{0:N0}件の一致があります。「脅威」タブで確認できます。</system:String>
+  <system:String x:Key="FeedNotProof">フィードに載っていることは、害がある証拠ではありません。誰かがある時点で、この宛先を上の理由に関係するものとして公開した、という意味です。</system:String>
 </ResourceDictionary>

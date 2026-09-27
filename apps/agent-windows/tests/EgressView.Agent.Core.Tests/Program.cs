@@ -3195,6 +3195,52 @@ try
             Assert(reopened.ReadLatestOutboundAnomaly()?.Breakdown?.Applications[0].Name == "backup.exe",
                 "and survives a restart");
 
+        // Threat notices, as the Mac Agent decides them (P3-180).
+        {
+            var now = new DateTimeOffset(2026, 9, 28, 9, 0, 0, TimeSpan.Zero);
+            var since = now.AddMinutes(-1);
+            ThreatFinding Finding(string address, string confidence, DateTimeOffset lastSeen, string app = "app.exe") =>
+                new(address, address, null, app, 3, 2048, 0, lastSeen.AddMinutes(-10), lastSeen, "ip", address,
+                    "abuse.ch Feodo Tracker", "botnet C2", confidence);
+            ThreatReport Report(params ThreatFinding[] findings) => new("available", 100, now, 50, findings);
+            var planner = new ThreatNotificationPlanner();
+
+            Assert(planner.Plan(Report(Finding("192.0.2.1", "low", now)), since, now, false) is null,
+                "a low-confidence match stays in the Threats tab and interrupts nobody");
+            Assert(planner.Plan(Report(Finding("192.0.2.1", "high", since.AddSeconds(-1))), since, now, false) is null,
+                "a match last seen before the scan window is not announced again");
+            Assert(planner.Plan(Report(Finding("192.0.2.1", "high", now)), since, now, true) is null,
+                "while delivery to the Hub is healthy the Hub is the one to say so");
+            Assert(planner.Plan(Report(Finding("192.0.2.1", "high", now)) with { Availability = "stale" }, since, now, false) is null,
+                "threat information that is not available announces nothing");
+
+            var two = Report(Finding("192.0.2.1", "high", now.AddSeconds(-5)), Finding("192.0.2.1", "high", now, "other.exe"),
+                Finding("192.0.2.2", "high", now.AddSeconds(-30)), Finding("192.0.2.3", "low", now));
+            var notice = planner.Plan(two, since, now, false);
+            Assert(notice is { Addresses.Count: 2, More: 0 } && notice.Kept.Count == 3 && notice.Kept[0].Application == "other.exe" &&
+                notice.Kept[^1].Address == "192.0.2.2",
+                "a notice counts destinations, keeps every high-confidence match for them newest first, and leaves the low one out");
+            Assert(planner.Plan(two, since, now, false) is not null,
+                "a notice that was not shown is tried again at the next scan");
+            planner.Accept(notice!, now);
+            Assert(planner.Plan(two, since, now.AddHours(23), false) is null,
+                "a destination already announced is not announced again the same day");
+            Assert(planner.Plan(two, since, now.AddDays(1), false) is { Addresses.Count: 2 },
+                "and is again after a day");
+
+            var many = Report(Enumerable.Range(1, 14).Select(index => Finding($"198.51.100.{index}", "high", now.AddSeconds(-index))).ToArray());
+            Assert(new ThreatNotificationPlanner().Plan(many, since, now, false) is { Kept.Count: 10, More: 4 } capped &&
+                capped.Kept[0].Address == "198.51.100.1",
+                "at most ten matches are kept with a notice, and the rest are counted");
+
+            var healthy = new DeliveryNotificationSample(now, true, "acknowledged", 0, null, now);
+            Assert(ThreatNotificationPlanner.HubDeliveryHealthy(healthy) &&
+                !ThreatNotificationPlanner.HubDeliveryHealthy(healthy with { Active = false }) &&
+                !ThreatNotificationPlanner.HubDeliveryHealthy(healthy with { State = "retryable" }) &&
+                !ThreatNotificationPlanner.HubDeliveryHealthy(healthy with { Pending = 9, OldestPendingAt = now.AddMinutes(-6) }),
+                "delivery counts as healthy only when it is on, not failing, and not five minutes behind");
+        }
+
         // Newest first, and no more than asked for.
         var manyAnomalies = Path.Combine(directory, "outbound-anomaly-many.db");
         using (var store = new ObservationStore(manyAnomalies))
