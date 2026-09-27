@@ -115,11 +115,65 @@ public struct GlobeAggregator: Sendable {
 
 /// Where this Mac sits, for drawing traffic as leaving from somewhere.
 ///
-/// The Hub lets the operator pick a home country. An agent has nobody to ask,
-/// so it reads the region the machine is already configured for. That is a
-/// guess about the country, never about the address: no lookup is made and
-/// nothing is sent.
+/// The person chooses in Settings > General: follow the region macOS is set
+/// to, or name a country. Either way it is a statement about the country,
+/// never about the address: no lookup is made and nothing is sent, and the
+/// choice stays on this Mac.
 public enum HomeLocation {
+    /// Where the choice is kept. Absent or empty means "follow macOS".
+    public static let defaultsKey = "agentHomeCountry"
+
+    /// Where traffic is drawn from, and why.
+    public struct Resolved: Equatable, Sendable {
+        public let countryCode: String
+        public let latitude: Double
+        public let longitude: Double
+        /// True when the country came from the region macOS is set to rather
+        /// than from the person's own choice.
+        public let followsSystem: Bool
+
+        public var coordinate: (latitude: Double, longitude: Double) { (latitude, longitude) }
+    }
+
+    /// The country traffic leaves from, or nil when nobody has said.
+    ///
+    /// It used to fall back to Japan for any region missing from the table of
+    /// capitals -- 22 countries -- so someone in Thailand or Poland saw every
+    /// connection leave Tokyo, with nothing on screen saying it was a guess.
+    /// A country with no capital listed is now placed at the middle of its
+    /// own outline, and a Mac with no usable region says so instead.
+    public static func resolve(
+        chosen: String?,
+        region: String? = Locale.current.region?.identifier,
+        atlas: WorldAtlas?
+    ) -> Resolved? {
+        if let chosen = normalized(chosen),
+           let point = coordinate(for: chosen, atlas: atlas) {
+            return Resolved(countryCode: chosen, latitude: point.latitude,
+                            longitude: point.longitude, followsSystem: false)
+        }
+        guard let region = normalized(region),
+              let point = coordinate(for: region, atlas: atlas) else { return nil }
+        return Resolved(countryCode: region, latitude: point.latitude,
+                        longitude: point.longitude, followsSystem: true)
+    }
+
+    /// The capital when it is listed, so the Hub's map and this one agree;
+    /// otherwise the middle of the country's largest outline.
+    public static func coordinate(
+        for countryCode: String, atlas: WorldAtlas?
+    ) -> (latitude: Double, longitude: Double)? {
+        let code = countryCode.uppercased()
+        if let capital = coordinates[code] { return capital }
+        return atlas?.center(ofCountry: code)
+    }
+
+    private static func normalized(_ code: String?) -> String? {
+        guard let code = code?.trimmingCharacters(in: .whitespaces).uppercased(),
+              code.count == 2 else { return nil }
+        return code
+    }
+
     /// The same capital coordinates the Web UI uses, so the two maps agree.
     static let coordinates: [String: (latitude: Double, longitude: Double)] = [
         "JP": (35.68, 139.69), "US": (38.89, -77.04), "CA": (45.42, -75.69),
@@ -132,14 +186,6 @@ public enum HomeLocation {
         "RU": (55.75, 37.62),
     ]
 
-    public static func current(
-        region: String? = Locale.current.region?.identifier
-    ) -> (latitude: Double, longitude: Double) {
-        guard let region, let match = coordinates[region.uppercased()] else {
-            return coordinates["JP"]!
-        }
-        return match
-    }
 }
 
 /// Points along the great circle between two places.

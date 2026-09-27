@@ -267,23 +267,62 @@ final class GreatCircleTests: XCTestCase {
 }
 
 final class HomeLocationTests: XCTestCase {
-    func testTheRegionTheMachineIsSetToDecidesWhereTrafficLeavesFrom() {
-        // A guess about the country, never about the address: nothing is looked
-        // up and nothing is sent.
-        let japan = HomeLocation.current(region: "JP")
+    private static let atlas = try? WorldAtlas.bundled()
+
+    func testTheRegionTheMachineIsSetToDecidesWhereTrafficLeavesFrom() throws {
+        // A statement about the country, never about the address: nothing is
+        // looked up and nothing is sent.
+        let japan = try XCTUnwrap(HomeLocation.resolve(chosen: nil, region: "JP", atlas: nil))
         XCTAssertEqual(japan.latitude, 35.68, accuracy: 0.001)
-        let unitedStates = HomeLocation.current(region: "us")
+        XCTAssertTrue(japan.followsSystem)
+        let unitedStates = try XCTUnwrap(HomeLocation.resolve(chosen: "", region: "us", atlas: nil))
         XCTAssertEqual(unitedStates.longitude, -77.04, accuracy: 0.001)
     }
 
-    func testAnUnknownRegionFallsBackRatherThanLandingAtNullIsland() {
-        // (0, 0) is in the Gulf of Guinea. Traffic drawn from there would be
-        // wrong in a way that looks deliberate.
-        for region in [nil, "ZZ", ""] {
-            let fallback = HomeLocation.current(region: region)
-            XCTAssertNotEqual(fallback.latitude, 0)
-            XCTAssertNotEqual(fallback.longitude, 0)
+    func test選んだ国がmacOSの地域より優先される() throws {
+        let chosen = try XCTUnwrap(HomeLocation.resolve(chosen: "de", region: "JP", atlas: nil))
+        XCTAssertEqual(chosen.countryCode, "DE")
+        XCTAssertFalse(chosen.followsSystem)
+        XCTAssertEqual(chosen.longitude, 13.40, accuracy: 0.001)
+    }
+
+    func test首都の表に無い国は日本ではなくその国に置く() throws {
+        // Thailand is not among the 22 capitals. It used to be drawn from Tokyo.
+        let thailand = try XCTUnwrap(HomeLocation.resolve(chosen: nil, region: "TH", atlas: Self.atlas))
+        XCTAssertEqual(thailand.countryCode, "TH")
+        XCTAssertEqual(thailand.latitude, 15, accuracy: 4)
+        XCTAssertEqual(thailand.longitude, 101, accuracy: 4)
+        let poland = try XCTUnwrap(HomeLocation.coordinate(for: "PL", atlas: Self.atlas))
+        XCTAssertEqual(poland.latitude, 52, accuracy: 3)
+        XCTAssertEqual(poland.longitude, 19, accuracy: 3)
+    }
+
+    func test国が分からなければ推測せずnilを返す() {
+        // Not Japan, and not (0, 0) in the Gulf of Guinea: either would be a
+        // claim about where this Mac is that nobody made.
+        for region in [nil, "ZZ", "", "JPN"] {
+            XCTAssertNil(HomeLocation.resolve(chosen: nil, region: region, atlas: Self.atlas), "\(String(describing: region))")
         }
+    }
+
+    func test地図に無い国を選んでいたらmacOSの地域に戻る() throws {
+        let fallback = try XCTUnwrap(HomeLocation.resolve(chosen: "ZZ", region: "JP", atlas: Self.atlas))
+        XCTAssertEqual(fallback.countryCode, "JP")
+        XCTAssertTrue(fallback.followsSystem)
+    }
+
+    func test日付変更線をまたぐ国の中心が地球の反対側に行かない() throws {
+        // Fiji's outline straddles 180 degrees; averaging raw longitudes would
+        // put its middle near 0 degrees, in Africa.
+        let fiji = try XCTUnwrap(HomeLocation.coordinate(for: "FJ", atlas: Self.atlas))
+        XCTAssertGreaterThan(abs(fiji.longitude), 170)
+        XCTAssertEqual(fiji.latitude, -17.5, accuracy: 3)
+    }
+
+    func test選べる国の一覧は重複せず首都の表の国を含む() throws {
+        let codes = try XCTUnwrap(Self.atlas).countryCodes
+        XCTAssertEqual(codes.count, Set(codes).count)
+        for code in ["JP", "US", "DE", "TH", "PL", "BR"] { XCTAssertTrue(codes.contains(code), code) }
     }
 }
 

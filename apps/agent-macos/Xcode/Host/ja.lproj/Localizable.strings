@@ -168,6 +168,11 @@
 "Launch at login is unavailable for this build." = "このビルドではログイン時起動を利用できません。";
 "Language" = "言語";
 "Display language" = "表示言語";
+"This Mac is in" = "このMacがある国";
+"Follow macOS (%@)" = "macOSの設定に従う（%@）";
+"Follow macOS (not set)" = "macOSの設定に従う（未設定）";
+"Where the globe draws connections from. It stays on this Mac: nothing is looked up and nothing is sent to a Hub." = "地球儀で通信の線を引く出発点です。この設定はこのMacの中だけで使い、どこにも問い合わせず、Hubにも送りません。";
+"macOS does not say which country this Mac is in, so no lines are drawn. Choose one in Settings > General." = "macOSの設定からこのMacの国が分からないため、線を引いていません。設定 > 一般で国を選んでください。";
 "Globe animation" = "地球儀のアニメーション";
 "Frame rate" = "更新頻度";
 "Energy saver (3 fps)" = "省電力（3 fps）";
