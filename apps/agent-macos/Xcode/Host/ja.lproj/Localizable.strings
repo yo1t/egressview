@@ -834,7 +834,7 @@
 "Showing the newest %1$lld of %2$lld." = "%2$lld件のうち新しい%1$lld件を表示しています。";
 "This is a behavioural anomaly, not a malware verdict." = "これは通信量の変化としての異常で、マルウェアという判定ではありません。";
 "The details were not recorded for this notice. It was sent before EgressView Agent 0.5.97, which began keeping them." = "この通知の詳細は記録されていません。詳細の記録を始めたEgressView Agent 0.5.97より前に送られた通知です。";
-"Confidence" = "確信度";
+"Confidence" = "確度";
 "%lld more matches in this notice are in the Threats tab." = "この通知にはほかに%lld件の一致があります。「脅威」タブで確認できます。";
 "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point." = "フィードに載っていることは、害がある証拠ではありません。誰かがある時点で、この宛先を上の理由に関係するものとして公開した、という意味です。";
 "Open the Threats tab" = "「脅威」タブを開く";
