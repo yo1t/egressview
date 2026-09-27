@@ -36,6 +36,22 @@ HostアプリとNetwork ExtensionはmacOSのApp Sandbox内で動作します。H
 
 **インストールはここまでです。** この時点でAgentはこのMacの外向き通信を記録し、ここに保存しています。メニューからウィンドウを開けば見られます。
 
+### Homebrewで入れる場合
+
+アプリをHomebrewで管理している場合は、同じ署名済みパッケージをcaskとして入れられます。中で動くのは同じインストーラなので、上の手順3（System Extensionの承認）は、この場合も一度だけ必要です。
+
+```bash
+brew tap yo1t/egressview
+brew trust yo1t/egressview
+brew install --cask egressview-agent
+```
+
+`brew trust`が必要なのは、新しいHomebrew（7.0.6で確認）が、信頼していないtapのcaskを「Refusing to load cask ... from untrusted tap」と表示して読み込まないためです。`sudo`は付けずに実行してください。管理者パスワードが必要なときは、インストーラが尋ねます。
+
+**更新は、手で入れた場合と同じくAgent自身が行います。** caskには`auto_updates`を付けてあるので、ふつうの`brew upgrade`はAgentを入れ直しません（Agentが更新済みの版をもう一度入れることはありません。入れ直すのは`brew upgrade --greedy`のときだけです）。削除は、先にAgentの**アンインストール**（後述）を行い、そのあと`brew uninstall --cask egressview-agent`を実行します。
+
+パッケージから入れたMacは、Homebrewからは入っていないものとして見えます。そのMacで`brew upgrade --cask egressview-agent`を実行すると「not installed」と表示されますが、問題ありません。更新はAgentから行ってください。
+
 ### Hubがある場合の接続
 
 このMacの観測結果をネットワーク全体と並べたい場合だけです。**ここまでで何もMacから出ていません。**以下を完了するまで、何も出ていきません。
