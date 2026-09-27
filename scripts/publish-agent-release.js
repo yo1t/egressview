@@ -324,6 +324,61 @@ function upload(config, file, key, cacheControl, contentType) {
 }
 
 /**
+ * The package is in the bucket, whole, before anything points at it.
+ *
+ * On 2026-09-27 Windows 0.1.136 went out with its arm64 MSI missing from the
+ * bucket: the upload step returned, the manifest naming the file was signed
+ * and uploaded, the read-back of the manifest passed, and the script said
+ * "Published". An ARM PC following the signed manifest got a 403 until the
+ * file was uploaded again by hand. The manifest check could not see it,
+ * because it only reads the manifest.
+ */
+function assertStored(config, entry, runCommand = run) {
+  const key = `${config.platform}/${path.basename(entry.file)}`;
+  const expected = fs.statSync(entry.file).size;
+  let stored;
+  try {
+    stored = String(runCommand('aws', awsArgs(config, [
+      's3api', 'head-object', '--bucket', config.bucket, '--key', key,
+      '--query', 'ContentLength', '--output', 'text',
+    ]))).trim();
+  } catch (error) {
+    throw new Error(`${key} is not in the bucket after its upload: ${error.message.split('\n')[0]}`);
+  }
+  if (stored !== String(expected)) {
+    throw new Error(`${key} is ${stored} bytes in the bucket, not ${expected}`);
+  }
+}
+
+/**
+ * Every package the manifest names is served, byte for byte, from where the
+ * manifest says. The last word on a release: what an agent downloads.
+ */
+async function verifyPackagesServed(config, manifest, io = {}) {
+  const sleep = io.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const get = io.fetch || fetch;
+  for (const entry of manifest.packages) {
+    const url = `${config.verifyOrigin}/${config.platform}/${path.basename(entry.url)}`;
+    let last = 'no attempt was made';
+    let served = false;
+    for (let attempt = 1; attempt <= VERIFY_ATTEMPTS && !served; attempt += 1) {
+      try {
+        const response = await get(url, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const bytes = Buffer.from(await response.arrayBuffer());
+        const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+        if (digest === entry.sha256) served = true;
+        else last = `served ${bytes.length} bytes with SHA-256 ${digest}, not ${entry.sha256}`;
+      } catch (error) {
+        last = error.message;
+      }
+      if (!served && attempt < VERIFY_ATTEMPTS) await sleep(VERIFY_DELAY_MS);
+    }
+    if (!served) throw new Error(`${url} is not what the manifest names: ${last}`);
+  }
+}
+
+/**
  * Read back what CloudFront actually serves. Retried because both an
  * invalidation and an expiring cache entry take time: a mismatch in the first
  * seconds means "not yet", and only a mismatch that outlives the manifest TTL
@@ -385,6 +440,7 @@ async function publish(config, io = {}) {
       'public, max-age=31536000, immutable',
       'application/octet-stream'
     );
+    assertStored(config, entry, io.run || run);
   }
   upload(config, signaturePath, `${config.platform}/manifest.json.sig`,
     'public, max-age=300', 'application/octet-stream');
@@ -422,6 +478,7 @@ async function publish(config, io = {}) {
   }
 
   await verifyPublished(config, manifestBytes, io);
+  await verifyPackagesServed(config, manifest, io);
   log(`Published ${config.platform} ${config.version} to ${config.baseUrl}/${config.platform}/`);
   return { manifest, manifestPath, signaturePath, published: true };
 }
@@ -442,6 +499,8 @@ module.exports = {
   buildManifest,
   serializeManifest,
   assertPublishableTree,
+  assertStored,
+  verifyPackagesServed,
   releaseTag,
   MANIFEST_SCHEMA_VERSION,
 };
