@@ -58,4 +58,5 @@
   <system:String x:Key="HomeCountryFollowWindowsNotSet">Follow Windows (not set)</system:String>
   <system:String x:Key="HomeCountryHint">Where the globe draws connections from. It stays on this PC: nothing is looked up and nothing is sent to a Hub.</system:String>
   <system:String x:Key="GlobeNoHome">Windows does not say which country this PC is in, so no lines are drawn. Choose one in Settings &gt; General.</system:String>
+  <system:String x:Key="LogHeldBySelectionStatus">Holding while a row is selected · showing {0} · press Esc to clear the selection and resume</system:String>
 </ResourceDictionary>

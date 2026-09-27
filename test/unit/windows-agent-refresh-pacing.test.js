@@ -18,7 +18,7 @@ describe('Windows Agent refresh pacing', () => {
 
   it('every refresh of the shown tab sets that time from what it took', () => {
     assert.ok(windowCode.includes(
-      'finally { visibleRefreshDueAt = DateTimeOffset.UtcNow + RefreshPacing.After(Stopwatch.GetElapsedTime(started)); }'));
+      'finally { visibleRefreshDueAt = DateTimeOffset.UtcNow + RefreshPacing.After(Stopwatch.GetElapsedTime(started), IsActive); }'));
     // The tab switch is the only one: a second path to the tabs would refresh
     // without setting the time.
     assert.equal(windowCode.match(/MainTabs\.SelectedIndex switch/g).length, 1);
