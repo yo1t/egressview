@@ -31,6 +31,12 @@ describe('Windows Agent installer language and artwork', () => {
     assert.doesNotMatch(packageWxs, /Language="1033"/);
   });
 
+  // 0.1.138: the Japanese transform set the upgrade's language to 1041, and
+  // on a Japanese PC the installed English-language 0.1.137 was left behind.
+  it('upgrades a product installed in either language', () => {
+    assert.match(packageWxs, /<MajorUpgrade IgnoreLanguage="yes"/);
+  });
+
   it('embeds the Japanese transform under 1041 and checks it is there', () => {
     assert.match(buildScript, /foreach \(\$culture in 'en-US', 'ja-JP'\)/);
     assert.match(buildScript, /msi transform -t language/);

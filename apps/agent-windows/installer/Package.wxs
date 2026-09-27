@@ -10,7 +10,12 @@
            Language="!(loc.PackageLanguage)"
            Compressed="yes">
     <SummaryInformation Description="!(loc.PackageDescription)" Manufacturer="EgressView" />
-    <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)"
+    <!-- IgnoreLanguage: the Japanese transform sets the package's language to
+         1041, and without this the upgrade would look only for a 1041
+         product. On a Japanese PC it left an English-language 0.1.137
+         installed beside 0.1.138, two entries in Installed apps. The
+         product is one product in whatever language it was installed in. -->
+    <MajorUpgrade IgnoreLanguage="yes" DowngradeErrorMessage="!(loc.DowngradeError)"
                   Schedule="afterInstallInitialize" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
