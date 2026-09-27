@@ -18,6 +18,68 @@ final class ClosingReportCompletesRowTests: XCTestCase {
         )
     }
 
+    /// One time a reused flow id was open, from `start` to `end` seconds.
+    private func time(start: TimeInterval, end: TimeInterval, bytes: UInt64?) -> ConnectionObservation {
+        ConnectionObservation(
+            networkProtocol: .udp, localAddress: "192.0.2.10", localPort: 55_264,
+            remoteAddress: "203.0.113.10", remotePort: 3722, processID: 42, processName: "rapportd",
+            firstObservedAt: Date(timeIntervalSince1970: start), lastObservedAt: Date(timeIntervalSince1970: end),
+            bytesIn: bytes, bytesOut: bytes, collector: .networkExtension, confidence: .exact,
+            flowID: flow
+        )
+    }
+
+    /// A socket that opened again only to receive made no opening report for
+    /// that time. Its closing report must not complete the row of an earlier
+    /// time that is still open on the Hub.
+    func test_別の回の開始時のidは借りない() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        queue.setHubCompletesObservations(true)
+        try queue.enqueue([time(start: 0, end: 0, bytes: nil)])
+        let earlier = try deliver(queue)
+
+        try queue.enqueue([time(start: 60, end: 91, bytes: 288)])
+        let later = try deliver(queue)
+
+        XCTAssertNotEqual(later, earlier)
+    }
+
+    /// The extension restarted while the flow was open, so its closing report
+    /// says it started when it ended. It still completes the open row.
+    func test_開始時刻の分からない終了報告は開いている回のidを使う() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        queue.setHubCompletesObservations(true)
+        try queue.enqueue([time(start: 0, end: 0, bytes: nil)])
+        let opening = try deliver(queue)
+
+        try queue.enqueue([time(start: 600, end: 600, bytes: 288)])
+        let closing = try deliver(queue)
+
+        XCTAssertEqual(closing, opening)
+    }
+
+    /// A queue file written before openings carried their start still loads
+    /// and still completes the row, as it did.
+    func test_開始時刻を持たない古い送信待ちファイルでも完成させる() throws {
+        let url = temporaryURL()
+        let queue = try AgentDeliveryQueue(fileURL: url)
+        queue.setHubCompletesObservations(true)
+        try queue.enqueue([observation(bytes: nil)])
+        let opening = try deliver(queue)
+
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        var openings = try XCTUnwrap(json["sentOpenings"] as? [[String: Any]])
+        openings = openings.map { var entry = $0; entry.removeValue(forKey: "startedAt"); return entry }
+        json["sentOpenings"] = openings
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+
+        let reloaded = try AgentDeliveryQueue(fileURL: url)
+        reloaded.setHubCompletesObservations(true)
+        try reloaded.enqueue([observation(bytes: 700)])
+        let closing = try deliver(reloaded)
+        XCTAssertEqual(closing, opening)
+    }
+
     private func temporaryURL() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("egressview-complete-\(UUID().uuidString).json")
     }
