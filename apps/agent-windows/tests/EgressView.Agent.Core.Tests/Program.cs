@@ -289,6 +289,11 @@ try
         Assert(RefreshPacing.After(TimeSpan.Zero) == TimeSpan.FromSeconds(5)
                && RefreshPacing.After(TimeSpan.FromSeconds(-1)) == TimeSpan.FromSeconds(5),
             "and a clock that went backwards does not make it refresh continuously");
+        Assert(RefreshPacing.After(TimeSpan.FromMilliseconds(250), inFront: false) == TimeSpan.FromSeconds(30)
+               && RefreshPacing.After(TimeSpan.FromMilliseconds(250), inFront: true) == TimeSpan.FromSeconds(5),
+            "behind another window the tab refreshes every thirty seconds at most, in front as before (P3-107)");
+        Assert(RefreshPacing.After(TimeSpan.FromSeconds(8.7), inFront: false) == TimeSpan.FromSeconds(174),
+            "and a slow refresh keeps its own longer wait");
     }
 
     // A status request does not wait behind a long one, and does not lie for

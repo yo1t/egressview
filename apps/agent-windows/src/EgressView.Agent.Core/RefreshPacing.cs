@@ -23,6 +23,20 @@ public static class RefreshPacing
     public static readonly TimeSpan Longest = TimeSpan.FromMinutes(10);
     public const int WaitPerRefreshTime = 20;
 
+    /// Behind another window, never more often than this (P3-107). The
+    /// connection log's full refresh redraws the rows that changed, and that
+    /// redraw, not the read, is what the window spends: measured 2026-09-27,
+    /// following cost about 6% of a core in front and still 5.6% behind
+    /// another window while only the stream slowed.
+    public static readonly TimeSpan Background = TimeSpan.FromSeconds(30);
+
+    /// The same, for a window the reader may not be looking at.
+    public static TimeSpan After(TimeSpan lastRefreshTook, bool inFront)
+    {
+        var wait = After(lastRefreshTook);
+        return inFront || wait >= Background ? wait : Background;
+    }
+
     public static TimeSpan After(TimeSpan lastRefreshTook)
     {
         var wait = lastRefreshTook * WaitPerRefreshTime;
