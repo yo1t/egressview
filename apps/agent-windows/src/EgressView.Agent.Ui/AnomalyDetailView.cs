@@ -122,6 +122,45 @@ internal static class AnomalyDetailView
             else panel.Children.Add(Secondary(LocalizationManager.Text("NoticeDetailsNotRecorded"), 6));
             panel.Children.Add(Secondary(LocalizationManager.Text("AnomalyNotMalware"), 10));
         }
+        else if (entry.Kind == "Threat")
+        {
+            panel.Children.Add(Rule());
+            if (entry.Threats is not { } threats)
+                panel.Children.Add(Secondary(LocalizationManager.Text("NoticeDetailsNotRecorded"), 6));
+            else
+            {
+                for (var index = 0; index < threats.Count; index++)
+                {
+                    if (index > 0) panel.Children.Add(Rule());
+                    panel.Children.Add(Threat(threats[index]));
+                }
+                if (entry.MoreThreats > 0)
+                    panel.Children.Add(Secondary(string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MoreThreatsFormat"), entry.MoreThreats), 10));
+            }
+            panel.Children.Add(Secondary(LocalizationManager.Text("FeedNotProof"), 10));
+        }
+        return panel;
+    }
+
+    /// One match as it stood when the notice went out.
+    internal static FrameworkElement Threat(ThreatFinding finding)
+    {
+        var panel = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+        panel.Children.Add(Heading(finding.Destination, 13));
+        var facts = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        facts.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        facts.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        AddFact(facts, LocalizationManager.Text("Process"), finding.Application);
+        AddFact(facts, LocalizationManager.Text("MatchedValue"), $"{finding.IndicatorKind.ToUpperInvariant()} · {finding.MatchedValue}");
+        AddFact(facts, LocalizationManager.Text("Feed"), finding.Source ?? "—");
+        AddFact(facts, LocalizationManager.Text("Reason"), finding.Tag ?? "—");
+        AddFact(facts, LocalizationManager.Text("Confidence"), LocalizationManager.Text(finding.Confidence == "high" ? "HighAction" : "LowAction"));
+        AddFact(facts, LocalizationManager.Text("Connections"), finding.Connections.ToString("N0", CultureInfo.CurrentCulture));
+        AddFact(facts, LocalizationManager.Text("DataVolume"), finding.ConnectionsWithoutBytes == 0 ? FlowRow.FormatBytes(finding.Bytes) :
+            $"{FlowRow.FormatBytes(finding.Bytes)} + {finding.ConnectionsWithoutBytes:N0} {LocalizationManager.Text("Unmeasured").ToLower(CultureInfo.CurrentCulture)}");
+        AddFact(facts, LocalizationManager.Text("FirstSeen"), finding.FirstSeen.LocalDateTime.ToString("g", CultureInfo.CurrentCulture));
+        AddFact(facts, LocalizationManager.Text("LastSeen"), finding.LastSeen.LocalDateTime.ToString("g", CultureInfo.CurrentCulture));
+        panel.Children.Add(facts);
         return panel;
     }
 
@@ -162,7 +201,7 @@ internal static class AnomalyDetailView
         var name = Secondary(label, 0);
         name.Margin = new Thickness(0, 2, 14, 0);
         Grid.SetRow(name, row);
-        var text = new TextBlock { Text = value, Margin = new Thickness(0, 2, 0, 0) };
+        var text = new TextBlock { Text = value, Margin = new Thickness(0, 2, 0, 0), TextWrapping = TextWrapping.Wrap };
         Grid.SetRow(text, row);
         Grid.SetColumn(text, 1);
         grid.Children.Add(name);

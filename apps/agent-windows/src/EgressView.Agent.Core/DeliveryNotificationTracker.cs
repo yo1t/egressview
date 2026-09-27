@@ -76,6 +76,6 @@ public sealed class DeliveryNotificationTracker(DeliveryNotificationState? resto
         };
     }
 
-    private static bool IsFailure(string value) => value is "authorization-required" or "rate-limited" or
+    public static bool IsFailure(string value) => value is "authorization-required" or "rate-limited" or
         "retryable" or "contract-rejected" or "invalid-acknowledgement" or "hub-incompatible";
 }

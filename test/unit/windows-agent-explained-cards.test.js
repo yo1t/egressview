@@ -11,6 +11,7 @@ const windowXaml = read('MainWindow.xaml');
 const windowCode = read('MainWindow.xaml.cs');
 const detailView = read('AnomalyDetailView.cs');
 const notifications = read('LocalNotificationService.cs');
+const app = read('App.xaml.cs');
 const strings = { ja: read(path.join('Resources', 'Strings.ja.xaml')), en: read(path.join('Resources', 'Strings.en.xaml')) };
 
 function key(dictionary, name) {
@@ -39,15 +40,29 @@ describe('Windows Agent cards and notices explain themselves', () => {
   });
 
   it('the history keeps an anomaly notice\'s breakdown, and older entries still read', () => {
-    assert.match(notifications, /OutboundAnomalyRecord\? Anomaly = null\);/);
+    assert.match(notifications, /OutboundAnomalyRecord\? Anomaly = null,/);
     assert.match(windowCode, /anomaly: record\);/);
   });
 
-  it('every new phrase exists in both languages, and a missing breakdown names the version that began keeping it', () => {
+  it('threat matches are notified, with the matches kept in the history and none in the notice', () => {
+    assert.match(app, /Notifications\.Notify\("Threat", /);
+    assert.match(app, /threats: notice\.Kept, moreThreats: notice\.More\)\)\s*threatNotices\.Accept\(notice, now\);/);
+    assert.match(app, /hubDeliveryHealthy = ThreatNotificationPlanner\.HubDeliveryHealthy\(sample\);/);
+    assert.match(notifications, /IReadOnlyList<ThreatFinding>\? Threats = null, int MoreThreats = 0\);/);
+    // The notice's text is counts only; names never reach the lock screen.
+    for (const language of ['ja', 'en']) {
+      const body = key(strings[language], 'ThreatNoticeFormat');
+      assert.ok(body.includes('{0:N0}'));
+      assert.ok(!/\{[1-9]/.test(body));
+    }
+  });
+
+    it('every new phrase exists in both languages, and a missing breakdown names the version that began keeping it', () => {
     for (const name of ['UsualFor15Minutes', 'AppsSentMost', 'DestinationsSentMost', 'OtherDestinationsFormat',
       'AnomalyBreakdownNotRecorded', 'AnomalyLargeTransfer', 'AnomalyDistributedTransfer', 'AnomaliesInPeriod',
       'NoAnomaliesInPeriod', 'AnomalyBaselineNotReady', 'ShowingNewestFormat', 'AnomalyNotMalware',
-      'NoticeDetailsNotRecorded', 'OpenThreatsTab', 'NotificationKindOutboundAnomaly']) {
+      'NoticeDetailsNotRecorded', 'OpenThreatsTab', 'NotificationKindOutboundAnomaly', 'ThreatNoticeTitle',
+      'ThreatNoticeFormat', 'MoreThreatsFormat', 'FeedNotProof']) {
       assert.ok(key(strings.ja, name), `ja ${name}`);
       assert.ok(key(strings.en, name), `en ${name}`);
     }

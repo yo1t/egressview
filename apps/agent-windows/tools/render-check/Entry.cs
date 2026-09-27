@@ -580,6 +580,15 @@ internal static class Entry
                 SaveDetail(AnomalyDetailView.Notice(new NotificationHistoryEntry(at.AddMinutes(-5), "HubDelivery", "EgressView Agent",
                     "Hubへの送信が完了していません。未送信 1,204 件。Agentを開いて確認してください。", false, "suppressed-daily-limit")),
                     Path.Combine(output, $"notice-other-{suffix}.png"));
+                SaveDetail(AnomalyDetailView.Notice(new NotificationHistoryEntry(at.AddMinutes(-9), "Threat", "新しい脅威の一致を検出しました",
+                    "直近の照合で、まだ通知していない2件の宛先が脅威情報と一致しました。脅威タブを開いて確認してください。アドレスとホスト名は通知に表示しません。",
+                    true, Threats:
+                    [
+                        new("bad.example (203.0.113.40)", "203.0.113.40", "bad.example", "chrome.exe", 4, 18_400, 0, at.AddMinutes(-30), at.AddMinutes(-10),
+                            "domain", "bad.example", "URLhaus", "malware download", "high"),
+                        new("198.51.100.23", "198.51.100.23", null, "svchost.exe", 1, 0, 1, at.AddMinutes(-12), at.AddMinutes(-12),
+                            "ip", "198.51.100.23", "abuse.ch Feodo Tracker", "botnet C2", "high"),
+                    ], MoreThreats: 3)), Path.Combine(output, $"notice-threat-{suffix}.png"));
             }
         }
 

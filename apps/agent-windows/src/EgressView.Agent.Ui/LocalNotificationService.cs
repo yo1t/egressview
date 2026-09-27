@@ -16,8 +16,13 @@ namespace EgressView.Agent.Ui;
 /// the lock screen and names nobody; this history is inside the Agent, so it
 /// keeps them. Absent in entries written before 0.1.140 and for other kinds.
 /// </param>
+/// <param name="Threats">
+/// The matches a threat notice was about, newest first, at most ten; the
+/// notice itself says only how many. <paramref name="MoreThreats"/> counts the
+/// rest, so a list cut short says so.
+/// </param>
 internal sealed record NotificationHistoryEntry(DateTimeOffset Date, string Kind, string Title, string Body, bool Delivered, string Outcome = "shown", int Repeats = 1,
-    OutboundAnomalyRecord? Anomaly = null);
+    OutboundAnomalyRecord? Anomaly = null, IReadOnlyList<ThreatFinding>? Threats = null, int MoreThreats = 0);
 
 internal sealed class LocalNotificationService
 {
@@ -47,7 +52,7 @@ internal sealed class LocalNotificationService
     internal int SuppressedToday => history.Count(item => item.Date.LocalDateTime.Date == DateTime.Today && item.Outcome.StartsWith("suppressed-", StringComparison.Ordinal));
 
     internal bool Notify(string kind, string key, string title, string body, Action<string, string> show, bool bypassLimits = false,
-        OutboundAnomalyRecord? anomaly = null)
+        OutboundAnomalyRecord? anomaly = null, IReadOnlyList<ThreatFinding>? threats = null, int moreThreats = 0)
     {
         var now = DateTimeOffset.Now;
         var decision = NotificationPolicy.Evaluate(
@@ -61,14 +66,14 @@ internal sealed class LocalNotificationService
             bypassLimits);
         if (decision != NotificationDecision.Deliver)
         {
-            Add(new NotificationHistoryEntry(now, kind, title, Redact(body), false, $"suppressed-{DecisionName(decision)}", Anomaly: anomaly));
+            Add(new NotificationHistoryEntry(now, kind, title, Redact(body), false, $"suppressed-{DecisionName(decision)}", Anomaly: anomaly, Threats: threats, MoreThreats: moreThreats));
             return false;
         }
         cooldowns[key] = now;
         var delivered = true;
         try { show(title, body); }
         catch { delivered = false; }
-        Add(new NotificationHistoryEntry(now, kind, title, Redact(body), delivered, delivered ? "shown" : "delivery-failed", Anomaly: anomaly));
+        Add(new NotificationHistoryEntry(now, kind, title, Redact(body), delivered, delivered ? "shown" : "delivery-failed", Anomaly: anomaly, Threats: threats, MoreThreats: moreThreats));
         return delivered;
     }
 
