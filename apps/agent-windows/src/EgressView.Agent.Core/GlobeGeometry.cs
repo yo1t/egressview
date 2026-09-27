@@ -4,10 +4,10 @@ namespace EgressView.Agent.Core;
 
 /// Where this PC sits, so traffic can be drawn as leaving from somewhere.
 ///
-/// The Hub lets the operator pick a home country. An agent has nobody to ask,
-/// so it reads the region the machine is already configured for. That is a
-/// guess about the country, never about the address: no lookup is made and
-/// nothing is sent.
+/// The Hub lets the operator pick a home country, and so does this PC's
+/// Settings > General (P3-178). Left to follow Windows, it reads the country
+/// the machine is configured for. That is a statement about the country,
+/// never about the address: no lookup is made and nothing is sent.
 public static class HomeLocation
 {
     /// The same capital coordinates the Web UI and the Mac Agent use, so the
@@ -24,12 +24,116 @@ public static class HomeLocation
         ["RU"] = (55.75, 37.62),
     };
 
-    public static (double Latitude, double Longitude) Current(string? region = null)
+    /// Where the globe draws from: the country chosen in settings, else the
+    /// one Windows is set to, else nowhere (P3-178).
+    ///
+    /// Nowhere, not Tokyo. Every country outside the table, and every PC
+    /// Windows could say nothing about, used to be drawn from Japan without
+    /// a word -- a Thai or Polish reader's traffic leaving from a city it
+    /// never touched. Null tells the globe to draw no lines and say why.
+    ///
+    /// A capital from the table where there is one, so the Hub, the Mac and
+    /// this agree; otherwise the middle of the country on the map
+    /// (<paramref name="center"/>). Nothing is looked up and nothing is sent.
+    public static (double Latitude, double Longitude)? Resolve(string? chosen, string? region,
+        Func<string, (double Latitude, double Longitude)?> center)
     {
-        region ??= SafeRegion();
-        return region is not null && Coordinates.TryGetValue(region.ToUpperInvariant(), out var match)
-            ? match
-            : Coordinates["JP"];
+        foreach (var candidate in new[] { chosen, region })
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            var code = candidate.Trim().ToUpperInvariant();
+            return Coordinates.TryGetValue(code, out var capital) ? capital : center(code);
+        }
+        return null;
+    }
+
+    /// The country Windows is set to: Settings > Time & language > Region >
+    /// "Country or region", as two letters, or null.
+    ///
+    /// Not CultureInfo.CurrentCulture, which is the display format. Before
+    /// P3-178 that was what was read, so choosing Japanese date formats made
+    /// a PC in Germany Japanese.
+    public static string? WindowsRegion()
+    {
+        try
+        {
+            var buffer = new char[16];
+            var length = GetUserDefaultGeoName(buffer, buffer.Length);
+            if (length > 1 && TwoLetters(new string(buffer, 0, length - 1)) is { } name) return name;
+        }
+        catch (EntryPointNotFoundException) { } // before Windows 10 1709
+        catch (Exception) { return null; }
+        try
+        {
+            var nation = GetUserGeoID(GeoClassNation);
+            if (nation == GeoIdNotAvailable) return null;
+            var buffer = new char[16];
+            var length = GetGeoInfo(nation, GeoIso2, buffer, buffer.Length, 0);
+            return length > 1 ? TwoLetters(new string(buffer, 0, length - 1)) : null;
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// A region Windows gives as two letters; its world regions are numbers
+    /// ("419", Latin America), which name no country.
+    internal static string? TwoLetters(string value) =>
+        value.Length == 2 && char.IsAsciiLetter(value[0]) && char.IsAsciiLetter(value[1]) ? value.ToUpperInvariant() : null;
+
+    /// Whether the table has a capital for this country.
+    public static bool HasCapital(string code) => Coordinates.ContainsKey(code.ToUpperInvariant());
+
+    private const int GeoClassNation = 16;
+    private const int GeoIso2 = 4;
+    private const int GeoIdNotAvailable = -1;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int GetUserDefaultGeoName(char[] geoName, int geoNameCount);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern int GetUserGeoID(int geoClass);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "GetGeoInfoW", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int GetGeoInfo(int location, int geoType, char[] geoData, int geoDataCount, int languageId);
+
+    /// The middle of a country's largest outline, the same rule the Mac uses.
+    ///
+    /// The largest, because islands and exclaves would pull the point into
+    /// the sea. The area-weighted centre of that ring, not the middle of its
+    /// bounding box, which for a crescent can fall outside the country.
+    /// Longitudes are unwrapped around the ring's first point, so a ring that
+    /// crosses the date line -- Fiji's -- is not averaged across the globe.
+    public static (double Latitude, double Longitude)? Center(IEnumerable<IReadOnlyList<(double Lat, double Lon)>> rings)
+    {
+        (double Area, double Latitude, double Longitude)? best = null;
+        foreach (var ring in rings)
+        {
+            if (ring.Count < 3) continue;
+            var firstLongitude = ring[0].Lon;
+            var xs = new double[ring.Count];
+            for (var i = 0; i < ring.Count; i++)
+            {
+                var x = ring[i].Lon;
+                while (x - firstLongitude > 180) x -= 360;
+                while (x - firstLongitude < -180) x += 360;
+                xs[i] = x;
+            }
+            double twiceArea = 0, cx = 0, cy = 0;
+            for (var i = 0; i < ring.Count; i++)
+            {
+                var j = (i + 1) % ring.Count;
+                var cross = xs[i] * ring[j].Lat - xs[j] * ring[i].Lat;
+                twiceArea += cross;
+                cx += (xs[i] + xs[j]) * cross;
+                cy += (ring[i].Lat + ring[j].Lat) * cross;
+            }
+            var area = Math.Abs(twiceArea) / 2;
+            if (area <= 0 || best is { } current && area <= current.Area) continue;
+            var longitude = cx / (3 * twiceArea);
+            while (longitude > 180) longitude -= 360;
+            while (longitude < -180) longitude += 360;
+            best = (area, cy / (3 * twiceArea), longitude);
+        }
+        return best is { } found ? (found.Latitude, found.Longitude) : null;
     }
 
     /// How far to tip the globe, and which way.
@@ -41,12 +145,6 @@ public static class HomeLocation
     /// home hemisphere, not so much that the equator stops reading as level.
     public static double PreferredTilt(double latitude, double magnitude = 12) =>
         latitude >= 0 ? magnitude : -magnitude;
-
-    private static string? SafeRegion()
-    {
-        try { return new RegionInfo(CultureInfo.CurrentCulture.Name).TwoLetterISORegionName; }
-        catch (Exception) { return null; }
-    }
 }
 
 /// Points along the great circle between two places.

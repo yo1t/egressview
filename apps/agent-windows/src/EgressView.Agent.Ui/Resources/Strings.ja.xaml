@@ -53,4 +53,9 @@
   <system:String x:Key="CountryLastAccess">最終アクセス</system:String>
   <system:String x:Key="CountryTimes">{0:N0}回</system:String>
   <system:String x:Key="Expand">拡大</system:String>
+  <system:String x:Key="HomeCountry">このPCがある国</system:String>
+  <system:String x:Key="HomeCountryFollowWindows">Windowsの設定に従う（{0}）</system:String>
+  <system:String x:Key="HomeCountryFollowWindowsNotSet">Windowsの設定に従う（未設定）</system:String>
+  <system:String x:Key="HomeCountryHint">地球儀で通信の線を引く出発点です。この設定はこのPCの中だけで使い、どこにも問い合わせず、Hubにも送りません。</system:String>
+  <system:String x:Key="GlobeNoHome">Windowsの設定からこのPCの国が分からないため、線を引いていません。設定 &gt; 一般で国を選んでください。</system:String>
 </ResourceDictionary>

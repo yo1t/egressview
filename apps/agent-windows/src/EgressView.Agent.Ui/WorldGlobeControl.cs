@@ -15,7 +15,7 @@ public sealed class WorldGlobeControl : FrameworkElement
 {
     private readonly IReadOnlyList<WorldAtlas.Country> atlas = WorldAtlas.Load();
     private readonly DispatcherTimer timer;
-    private readonly (double Latitude, double Longitude) home = EgressView.Agent.Core.HomeLocation.Current();
+    private (double Latitude, double Longitude)? home = WorldAtlas.Home();
     private double longitude;
     private DateTimeOffset previousFrame;
     // Match the Mac Agent and stay still until the person explicitly asks
@@ -32,12 +32,26 @@ public sealed class WorldGlobeControl : FrameworkElement
 
     public WorldGlobeControl()
     {
-        longitude = home.Longitude;
+        longitude = home?.Longitude ?? 0;
         timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         timer.Tick += (_, _) => Advance();
         IsVisibleChanged += (_, _) => ReconcileTimer();
         Unloaded += (_, _) => timer.Stop();
     }
+
+    /// Whether there is a place to draw lines from. Without one the globe
+    /// still shows every destination, and says why no line leaves (P3-178).
+    public bool HasHome => home is not null;
+
+    /// Reads the chosen country again, so a change in settings shows at once.
+    public void ReloadHome()
+    {
+        home = WorldAtlas.Home();
+        if (home is { } place) longitude = place.Longitude;
+        InvalidateVisual();
+    }
+
+    private double HomeTilt => EgressView.Agent.Core.HomeLocation.PreferredTilt(home?.Latitude ?? 0);
 
     protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
 
@@ -158,9 +172,12 @@ public sealed class WorldGlobeControl : FrameworkElement
         // been talking but not that it was this machine doing the talking.
         var arcPen = new Pen(Brushes.Orange, 0.9) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }.Frozen();
         var farSidePen = new Pen(Brushes.Orange, 0.7).Frozen();
-        foreach (var item in points)
+        // No home, no lines: every destination is still drawn, and the
+        // window says why nothing leaves from here (P3-178).
+        var from = home ?? default;
+        foreach (var item in home is null ? [] : points)
         {
-            var arc = EgressView.Agent.Core.GreatCircle.Path(home, (item.Latitude, item.Longitude));
+            var arc = EgressView.Agent.Core.GreatCircle.Path(from, (item.Latitude, item.Longitude));
             // The half of the route running behind the globe is drawn faintly
             // against the rim rather than dropped, so an arc to the far side
             // still reads as one journey instead of stopping at the edge.
@@ -182,7 +199,7 @@ public sealed class WorldGlobeControl : FrameworkElement
             drawing.DrawEllipse(accent, markerPen, point.Value, size, size);
         }
 
-        if (Project(home.Latitude, home.Longitude, center, radius) is { } origin)
+        if (home is { } place && Project(place.Latitude, place.Longitude, center, radius) is { } origin)
         {
             drawing.DrawEllipse(null, new Pen(Brushes.Orange, 1.4).Frozen(), origin, 6, 6);
             drawing.DrawEllipse(Brushes.Orange, null, origin, 2.4, 2.4);
@@ -271,7 +288,7 @@ public sealed class WorldGlobeControl : FrameworkElement
     /// point behind the globe appears from here.
     private Point Clamp(double latitude, double pointLongitude, Point center, double radius)
     {
-        var centerLatitude = EgressView.Agent.Core.HomeLocation.PreferredTilt(home.Latitude);
+        var centerLatitude = HomeTilt;
         var phi = latitude * Math.PI / 180;
         var lambda = (pointLongitude - longitude) * Math.PI / 180;
         var phi0 = centerLatitude * Math.PI / 180;
@@ -345,7 +362,7 @@ public sealed class WorldGlobeControl : FrameworkElement
 
     private Point? Project(double latitude, double pointLongitude, Point center, double radius)
     {
-        var centerLatitude = EgressView.Agent.Core.HomeLocation.PreferredTilt(home.Latitude);
+        var centerLatitude = HomeTilt;
         var phi = latitude * Math.PI / 180;
         var lambda = (pointLongitude - longitude) * Math.PI / 180;
         var phi0 = centerLatitude * Math.PI / 180;
