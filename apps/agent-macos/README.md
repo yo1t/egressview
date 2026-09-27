@@ -66,6 +66,33 @@ the feed operators learn.
 outbound connections and keeping them here. Open its window from the menu to
 watch.
 
+### Installing with Homebrew instead
+
+If you manage apps with Homebrew, the same signed package is available as a
+cask. Homebrew still runs the same installer, so step 3 above -- approving the
+System Extension -- is still yours to do once.
+
+```bash
+brew tap yo1t/egressview
+brew trust yo1t/egressview
+brew install --cask egressview-agent
+```
+
+`brew trust` is needed because recent Homebrew (checked with 7.0.6) refuses
+casks from a tap you have not trusted, with "Refusing to load cask ... from
+untrusted tap". Run these as yourself, not with `sudo`; the installer asks for
+an administrator password when it needs one.
+
+**Updates still come from the agent,** exactly as for a package installed by
+hand. The cask is marked `auto_updates`, so a plain `brew upgrade` leaves the
+agent alone rather than reinstalling a version it already updated to (only
+`brew upgrade --greedy` would). To remove it, use the agent's own **Uninstall**
+first (below), then `brew uninstall --cask egressview-agent`.
+
+A Mac that was installed from the package is not known to Homebrew:
+`brew upgrade --cask egressview-agent` there says the cask is not installed.
+That is expected; keep updating it from the agent.
+
 ### Connecting it to a Hub, if you have one
 
 Only if you want this Mac's observations stored alongside the rest of your
