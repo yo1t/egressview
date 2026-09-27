@@ -70,6 +70,8 @@ Linux-router conntrack collection is a [preview](docs/setup-conntrack.md), not y
 
 ## Explore further
 
+Browse the [documentation index](docs/README.md) for all guides and references.
+
 | Topic | Guide |
 |---|---|
 | AI Insights and optional model providers | [AI Insights](docs/setup-ai-insights.md) · [Amazon Bedrock](docs/setup-bedrock.md) |
