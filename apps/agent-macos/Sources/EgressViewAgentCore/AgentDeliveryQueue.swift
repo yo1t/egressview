@@ -243,7 +243,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     private func openingAwaitingClose(
         for observation: ConnectionObservation, excluding activeIDs: Set<UUID>
     ) -> Int? {
-        guard observation.hasByteCounts, let flowID = observation.flowID else { return nil }
+        guard observation.startIsUnknown, let flowID = observation.flowID else { return nil }
         return state.pending.lastIndex(where: {
             !activeIDs.contains($0.observationID)
                 && $0.observation.flowID == flowID
