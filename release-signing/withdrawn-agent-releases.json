@@ -28,6 +28,15 @@
       "supersededBy": "0.1.126",
       "reason": "Never published; installed on one machine for about twenty hours. It raised the IPC listeners to four but granted the service's account only CreateNewInstance on the pipe, and creating an instance of an existing pipe also opens it for reading and writing, so three of the four listeners failed on every attempt, retried every 100 ms and wrote a failure counter to the database each time -- 1,947,715 times before it was replaced. Status requests during a long analysis still failed to connect. Its test gave the window's and the server's rules the same SID and could not see it. Fixed in 0.1.126 by PR #667.",
       "recordedAt": "2026-09-25"
+    },
+    {
+      "platform": "windows",
+      "version": "0.1.138",
+      "kind": "defective-build",
+      "publishedAt": null,
+      "supersededBy": "0.1.139",
+      "reason": "Never published. The first build that speaks Japanese (PR #710): Windows Installer applies its Japanese language transform, which also sets the MajorUpgrade rows' language to 1041, so on a Japanese PC the upgrade looks only for products of language 1041 and does not remove an installed English-language (1033) 0.1.137. Installed over 0.1.137 on one PC, 'Installed apps' listed both. Fixed in 0.1.139 by MajorUpgrade IgnoreLanguage=\"yes\".",
+      "recordedAt": "2026-09-27"
     }
   ]
 }
