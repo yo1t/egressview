@@ -42,7 +42,8 @@
 "Destinations" = "Destinations";
 "Collection" = "Collection";
 "Connection activity" = "Connection activity";
-"Showing the newest 500 records in the shared period" = "Showing the newest 500 records in the shared period";
+"Each row is one connection, from when it was first seen to when it ended. Showing the newest 500 in the shared period." = "Each row is one connection, from when it was first seen to when it ended. Showing the newest 500 in the shared period.";
+"A connection that macOS opens again under the same identity is a new row each time." = "A connection that macOS opens again under the same identity is a new row each time.";
 "%lld shown" = "%lld shown";
 "Application" = "Application";
 "Destination" = "Destination";
@@ -809,3 +810,11 @@
 "Destinations without a name are shown as addresses. Counted by connections: %@." = "Destinations without a name are shown as addresses. Counted by connections: %@.";
 "Destinations without a name are shown as addresses." = "Destinations without a name are shown as addresses.";
 "Counted by IP address, %lld of %lld destinations have a name; the rest are shown as IP addresses. The Destinations tile counts names while destinations are shown by name, so its number can differ. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name." = "Counted by IP address, %lld of %lld destinations have a name; the rest are shown as IP addresses. The Destinations tile counts names while destinations are shown by name, so its number can differ. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name.";
+"Per connection" = "Per connection";
+"Opens and ends" = "Opens and ends";
+"Opened" = "Opened";
+"Ended" = "Ended";
+"Event" = "Event";
+"Time" = "Time";
+"Show" = "Show";
+"Each row is a connection opening or ending, newest first. Showing the newest 500 in the shared period." = "Each row is a connection opening or ending, newest first. Showing the newest 500 in the shared period.";

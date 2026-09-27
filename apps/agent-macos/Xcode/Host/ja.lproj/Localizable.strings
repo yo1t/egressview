@@ -42,7 +42,8 @@
 "Destinations" = "宛先";
 "Collection" = "収集状態";
 "Connection activity" = "通信ログ";
-"Showing the newest 500 records in the shared period" = "選択期間の新しい通信を最大500件表示します";
+"Each row is one connection, from when it was first seen to when it ended. Showing the newest 500 in the shared period." = "1行は1つの接続です（最初の観測から終了まで）。選択期間の新しい接続を最大500件表示します。";
+"A connection that macOS opens again under the same identity is a new row each time." = "macOSが同じ識別子で開き直した接続は、開き直すたびに別の行になります。";
 "%lld shown" = "%lld件表示";
 "Application" = "アプリ";
 "Destination" = "宛先";
@@ -811,3 +812,11 @@
 "Destinations without a name are shown as addresses. Counted by connections: %@." = "名前が分からない宛先はIPアドレスで表示します。接続数で数えると %@ です。";
 "Destinations without a name are shown as addresses." = "名前が分からない宛先はIPアドレスで表示します。";
 "Counted by IP address, %lld of %lld destinations have a name; the rest are shown as IP addresses. The Destinations tile counts names while destinations are shown by name, so its number can differ. The chart is ordered by connections, and destinations that rarely have a name, such as devices on your network, broadcast and multicast, tend to make the most connections. So it can look like mostly addresses even when most destinations have a name." = "IPアドレスで数えると、%2$lld 件の宛先のうち %1$lld 件で名前を取得できています。残りはIPアドレスで表示します。「宛先」タイルは、宛先を名前で表示している間は名前で数えるため、件数が異なることがあります。下の図は接続数順に並びます。名前が付きにくい宛先（同じネットワーク内の機器、ブロードキャスト、マルチキャスト）は接続数が多くなりやすいため、多くの宛先に名前があっても、図はIPアドレスばかりに見えることがあります。";
+"Per connection" = "通信ごと";
+"Opens and ends" = "開始・終了ごと";
+"Opened" = "開始";
+"Ended" = "終了";
+"Event" = "出来事";
+"Time" = "時刻";
+"Show" = "表示";
+"Each row is a connection opening or ending, newest first. Showing the newest 500 in the shared period." = "1行は接続の開始または終了です（新しい順）。選択期間の新しいものを最大500件表示します。";
