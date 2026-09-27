@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The installer's own words. The dialogs themselves come from WixToolset.UI
+     in the same culture; build-msi.ps1 builds this culture and ja-JP, and
+     embeds the Japanese one as a language transform that Windows Installer
+     applies on its own when Windows's display language is Japanese. -->
+<WixLocalization Culture="en-US" Codepage="1252" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+  <String Id="PackageLanguage" Value="1033" />
+  <String Id="PackageDescription" Value="EgressView Agent for Windows" />
+  <String Id="DowngradeError" Value="A newer version of EgressView Agent is already installed." />
+  <String Id="ServiceDescription" Value="Observes outbound network connections for EgressView." />
+  <String Id="ShortcutDescription" Value="Open EgressView Agent" />
+</WixLocalization>
