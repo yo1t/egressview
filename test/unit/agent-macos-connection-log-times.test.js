@@ -169,7 +169,11 @@ describe('通信ログが新しい通信に追従する', () => {
     // An id holding the last-observed time and the row index changed on every
     // reload, so every row was a new row. A log that reloads as traffic
     // arrives would have thrown the table away several times a minute.
-    assert.match(viewModel, /id: observation\.flowID\?\.uuidString/);
+    // The flow and the start of this time it was open: since 0.5.93 a flow id
+    // macOS reuses has one row per time it opened, and neither part moves
+    // when the row is updated.
+    assert.match(viewModel, /id: observation\.flowID\.map \{\s*"\\\(\$0\.uuidString\)\|\\\(observation\.firstObservedAt/);
     assert.doesNotMatch(viewModel, /id: "\\\(observation\.stableKey\)\|\\\(observation\.lastObservedAt/);
+    assert.doesNotMatch(viewModel, /uuidString\)\|\\\(observation\.lastObservedAt/);
   });
 });
