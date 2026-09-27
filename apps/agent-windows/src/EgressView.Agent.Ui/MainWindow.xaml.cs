@@ -149,6 +149,10 @@ public partial class MainWindow : Window
 
     internal Task RefreshStatusFromTrayAsync() => RefreshStatusAsync();
 
+    /// The card says how many; the tab says which. Without this the reader
+    /// had to go looking for the tab with the number in their head (P3-180).
+    private void ThreatCard_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e) => SelectTab(3);
+
     /// How much of the period was actually watched: a proportion, or nothing
     /// when there is no answer yet.
     ///
@@ -355,6 +359,10 @@ public partial class MainWindow : Window
         OutboundAnomalyCount.Text = data.OutboundAnomalies > 0
             ? data.OutboundAnomalies.ToString("N0")
             : data.OutboundBaselineReady ? "0" : "—";
+        // Which windows, how much against the usual, and who sent it -- where
+        // the pointer rests on the card, not only how many (P3-180).
+        AnomalyDetailView.Attach(OutboundAnomalyCard,
+            AnomalyDetailView.List(data.OutboundAnomalyDetails, data.OutboundAnomalies, data.OutboundBaselineReady));
         SetCoverage(data.CoverageRatio);
         StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.StorageBytes));
         MonitoringSince.Text = data.MonitoringStartedAt is { } started ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MonitoringSince"), started.LocalDateTime.ToString("g")) : string.Empty;
@@ -1053,7 +1061,13 @@ public partial class MainWindow : Window
         var body = string.Format(CultureInfo.CurrentCulture,
             LocalizationManager.Text(distributed ? "OutboundAnomalyDistributedFormat" : "OutboundAnomalyLargeFormat"),
             windowStart.ToLocalTime().ToString("t", CultureInfo.CurrentCulture), FlowRow.FormatBytes((long)Math.Min(bytes, long.MaxValue)));
-        app.Notifications.Notify("OutboundAnomaly", $"outbound-anomaly-{windowStart:O}", "EgressView Agent", body, app.ShowNotification);
+        // Kept with the history entry, not put in the notice: the notice can
+        // show on the lock screen, and names stay inside the Agent (P3-180).
+        OutboundAnomalyRecord? record = null;
+        try { if (anomaly.TryGetProperty("details", out var details)) record = details.Deserialize<OutboundAnomalyRecord>(); }
+        catch (JsonException) { }
+        app.Notifications.Notify("OutboundAnomaly", $"outbound-anomaly-{windowStart:O}", "EgressView Agent", body, app.ShowNotification,
+            anomaly: record);
     }
 
     /// Turning destination-name reading off is a request not to collect the
@@ -2948,10 +2962,13 @@ internal sealed class NotificationRow(NotificationHistoryEntry value)
         "HubDelivery" => LocalizationManager.Text("NotificationKindHubDelivery"),
         "ThreatIntelChange" => LocalizationManager.Text("NotificationKindThreatIntelChange"),
         "Recovery" => LocalizationManager.Text("NotificationKindRecovery"),
+        "OutboundAnomaly" => LocalizationManager.Text("NotificationKindOutboundAnomaly"),
         _ => value.Kind,
     };
     public string Title => value.Title;
     public string Body => value.Body;
+    /// What the notice was about, where the pointer rests on it (P3-180).
+    public System.Windows.Controls.ToolTip Detail => AnomalyDetailView.Wrap(AnomalyDetailView.Notice(value));
     public string Outcome => LocalizationManager.Text(value.Outcome switch
     {
         "shown" => "Delivered",
