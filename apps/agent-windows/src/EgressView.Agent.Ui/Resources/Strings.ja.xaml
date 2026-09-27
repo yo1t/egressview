@@ -73,5 +73,5 @@
   <system:String x:Key="AnomalyNotMalware">これは通信量の変化としての異常で、マルウェアという判定ではありません。</system:String>
   <system:String x:Key="NoticeDetailsNotRecorded">この通知の詳細は記録されていません。詳細の記録を始めたEgressView Agent 0.1.140より前に送られた通知です。</system:String>
   <system:String x:Key="OpenThreatsTab">「脅威」タブを開く</system:String>
-  <system:String x:Key="NotificationKindOutboundAnomaly">送信異常</system:String>
+  <system:String x:Key="NotificationKindOutboundAnomaly">外向き通信の異常</system:String>
 </ResourceDictionary>
