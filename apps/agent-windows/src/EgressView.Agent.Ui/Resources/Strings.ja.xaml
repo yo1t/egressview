@@ -58,4 +58,5 @@
   <system:String x:Key="HomeCountryFollowWindowsNotSet">Windowsの設定に従う（未設定）</system:String>
   <system:String x:Key="HomeCountryHint">地球儀で通信の線を引く出発点です。この設定はこのPCの中だけで使い、どこにも問い合わせず、Hubにも送りません。</system:String>
   <system:String x:Key="GlobeNoHome">Windowsの設定からこのPCの国が分からないため、線を引いていません。設定 &gt; 一般で国を選んでください。</system:String>
+  <system:String x:Key="LogHeldBySelectionStatus">行を選択中のため更新を止めています · 表示は {0} 時点です · Escで選択を解除すると再開します</system:String>
 </ResourceDictionary>
