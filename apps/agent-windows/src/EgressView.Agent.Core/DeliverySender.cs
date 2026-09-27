@@ -31,6 +31,23 @@ public sealed class DeliverySender
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan CapabilitySuccessRefresh = TimeSpan.FromHours(24);
     private static readonly TimeSpan CapabilityRetry = TimeSpan.FromHours(1);
+    private int capabilityFailures;
+
+    /// How long to wait before asking again after the Hub could not be asked.
+    ///
+    /// It had been the hour an incompatible answer waits. A failure is not an
+    /// answer: on 2026-09-27 the Mac Agent asked three seconds after it
+    /// started, before the network was ready, and for the next hour treated
+    /// the Hub as one that takes no destination names -- none were sent
+    /// (P3-179). This had the same shape. Thirty seconds, doubling, up to
+    /// that same hour, so a Hub that is down or too old to answer is still
+    /// asked at most hourly once it has failed seven times.
+    internal static TimeSpan CapabilityFailureRetry(int consecutiveFailures)
+    {
+        var doublings = Math.Clamp(consecutiveFailures - 1, 0, 16);
+        var wait = TimeSpan.FromSeconds(30) * Math.Pow(2, doublings);
+        return wait < CapabilityRetry ? wait : CapabilityRetry;
+    }
 
     public DeliverySender(HttpClient? http = null, TimeProvider? timeProvider = null)
     {
@@ -122,12 +139,14 @@ public sealed class DeliverySender
                 capabilityHub = hub;
                 capabilities = null;
                 capabilityCheckedAt = null;
+                capabilityFailures = 0;
                 capabilityStatus = new("not-checked");
             }
             if (capabilityCheckedAt is { } checkedAt)
             {
-                var refresh = capabilities is null || capabilityStatus.State == "incompatible"
-                    ? CapabilityRetry : CapabilitySuccessRefresh;
+                var refresh = capabilityStatus.State == "unavailable" ? CapabilityFailureRetry(capabilityFailures)
+                    : capabilities is null || capabilityStatus.State == "incompatible" ? CapabilityRetry
+                    : CapabilitySuccessRefresh;
                 if (now - checkedAt < refresh) return AgentCapabilityNegotiation.Decide(capabilities);
             }
             // Record the attempt before awaiting so concurrent callers cannot
@@ -188,6 +207,7 @@ public sealed class DeliverySender
         {
             capabilities = value;
             capabilityStatus = status;
+            capabilityFailures = status.State == "unavailable" ? capabilityFailures + 1 : 0;
         }
     }
 

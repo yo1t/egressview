@@ -2459,11 +2459,45 @@ try
         handler.CapabilitiesJson = """{"schemaVersions":[1],"maxObservationsPerBatch":200,"observationFields":["remoteHostname"]}""";
         Assert((await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev"))).Kind == DeliveryAttemptKind.Empty &&
             handler.CapabilityRequests == 1, "a failed capability lookup is not retried on every delivery pass");
-        clock.Advance(TimeSpan.FromHours(1) + TimeSpan.FromSeconds(1));
+        // P3-179: a failure is asked again soon, not in an hour -- the hour
+        // in which no destination name reaches the Hub.
+        clock.Advance(TimeSpan.FromSeconds(20));
+        await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev"));
+        Assert(handler.CapabilityRequests == 1, "twenty seconds after a failure it does not ask yet");
+        clock.Advance(TimeSpan.FromSeconds(11));
         await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev"));
         Assert(handler.CapabilityRequests == 2 && sender.CapabilityStatus.State == "agreed",
-            "a failed capability lookup is retried on the low-frequency refresh interval");
+            "thirty seconds after a failure it asks again, and the answer stands");
+        clock.Advance(TimeSpan.FromHours(2));
+        await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev"));
+        Assert(handler.CapabilityRequests == 2, "an answer is kept for a day, not asked again every half minute");
     }
+
+    // A Hub that keeps failing is asked less often each time: 30 s, then 60 s.
+    using (var failingStore = new ObservationStore(Path.Combine(directory, "sender-capability-failing.db")))
+    {
+        var handler = new DeliveryHandler(200, 200, 200, 200);
+        var clock = new ManualTimeProvider(deliveryStarted);
+        var sender = new DeliverySender(new HttpClient(handler), clock);
+        var credential = new AgentCredential(new Uri("https://down.example/"), agentId, agentToken, deliveryStarted);
+        async Task Pass() => await sender.SendNextAsync(failingStore, credential, new("host", "windows", "Windows", "dev"));
+        await Pass();
+        clock.Advance(TimeSpan.FromSeconds(31)); await Pass();
+        Assert(handler.CapabilityRequests == 2, "the first failure is asked again after thirty seconds");
+        clock.Advance(TimeSpan.FromSeconds(31)); await Pass();
+        Assert(handler.CapabilityRequests == 2, "the second waits longer than thirty seconds");
+        clock.Advance(TimeSpan.FromSeconds(30)); await Pass();
+        Assert(handler.CapabilityRequests == 3, "and is asked again after a minute");
+    }
+
+    // Failures back off from thirty seconds to the hour, so a Hub too old to
+    // answer is not asked twice a minute for ever.
+    Assert(DeliverySender.CapabilityFailureRetry(1) == TimeSpan.FromSeconds(30)
+           && DeliverySender.CapabilityFailureRetry(2) == TimeSpan.FromSeconds(60)
+           && DeliverySender.CapabilityFailureRetry(7) == TimeSpan.FromMinutes(32)
+           && DeliverySender.CapabilityFailureRetry(8) == TimeSpan.FromHours(1)
+           && DeliverySender.CapabilityFailureRetry(100) == TimeSpan.FromHours(1),
+        "capability failures are retried after 30 s, doubling, never beyond an hour");
 
     using (var incompatibleStore = new ObservationStore(Path.Combine(directory, "sender-incompatible.db")))
     {
