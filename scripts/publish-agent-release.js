@@ -314,8 +314,8 @@ function verifySignature(manifestPath, signaturePath, publicKeyPath) {
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
 }
 
-function upload(config, file, key, cacheControl, contentType) {
-  run('aws', awsArgs(config, [
+function upload(config, file, key, cacheControl, contentType, runCommand = run) {
+  return runCommand('aws', awsArgs(config, [
     's3', 'cp', file, `s3://${config.bucket}/${key}`,
     '--cache-control', cacheControl,
     '--content-type', contentType,
@@ -347,6 +347,39 @@ function assertStored(config, entry, runCommand = run) {
   }
   if (stored !== String(expected)) {
     throw new Error(`${key} is ${stored} bytes in the bucket, not ${expected}`);
+  }
+}
+
+const STORE_ATTEMPTS = 3;
+const STORE_RETRY_DELAY_MS = 30_000;
+
+/**
+ * Upload a package and confirm it is stored, trying again if it is not.
+ *
+ * Four times in one day (Windows 0.1.136, 0.1.137 and twice for 0.1.139)
+ * `aws s3 cp` of the arm64 MSI returned 0 and printed nothing, and the
+ * object was not in the bucket; run by hand a few minutes later the same
+ * command stored it, once after four and a half minutes for 78 MB. Why it
+ * returns without uploading is not known. The upload is repeated, and what
+ * the CLI said each time is logged, so the next occurrence carries its own
+ * evidence.
+ */
+async function storePackage(config, entry, io = {}) {
+  const log = io.log || ((message) => process.stdout.write(`${message}\n`));
+  const sleep = io.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const runCommand = io.run || run;
+  const key = `${config.platform}/${path.basename(entry.file)}`;
+  for (let attempt = 1; ; attempt += 1) {
+    const said = String(upload(config, entry.file, key, 'public, max-age=31536000, immutable',
+      'application/octet-stream', runCommand) || '').trim();
+    try {
+      assertStored(config, entry, runCommand);
+      return attempt;
+    } catch (error) {
+      log(`${key}: upload attempt ${attempt} left nothing stored (aws said: ${said || 'nothing'})`);
+      if (attempt >= STORE_ATTEMPTS) throw error;
+      await sleep(STORE_RETRY_DELAY_MS);
+    }
   }
 }
 
@@ -433,14 +466,7 @@ async function publish(config, io = {}) {
   // Packages first, manifest last: an agent reading the manifest mid-publish
   // must never find a URL that 404s.
   for (const entry of config.packages) {
-    upload(
-      config,
-      entry.file,
-      `${config.platform}/${path.basename(entry.file)}`,
-      'public, max-age=31536000, immutable',
-      'application/octet-stream'
-    );
-    assertStored(config, entry, io.run || run);
+    await storePackage(config, entry, io);
   }
   upload(config, signaturePath, `${config.platform}/manifest.json.sig`,
     'public, max-age=300', 'application/octet-stream');
@@ -500,6 +526,7 @@ module.exports = {
   serializeManifest,
   assertPublishableTree,
   assertStored,
+  storePackage,
   verifyPackagesServed,
   releaseTag,
   MANIFEST_SCHEMA_VERSION,

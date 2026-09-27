@@ -24,6 +24,15 @@ function withTemp(callback) {
   }
 }
 
+async function withTempAsync(callback) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-agent-release-unit-'));
+  try {
+    return await callback(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function fakePackage(dir, name, contents = 'package') {
   const file = path.join(dir, name);
   fs.writeFileSync(file, contents);
@@ -281,7 +290,7 @@ describe('a release must be the tag it claims to be', () => {
 // 2026-09-27: Windows 0.1.136 was reported published while its arm64 MSI was
 // missing from the bucket, and the signed manifest pointed at a 403.
 describe('a package must be stored and served before the release counts', () => {
-  const { assertStored, verifyPackagesServed } = require('../../scripts/publish-agent-release');
+  const { assertStored, storePackage, verifyPackagesServed } = require('../../scripts/publish-agent-release');
   const config = { platform: 'windows', bucket: 'b', verifyOrigin: 'https://dl.example', profile: 'p' };
 
   it('パッケージがバケットに実ファイルと同じ大きさで在ることを確かめる', () => withTemp((dir) => {
@@ -300,12 +309,40 @@ describe('a package must be stored and served before the release counts', () => 
 
   it('manifestより先に、各パッケージの保存を確かめる', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', 'publish-agent-release.js'), 'utf8');
-    const stored = source.indexOf('assertStored(config, entry, io.run || run);');
+    const stored = source.indexOf('await storePackage(config, entry, io);');
     const manifestUpload = source.indexOf("upload(config, manifestPath, `${config.platform}/manifest.json`");
     assert.ok(stored > 0 && stored < manifestUpload);
     const served = source.indexOf('await verifyPackagesServed(config, manifest, io);');
     assert.ok(served > source.indexOf('await verifyPublished(') && served < source.indexOf('log(`Published'));
   });
+
+  // An upload that returns without storing anything is tried again, and what
+  // the CLI said is logged each time.
+  it('何も残らなかったアップロードはやり直し、CLIの出力を記録する', () => withTempAsync(async (dir) => {
+    const file = fakePackage(dir, 'EgressView-Agent-Windows-0.2.0-arm64-unsigned.msi', 'twelve bytes');
+    let uploads = 0; let heads = 0; const logs = [];
+    const run = (command, args) => {
+      if (args[0] === 's3') { uploads += 1; return uploads === 1 ? '' : 'upload: done'; }
+      heads += 1;
+      if (heads === 1) throw new Error('An error occurred (404) when calling the HeadObject operation: Not Found');
+      return '12';
+    };
+    const attempts = await storePackage(config, { file }, { run, sleep: async () => {}, log: (m) => logs.push(m) });
+    assert.equal(attempts, 2);
+    assert.equal(uploads, 2);
+    assert.match(logs[0], /upload attempt 1 left nothing stored \(aws said: nothing\)/);
+  }));
+
+  it('3回とも残らなければ止める', () => withTempAsync(async (dir) => {
+    const file = fakePackage(dir, 'b.msi', 'twelve bytes');
+    let uploads = 0;
+    const run = (command, args) => {
+      if (args[0] === 's3') { uploads += 1; return ''; }
+      throw new Error('Not Found');
+    };
+    await assert.rejects(storePackage(config, { file }, { run, sleep: async () => {}, log: () => {} }), /not in the bucket after its upload/);
+    assert.equal(uploads, 3);
+  }));
 
   const bytes = Buffer.from('package bytes');
   const digest = crypto.createHash('sha256').update(bytes).digest('hex');
