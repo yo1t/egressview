@@ -82,6 +82,19 @@ final class FlowEpisodeStoreTests: XCTestCase {
         XCTAssertEqual(rows.first?.bytesOut, 288)
     }
 
+    /// A socket that opened again only to receive makes no opening report
+    /// for that time; its closing report, which knows when that time
+    /// started, is its own row rather than the end of an older open one.
+    func test開始時刻の分かる終了報告は古い開いたままの行にまとめない() throws {
+        let store = try store()
+        try store.append([report(start: 0, end: 0)])
+        try store.append([report(start: 600, end: 631, bytesOut: 288)])
+        let rows = try store.observations().sorted { $0.firstObservedAt < $1.firstObservedAt }
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertNil(rows[0].bytesOut, "古い回を、別の回の終了で閉じてはいけない")
+        XCTAssertEqual(rows[1].bytesOut, 288)
+    }
+
     func test閉じた回の後の終了報告は閉じた行を書き換えない() throws {
         let store = try store()
         try store.append([report(start: 0, end: 0)])
@@ -159,6 +172,13 @@ final class FlowEpisodeQueueTests: XCTestCase {
         try queue.enqueue([report(start: 0, end: 0)])
         try queue.enqueue([report(start: 600, end: 600, bytesOut: 288)])
         XCTAssertEqual(queue.status().pendingCount, 1)
+    }
+
+    func test開始時刻の分かる終了報告は送信待ちの古い開始報告にまとめない() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        try queue.enqueue([report(start: 0, end: 0)])
+        try queue.enqueue([report(start: 600, end: 631, bytesOut: 288)])
+        XCTAssertEqual(queue.status().pendingCount, 2)
     }
 
     func test間引きは開き直した回を落とさない() {

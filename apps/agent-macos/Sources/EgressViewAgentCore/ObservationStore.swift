@@ -2917,7 +2917,7 @@ public final class ObservationStore: @unchecked Sendable {
     private func flowEpisode(of observation: ConnectionObservation) throws -> Double? {
         guard let flowID = observation.flowID else { return nil }
         let start = observation.firstObservedAt.timeIntervalSince1970
-        guard observation.hasByteCounts else { return start }
+        guard observation.startIsUnknown else { return start }
         let statement = try prepare("""
         SELECT flow_episode FROM observations
         WHERE flow_id = ?1 AND (
