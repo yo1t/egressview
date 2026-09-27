@@ -582,17 +582,25 @@ struct AgentMainView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L("Connection activity"))
                         .font(.title2.weight(.semibold))
-                    Text(L("Showing the newest 500 records in the shared period"))
+                    // Says what a row is. On Windows the log can also show each
+                    // observation; this agent is told of a connection only when
+                    // it opens and when it closes, and both are this one row, so
+                    // there is no per-observation view to offer and no reason
+                    // to borrow the word (P3-107 stage 3, decided 2026-09-27).
+                    Text(model.logView == .connections
+                         ? L("Each row is one connection, from when it was first seen to when it ended. Showing the newest 500 in the shared period.")
+                         : L("Each row is a connection opening or ending, newest first. Showing the newest 500 in the shared period."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .help(L("A connection that macOS opens again under the same identity is a new row each time."))
                 }
                 Spacer()
                 // The count reports what is on screen. Reporting the unfiltered
                 // total beside a filtered table would make the filter look
                 // broken.
                 Text(model.logFilter.isActive
-                     ? L("%1$lld of %2$lld shown", model.visibleRows.count, model.observationRows.count)
-                     : L("%lld shown", model.observationRows.count))
+                     ? L("%1$lld of %2$lld shown", model.visibleRows.count, model.logSourceRows.count)
+                     : L("%lld shown", model.logSourceRows.count))
                     .foregroundStyle(.secondary)
                 if model.logFilter.isActive {
                     Button(L("Clear filters")) { model.logFilter = ConnectionLogFilter() }
@@ -608,7 +616,20 @@ struct AgentMainView: View {
                 }
                 .help(L("Stops the table moving while you read it. Nothing is collected differently; only this screen stops updating."))
             }
+            HStack {
+                // Named by what a line is, not A and B. The filter and the
+                // pause carry across, so switching costs nothing to try.
+                Picker(L("Show"), selection: $model.logView) {
+                    ForEach(AgentLogView.allCases) { view in Text(view.title).tag(view) }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 280)
+                Spacer()
+            }
             AgentLogFilterBar(model: model)
+            if model.logView == .events {
+                eventTable
+            } else {
             Table(model.visibleRows, sortOrder: $model.logSort) {
                 TableColumn(L("First seen"), value: \.firstObservedAt) { row in
                     Text(Self.observedFormatter.string(from: row.firstObservedAt))
@@ -672,9 +693,57 @@ struct AgentMainView: View {
                 .width(100)
             }
             .frame(maxHeight: .infinity)
+            }
         }
         .padding(16)
         .agentSection()
+    }
+
+    /// The same connections as things that happened: each opening, and each
+    /// ending the agent was told of, in the order they happened (P3-107).
+    private var eventTable: some View {
+        Table(model.visibleRows, sortOrder: $model.eventSort) {
+            TableColumn(L("Time"), value: \.eventAt) { row in
+                Text(Self.observedFormatter.string(from: row.eventAt))
+                    .monospacedDigit()
+            }
+            .width(min: 140, ideal: 160)
+            TableColumn(L("Event"), value: \.eventText) { row in
+                Text(row.eventText)
+                    .foregroundStyle(row.event == .ended ? .secondary : .primary)
+            }
+            .width(min: 60, ideal: 70)
+            TableColumn(L("Application"), value: \.application) { row in
+                Text(row.application)
+            }
+            .width(min: 130, ideal: 180)
+            TableColumn(L("Destination"), value: \.destinationText) { row in
+                Text(row.destinationText)
+                    .monospaced()
+                    .help(row.destinationText)
+            }
+            .width(min: 180, ideal: 280)
+            TableColumn(L("Country"), value: \.countryName) { row in
+                Text(row.countryName)
+                    .foregroundStyle(row.countryKey == nil ? .secondary : .primary)
+            }
+            .width(min: 90, ideal: 120)
+            TableColumn(L("Data volume"), value: \.bytesSort) { row in
+                Text(row.bytesText)
+                    .monospacedDigit()
+            }
+            .width(min: 90, ideal: 110)
+            TableColumn(L("Protocol"), value: \.protocolName) { row in
+                Text(row.protocolName)
+            }
+            .width(70)
+            TableColumn(L("Port"), value: \.port) { row in
+                Text(String(row.port))
+                    .monospacedDigit()
+            }
+            .width(60)
+        }
+        .frame(maxHeight: .infinity)
     }
 
     /// What the log is doing, in words.

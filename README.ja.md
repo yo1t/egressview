@@ -70,6 +70,8 @@ Linuxルーターのconntrack収集は[プレビュー](docs/setup-conntrack.ja.
 
 ## さらに使う
 
+[ドキュメント一覧](docs/README.md)から、製品別・目的別にガイドを探せます。
+
 | 用途 | ガイド |
 |---|---|
 | AI洞察と任意のモデル | [AI洞察](docs/setup-ai-insights.ja.md) · [Amazon Bedrock](docs/setup-bedrock.ja.md) |
