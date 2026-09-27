@@ -343,7 +343,7 @@ function assertStored(config, entry, runCommand = run) {
       '--query', 'ContentLength', '--output', 'text',
     ]))).trim();
   } catch (error) {
-    throw new Error(`${key} is not in the bucket after its upload: ${error.message.split('\n')[0]}`);
+    throw new Error(`${key} is not in the bucket after its upload: ${error.message.split('\n')[0]}`, { cause: error });
   }
   if (stored !== String(expected)) {
     throw new Error(`${key} is ${stored} bytes in the bucket, not ${expected}`);
