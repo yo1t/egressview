@@ -38,7 +38,7 @@ public struct OutboundTrafficWindow: Equatable, Sendable {
     }
 }
 
-public enum OutboundAnomalyKind: String, Equatable, Sendable {
+public enum OutboundAnomalyKind: String, Codable, Equatable, Sendable {
     case largeTransfer
     case distributedTransfer
 }

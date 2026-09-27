@@ -142,7 +142,7 @@ final class FlowEpisodeStoreTests: XCTestCase {
         sqlite3_close(database)
 
         let reopened = try ObservationStore(fileURL: url)
-        XCTAssertEqual(reopened.schemaVersion(), 16)
+        XCTAssertEqual(reopened.schemaVersion(), ObservationStore.latestSchemaVersion)
         XCTAssertEqual(try reopened.statistics().rawCount, 2)
         // The existing row is still the one its closing report completes.
         try reopened.append([report(start: 0, end: 40, bytesOut: 120)])

@@ -265,3 +265,101 @@ struct AgentThreatPanel: View {
         return formatter.string(from: date)
     }
 }
+
+/// What a notice in the history was about, for the pointer resting on it.
+///
+/// Threats and outbound anomalies get the record kept with the notice. Every
+/// other kind has nothing beyond its text, so it gets the whole text and the
+/// exact time -- the row itself cuts neither, but the popover is where the
+/// eye already is.
+struct AgentNotificationDetailView: View {
+    let entry: AgentNotificationHistoryEntry
+    let kindTitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(kindTitle).font(.caption.bold()).foregroundStyle(.secondary)
+                Spacer()
+                Text(AgentThreatPanel.stamp(entry.date)).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(entry.title).font(.headline)
+
+            if let anomaly = entry.details?.outboundAnomaly {
+                AgentOutboundAnomalyDetail(record: anomaly)
+                Text(L("This is a behavioural anomaly, not a malware verdict."))
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let threats = entry.details?.threats, !threats.isEmpty {
+                threatList(threats, more: entry.details?.moreThreats ?? 0)
+            } else {
+                Text(entry.body).font(.callout).fixedSize(horizontal: false, vertical: true)
+                if entry.kind == .threat || entry.kind == .outboundAnomaly {
+                    Text(L("The details were not recorded for this notice. It was sent before EgressView Agent 0.5.97, which began keeping them."))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Label(
+                entry.delivered ? L("Sent to macOS") : L("Not sent to macOS"),
+                systemImage: entry.delivered ? "checkmark.circle" : "exclamationmark.circle"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func threatList(_ threats: [AgentThreatNotificationDetail], more: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(threats) { threat in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(threat.hostname ?? threat.address)
+                        .font(.callout.weight(.semibold)).monospaced()
+                        .lineLimit(1).truncationMode(.middle)
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+                        if threat.hostname != nil { row(L("Address"), threat.address) }
+                        row(L("Application"), threat.application)
+                        row(L("What was on the list"), threat.matchedValue)
+                        row(L("Kind of indicator"), Self.kindName(threat.indicatorKind))
+                        row(L("Feed"), threat.feed ?? L("Unknown"))
+                        row(L("Why"), threat.reason ?? L("Listed"))
+                        row(L("Confidence"), threat.confidence == ThreatIndicator.Confidence.high.rawValue
+                            ? L("Match worth acting on") : L("Low confidence match"))
+                        row(L("Connections"), threat.connections.formatted())
+                        row(L("Data volume"), Self.volume(threat))
+                        row(L("First seen"), AgentThreatPanel.stamp(threat.firstSeen))
+                        row(L("Last seen"), AgentThreatPanel.stamp(threat.lastSeen))
+                    }
+                    .font(.caption)
+                }
+                if threat.id != threats.last?.id { Divider() }
+            }
+            if more > 0 {
+                Text(L("%lld more matches in this notice are in the Threats tab.", more))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text(L("A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point."))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary)
+            Text(value).lineLimit(2).truncationMode(.middle)
+        }
+    }
+
+    private static func kindName(_ raw: String) -> String {
+        ThreatIndicator.Kind(rawValue: raw).map(AgentThreatPanel.kindName) ?? raw
+    }
+
+    private static func volume(_ threat: AgentThreatNotificationDetail) -> String {
+        guard threat.bytes > 0 else { return threat.bytesArePartial ? L("Not measured") : "0 B" }
+        let measured = ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: threat.bytes), countStyle: .binary
+        )
+        return threat.bytesArePartial ? L("%@ or more", measured) : measured
+    }
+}

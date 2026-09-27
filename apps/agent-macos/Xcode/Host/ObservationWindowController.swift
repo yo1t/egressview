@@ -213,7 +213,8 @@ struct AgentMainView: View {
                             monitoringStatus: model.monitoringStatus,
                             storage: model.storage,
                             threats: model.threats,
-                            usesRolledUpHistory: model.usesRolledUpHistory
+                            usesRolledUpHistory: model.usesRolledUpHistory,
+                            openThreats: { selection.tab = .threats }
                         )
                         .frame(maxWidth: .infinity)
                         .frame(height: metrics.topHeight)
@@ -335,6 +336,11 @@ struct AgentMainView: View {
                     LazyVStack(spacing: 10) {
                         ForEach(notifications.history) { entry in
                             notificationHistoryRow(entry)
+                                .agentHoverPopover {
+                                    AgentNotificationDetailView(
+                                        entry: entry, kindTitle: notificationKindTitle(entry.kind)
+                                    )
+                                }
                         }
                     }
                 }
@@ -927,6 +933,9 @@ struct AgentOverviewPanel: View {
     /// displayed it, so the connection log for an old period looked empty for
     /// no stated reason. Found on 2026-08-24 while splitting this file.
     let usesRolledUpHistory: Bool
+    /// The threat tile is where the eye lands on a match; the list is a tab
+    /// away, so the tile takes the reader there.
+    let openThreats: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -984,6 +993,11 @@ struct AgentOverviewPanel: View {
                     summary.outboundAnomalyCount > 0
                         ? "exclamationmark.arrow.triangle.2.circlepath" : "checkmark.shield"
                 )
+                .agentHoverPopover {
+                    AgentOutboundAnomalyList(
+                        records: summary.outboundAnomalies, total: summary.outboundAnomalyCount
+                    )
+                }
                 tile(L("Monitored"), "\(Int((coverage.share * 100).rounded()))%", "clock.badge.checkmark")
                 // In the ordinary style whatever the value. A low share is a
                 // fact about the traffic -- browsers resolving over DoH,
@@ -996,12 +1010,21 @@ struct AgentOverviewPanel: View {
                 )
                 // A dash, not a zero, when nothing checked. Zero is an answer
                 // and this would not be one.
-                tile(
-                    L("Threats"),
-                    threats.wasChecked ? threats.destinationCount.formatted() : "—",
-                    threats.wasChecked && threats.destinationCount > 0
-                        ? "exclamationmark.triangle.fill" : "shield"
-                )
+                Button(action: openThreats) {
+                    tile(
+                        L("Threats"),
+                        threats.wasChecked ? threats.destinationCount.formatted() : "—",
+                        threats.wasChecked && threats.destinationCount > 0
+                            ? "exclamationmark.triangle.fill" : "shield"
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { inside in
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                .help(L("Open the Threats tab"))
+                .accessibilityHint(L("Open the Threats tab"))
             }
 
             Spacer(minLength: 0)

@@ -320,7 +320,7 @@ public final class ObservationStore: @unchecked Sendable {
     ///
     /// Named rather than counted from the code so the backup and the progress
     /// file can say where the migration is heading before it starts.
-    static let latestSchemaVersion = 16
+    static let latestSchemaVersion = 17
 
     private func migrate() throws {
         let version = try scalar("PRAGMA user_version") ?? 0
@@ -740,6 +740,18 @@ public final class ObservationStore: @unchecked Sendable {
             )
             try execute("PRAGMA user_version=16")
             reportMigrationStep(16)
+        }
+        if version < 17 {
+            // What an anomaly was compared with and who sent it, kept with the
+            // window. Both are known only when the anomaly is found: the usual
+            // level is not stored elsewhere, and the window's connections age
+            // out. Without them the overview could count anomalies but not
+            // explain one.
+            if try !columnExists(table: "outbound_traffic_windows", column: "anomaly_breakdown") {
+                try execute("ALTER TABLE outbound_traffic_windows ADD COLUMN anomaly_breakdown TEXT")
+            }
+            try execute("PRAGMA user_version=17")
+            reportMigrationStep(17)
         }
     }
 
@@ -1308,6 +1320,63 @@ public final class ObservationStore: @unchecked Sendable {
             sqlite3_bind_double(counter, 2, windowStart.timeIntervalSince1970 + windowLength)
             let total = sqlite3_step(counter) == SQLITE_ROW ? Int(sqlite3_column_int64(counter, 0)) : 0
             return (applications, destinations, total)
+        }
+    }
+
+    /// Keeps what explains an anomaly with its window. See migration 17.
+    public func recordOutboundAnomalyBreakdown(
+        windowStart: Date, breakdown: OutboundAnomalyRecord.Breakdown
+    ) throws {
+        let json = String(decoding: try JSONEncoder().encode(breakdown), as: UTF8.self)
+        try lock.withLock {
+            let statement = try prepare("""
+            UPDATE outbound_traffic_windows SET anomaly_breakdown = ? WHERE window_start = ?
+            """)
+            defer { sqlite3_finalize(statement) }
+            bindText(statement, 1, json)
+            sqlite3_bind_double(statement, 2, windowStart.timeIntervalSince1970)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ObservationStoreError.statement(lastMessage)
+            }
+        }
+    }
+
+    /// The period's anomalies, newest first, with whatever was kept about them.
+    public func outboundAnomalies(from: Date, to: Date, limit: Int = 5) throws -> [OutboundAnomalyRecord] {
+        try lock.withLock {
+            let statement = try prepare("""
+            SELECT window_start, anomaly_kind, bytes_out, application_count,
+                   destination_count, anomaly_breakdown
+            FROM outbound_traffic_windows
+            WHERE window_start >= ? AND window_start < ? AND anomaly_kind IS NOT NULL
+            ORDER BY window_start DESC
+            LIMIT ?
+            """)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
+            sqlite3_bind_int64(statement, 3, Int64(max(1, limit)))
+            var rows: [OutboundAnomalyRecord] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                // A kind this build does not know is skipped rather than
+                // shown as something it is not.
+                guard let raw = text(statement, 1),
+                      let kind = OutboundAnomalyKind(rawValue: raw) else { continue }
+                let breakdown = text(statement, 5).flatMap {
+                    try? JSONDecoder().decode(
+                        OutboundAnomalyRecord.Breakdown.self, from: Data($0.utf8)
+                    )
+                }
+                rows.append(OutboundAnomalyRecord(
+                    kind: kind,
+                    windowStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
+                    bytesOut: UInt64(max(0, sqlite3_column_int64(statement, 2))),
+                    applicationCount: Int(sqlite3_column_int64(statement, 3)),
+                    destinationCount: Int(sqlite3_column_int64(statement, 4)),
+                    breakdown: breakdown
+                ))
+            }
+            return rows
         }
     }
 

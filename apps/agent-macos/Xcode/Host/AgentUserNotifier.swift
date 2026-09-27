@@ -20,6 +20,57 @@ struct AgentNotificationHistoryEntry: Codable, Identifiable, Equatable {
     let title: String
     let body: String
     let delivered: Bool
+    /// What the notice was about, beyond what fits in it. Absent in entries
+    /// written before 0.5.97 and for kinds that have nothing more to say.
+    let details: AgentNotificationDetails?
+}
+
+/// Kept with a notice so the history can answer "which one, and how much?"
+/// after the moment has passed.
+///
+/// A threat notice says only how many destinations matched, because macOS can
+/// show it on the lock screen and the destinations stay inside EgressView. The
+/// history is inside EgressView, so it keeps them.
+struct AgentNotificationDetails: Codable, Equatable {
+    var outboundAnomaly: OutboundAnomalyRecord?
+    var threats: [AgentThreatNotificationDetail]?
+    /// Matches in the same notice beyond those kept, so a list cut short says so.
+    var moreThreats: Int?
+}
+
+/// One match, as it stood when the notice went out.
+struct AgentThreatNotificationDetail: Codable, Equatable, Identifiable {
+    let address: String
+    let hostname: String?
+    let application: String
+    let matchedValue: String
+    let indicatorKind: String
+    let feed: String?
+    let reason: String?
+    let confidence: String
+    let connections: Int
+    let bytes: UInt64
+    let bytesArePartial: Bool
+    let firstSeen: Date
+    let lastSeen: Date
+
+    var id: String { "\(address)|\(hostname ?? "")|\(application)|\(matchedValue)" }
+
+    init(_ finding: ThreatFinding) {
+        address = finding.candidate.address
+        hostname = finding.candidate.hostname
+        application = finding.candidate.processName
+        matchedValue = finding.match.matchedValue
+        indicatorKind = finding.match.indicator.kind.rawValue
+        feed = finding.match.indicator.source
+        reason = finding.match.indicator.tag
+        confidence = finding.match.indicator.confidence.rawValue
+        connections = finding.candidate.sessionCount
+        bytes = finding.candidate.bytes
+        bytesArePartial = finding.candidate.bytesArePartial
+        firstSeen = finding.candidate.firstObservedAt
+        lastSeen = finding.candidate.lastObservedAt
+    }
 }
 
 @MainActor
@@ -84,7 +135,8 @@ final class AgentUserNotifier: ObservableObject {
         kind: AgentNotificationKind, key: String, title: String, body: String,
         cooldown: TimeInterval = AgentNotificationLimiter.defaultCooldown,
         bypassPreference: Bool = false,
-        bypassLimits: Bool = false
+        bypassLimits: Bool = false,
+        details: AgentNotificationDetails? = nil
     ) -> Bool {
         guard bypassPreference || isEnabled(kind) else { return false }
         if !bypassLimits {
@@ -107,10 +159,10 @@ final class AgentUserNotifier: ObservableObject {
                     let delivered = (try? await Self.post(
                         title: title, body: body, to: center
                     )) != nil
-                    self.appendHistory(kind, title, body, delivered)
+                    self.appendHistory(kind, title, body, delivered, details)
                 case .denied:
                     self.permissionState = .denied
-                    self.appendHistory(kind, title, body, false)
+                    self.appendHistory(kind, title, body, false, details)
                 case .notDetermined:
                     let granted = (try? await center.requestAuthorization(
                         options: [.alert, .sound]
@@ -122,10 +174,10 @@ final class AgentUserNotifier: ObservableObject {
                             title: title, body: body, to: center
                         )) != nil
                     }
-                    self.appendHistory(kind, title, body, delivered)
+                    self.appendHistory(kind, title, body, delivered, details)
                 @unknown default:
                     self.permissionState = .denied
-                    self.appendHistory(kind, title, body, false)
+                    self.appendHistory(kind, title, body, false, details)
                 }
             }
         }
@@ -190,11 +242,12 @@ final class AgentUserNotifier: ObservableObject {
     }
 
     private func appendHistory(
-        _ kind: AgentNotificationKind, _ title: String, _ body: String, _ delivered: Bool
+        _ kind: AgentNotificationKind, _ title: String, _ body: String, _ delivered: Bool,
+        _ details: AgentNotificationDetails?
     ) {
         history.insert(AgentNotificationHistoryEntry(
             id: UUID(), date: Date(), kind: kind, title: title, body: body,
-            delivered: delivered
+            delivered: delivered, details: details
         ), at: 0)
         history = Array(history.prefix(100))
         defaults.set(try? JSONEncoder().encode(history), forKey: Keys.history)
@@ -247,6 +300,8 @@ final class AgentNotificationCoordinator {
     /// cooldown refuses that one attempt, nothing else would ever try (P3-88).
     private var hubProblems = AgentHubProblemTracker()
     private var seenThreats: [String: Date] = [:]
+    /// Matches kept with one threat notice; the rest are counted.
+    static let threatDetailLimit = 10
 
     init(
         store: ObservationStore?, hub: HubDeliveryController,
@@ -494,14 +549,22 @@ final class AgentNotificationCoordinator {
                 // there. Without the names, the notice is a number the reader
                 // cannot act on (P3-122).
                 let contributors = try? store.outboundWindowContributors(
-                    windowStart: finding.window.startedAt
+                    windowStart: finding.window.startedAt, limit: 5
                 )
-                return OutboundAnomalyReport(
+                let report = OutboundAnomalyReport(
                     finding: finding,
                     applications: contributors?.applications ?? [],
                     destinations: contributors?.destinations ?? [],
                     destinationCount: contributors?.destinationCount ?? 0
                 )
+                // Kept with the window whether or not the notice is sent, so
+                // the overview can explain the anomaly later (0.5.97).
+                if contributors != nil, let breakdown = report.record.breakdown {
+                    try? store.recordOutboundAnomalyBreakdown(
+                        windowStart: finding.window.startedAt, breakdown: breakdown
+                    )
+                }
+                return report
             }
             DispatchQueue.main.async { self?.handleOutboundAnomaly(result) }
         }
@@ -539,7 +602,8 @@ final class AgentNotificationCoordinator {
             body: notificationExplanation(
                 reason: culprits.isEmpty ? reason : reason + "\n" + culprits,
                 action: L("Open Network status or Connection log to review the applications and destinations involved.")
-            )
+            ),
+            details: AgentNotificationDetails(outboundAnomaly: report.record)
         )
     }
 
@@ -565,6 +629,12 @@ final class AgentNotificationCoordinator {
             return finding.candidate.address
         })
         guard !addresses.isEmpty else { return }
+        // Newest first, as the Threats tab would show them the moment the
+        // notice arrived.
+        let matched = report.findings
+            .filter { addresses.contains($0.candidate.address) }
+            .sorted { $0.candidate.lastObservedAt > $1.candidate.lastObservedAt }
+        let kept = Array(matched.prefix(Self.threatDetailLimit))
         let accepted = notifier.notify(
             kind: .threat, key: "threat-scan-\(Int(now.timeIntervalSince1970 / 60))",
             title: L("New threat match detected"),
@@ -572,7 +642,11 @@ final class AgentNotificationCoordinator {
                 reason: L("The latest scan found %lld previously unnotified destinations that matched threat information.", addresses.count),
                 action: L("Open the Threats tab to review them. Addresses and host names stay inside EgressView.")
             ),
-            cooldown: 0
+            cooldown: 0,
+            details: AgentNotificationDetails(
+                threats: kept.map(AgentThreatNotificationDetail.init),
+                moreThreats: matched.count > kept.count ? matched.count - kept.count : nil
+            )
         )
         if accepted { for address in addresses { seenThreats[address] = now } }
     }
@@ -610,6 +684,23 @@ struct OutboundAnomalyReport {
     let applications: [(name: String, bytesOut: UInt64)]
     let destinations: [(name: String, bytesOut: UInt64)]
     let destinationCount: Int
+
+    /// The same, in the form kept with the window and the notice.
+    var record: OutboundAnomalyRecord {
+        OutboundAnomalyRecord(
+            kind: finding.kind,
+            windowStart: finding.window.startedAt,
+            bytesOut: finding.window.bytesOut,
+            applicationCount: finding.window.applicationCount,
+            destinationCount: finding.window.destinationCount,
+            breakdown: .init(
+                usualBytesOut: finding.baselineMedianBytesOut,
+                applications: applications.map { .init(name: $0.name, bytesOut: $0.bytesOut) },
+                destinations: destinations.map { .init(name: $0.name, bytesOut: $0.bytesOut) },
+                sendingDestinationCount: destinationCount
+            )
+        )
+    }
 }
 
 enum OutboundAnomalyWording {

@@ -820,3 +820,21 @@
 "Time" = "時刻";
 "Show" = "表示";
 "Each row is a connection opening or ending, newest first. Showing the newest 500 in the shared period." = "1行は接続の開始または終了です（新しい順）。選択期間の新しいものを最大500件表示します。";
+
+/* Overview and notification history detail popovers */
+"Usual for 15 minutes" = "15分間の普段の送信量";
+"Applications that sent the most" = "送信量の多いアプリ";
+"Destinations sent the most" = "送信量の多い宛先";
+"and %lld other destinations" = "ほか%lld件の宛先";
+"Which applications and destinations sent it was not recorded for this anomaly. It was found before EgressView Agent 0.5.97, which began keeping them." = "この異常では、送信したアプリと宛先は記録されていません。記録を始めたEgressView Agent 0.5.97より前に見つかった異常です。";
+"Large transfer" = "大量の送信";
+"Spread across many applications and destinations" = "多数のアプリ・宛先に分散した送信";
+"Outbound anomalies in this period" = "この期間の送信異常";
+"No 15-minute window in this period sent unusually much compared with this Mac's usual level." = "この期間には、このMacの普段の送信量と比べて多すぎる15分間はありませんでした。";
+"Showing the newest %1$lld of %2$lld." = "%2$lld件のうち新しい%1$lld件を表示しています。";
+"This is a behavioural anomaly, not a malware verdict." = "これは通信量の変化としての異常で、マルウェアという判定ではありません。";
+"The details were not recorded for this notice. It was sent before EgressView Agent 0.5.97, which began keeping them." = "この通知の詳細は記録されていません。詳細の記録を始めたEgressView Agent 0.5.97より前に送られた通知です。";
+"Confidence" = "確度";
+"%lld more matches in this notice are in the Threats tab." = "この通知にはほかに%lld件の一致があります。「脅威」タブで確認できます。";
+"A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point." = "フィードに載っていることは、害がある証拠ではありません。誰かがある時点で、この宛先を上の理由に関係するものとして公開した、という意味です。";
+"Open the Threats tab" = "「脅威」タブを開く";
