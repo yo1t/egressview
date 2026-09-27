@@ -277,3 +277,56 @@ describe('a release must be the tag it claims to be', () => {
     assert.throws(() => assertPublishableTree(mac, clean), /not tagged agent-macos/);
   });
 });
+
+// 2026-09-27: Windows 0.1.136 was reported published while its arm64 MSI was
+// missing from the bucket, and the signed manifest pointed at a 403.
+describe('a package must be stored and served before the release counts', () => {
+  const { assertStored, verifyPackagesServed } = require('../../scripts/publish-agent-release');
+  const config = { platform: 'windows', bucket: 'b', verifyOrigin: 'https://dl.example', profile: 'p' };
+
+  it('パッケージがバケットに実ファイルと同じ大きさで在ることを確かめる', () => withTemp((dir) => {
+    const file = fakePackage(dir, 'EgressView-Agent-Windows-0.2.0-arm64-unsigned.msi', 'twelve bytes');
+    const calls = [];
+    assertStored(config, { file }, (command, args) => { calls.push(args); return '12\n'; });
+    assert.ok(calls[0].includes('head-object') && calls[0].includes('windows/EgressView-Agent-Windows-0.2.0-arm64-unsigned.msi'));
+  }));
+
+  it('無い・大きさが違うパッケージがあれば、manifestを上げる前に止める', () => withTemp((dir) => {
+    const file = fakePackage(dir, 'a.msi', 'twelve bytes');
+    assert.throws(() => assertStored(config, { file }, () => { throw new Error('An error occurred (404) when calling the HeadObject operation: Not Found'); }),
+      /not in the bucket after its upload/);
+    assert.throws(() => assertStored(config, { file }, () => '11'), /is 11 bytes in the bucket, not 12/);
+  }));
+
+  it('manifestより先に、各パッケージの保存を確かめる', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', 'publish-agent-release.js'), 'utf8');
+    const stored = source.indexOf('assertStored(config, entry, io.run || run);');
+    const manifestUpload = source.indexOf("upload(config, manifestPath, `${config.platform}/manifest.json`");
+    assert.ok(stored > 0 && stored < manifestUpload);
+    const served = source.indexOf('await verifyPackagesServed(config, manifest, io);');
+    assert.ok(served > source.indexOf('await verifyPublished(') && served < source.indexOf('log(`Published'));
+  });
+
+  const bytes = Buffer.from('package bytes');
+  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+  const manifest = { packages: [{ url: 'https://dl.example/windows/x.msi', sha256: digest }] };
+  const response = (status, body = Buffer.alloc(0)) => ({ ok: status === 200, status, arrayBuffer: async () => body });
+
+  it('配信されるパッケージがmanifestのSHA-256と一致すれば通す', async () => {
+    const urls = [];
+    await verifyPackagesServed(config, manifest, { fetch: async (url) => { urls.push(url); return response(200, bytes); }, sleep: async () => {} });
+    assert.deepEqual(urls, ['https://dl.example/windows/x.msi']);
+  });
+
+  it('403のまま、または中身が違えば「公開済み」と言わない', async () => {
+    await assert.rejects(verifyPackagesServed(config, manifest, { fetch: async () => response(403), sleep: async () => {} }), /HTTP 403/);
+    await assert.rejects(verifyPackagesServed(config, manifest, { fetch: async () => response(200, Buffer.from('other')), sleep: async () => {} }),
+      /not what the manifest names/);
+  });
+
+  it('届くまでの遅れは待つ', async () => {
+    let calls = 0;
+    await verifyPackagesServed(config, manifest, { fetch: async () => (++calls < 3 ? response(403) : response(200, bytes)), sleep: async () => {} });
+    assert.equal(calls, 3);
+  });
+});
