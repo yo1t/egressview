@@ -818,3 +818,21 @@
 "Time" = "Time";
 "Show" = "Show";
 "Each row is a connection opening or ending, newest first. Showing the newest 500 in the shared period." = "Each row is a connection opening or ending, newest first. Showing the newest 500 in the shared period.";
+
+/* Overview and notification history detail popovers */
+"Usual for 15 minutes" = "Usual for 15 minutes";
+"Applications that sent the most" = "Applications that sent the most";
+"Destinations sent the most" = "Destinations sent the most";
+"and %lld other destinations" = "and %lld other destinations";
+"Which applications and destinations sent it was not recorded for this anomaly. It was found before EgressView Agent 0.5.97, which began keeping them." = "Which applications and destinations sent it was not recorded for this anomaly. It was found before EgressView Agent 0.5.97, which began keeping them.";
+"Large transfer" = "Large transfer";
+"Spread across many applications and destinations" = "Spread across many applications and destinations";
+"Outbound anomalies in this period" = "Outbound anomalies in this period";
+"No 15-minute window in this period sent unusually much compared with this Mac's usual level." = "No 15-minute window in this period sent unusually much compared with this Mac's usual level.";
+"Showing the newest %1$lld of %2$lld." = "Showing the newest %1$lld of %2$lld.";
+"This is a behavioural anomaly, not a malware verdict." = "This is a behavioural anomaly, not a malware verdict.";
+"The details were not recorded for this notice. It was sent before EgressView Agent 0.5.97, which began keeping them." = "The details were not recorded for this notice. It was sent before EgressView Agent 0.5.97, which began keeping them.";
+"Confidence" = "Confidence";
+"%lld more matches in this notice are in the Threats tab." = "%lld more matches in this notice are in the Threats tab.";
+"A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point." = "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point.";
+"Open the Threats tab" = "Open the Threats tab";
