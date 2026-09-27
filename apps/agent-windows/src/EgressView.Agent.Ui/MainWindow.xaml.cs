@@ -1392,6 +1392,7 @@ public partial class MainWindow : Window
         NotifyOutboundAnomaly.IsChecked = AgentSettings.NotificationCategoryEnabled("OutboundAnomaly");
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
+        PopulateHomeCountryChoice();
         AutomaticUpdateChecks.IsChecked = AgentSettings.AutomaticUpdateChecks;
         StartupUiEnabled.IsChecked = AgentStartupRegistration.IsEnabled;
         selectedMinutes = AgentSettings.PeriodMinutes;
@@ -1725,8 +1726,52 @@ public partial class MainWindow : Window
         // The log's status line is composed in code, so it does not follow the
         // resource swap on its own.
         if (IsLoaded) ApplyLogFilter();
+        // Country names are composed in code too.
+        var wasLoading = loadingSettings; loadingSettings = true;
+        try { PopulateHomeCountryChoice(); } finally { loadingSettings = wasLoading; }
         _ = RefreshStatusAsync();
         RefreshNotifications();
+    }
+
+    /// "Follow Windows (Japan)" and then every country on the map, in the
+    /// order of their names in the language on screen (P3-178).
+    private void PopulateHomeCountryChoice()
+    {
+        var language = LocalizationManager.EffectiveLanguage;
+        var windows = EgressView.Agent.Core.HomeLocation.WindowsRegion();
+        HomeCountryChoice.Items.Clear();
+        HomeCountryChoice.Items.Add(new ComboBoxItem
+        {
+            Tag = string.Empty,
+            Content = windows is null ? LocalizationManager.Text("HomeCountryFollowWindowsNotSet")
+                : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("HomeCountryFollowWindows"),
+                    CountryHistoryDisplayRow.LocalizedCountryName(windows, language)),
+        });
+        var culture = CultureInfo.GetCultureInfo(language == "ja" ? "ja-JP" : "en-US");
+        foreach (var (code, name) in WorldAtlas.CountryCodes
+                     .Select(code => (Code: code, Name: CountryHistoryDisplayRow.LocalizedCountryName(code, language)))
+                     .OrderBy(entry => entry.Name, StringComparer.Create(culture, ignoreCase: true)))
+            HomeCountryChoice.Items.Add(new ComboBoxItem { Tag = code, Content = name });
+        var chosen = AgentSettings.HomeCountry;
+        HomeCountryChoice.SelectedItem = HomeCountryChoice.Items.OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, chosen, StringComparison.OrdinalIgnoreCase))
+            ?? HomeCountryChoice.Items[0];
+        ReconcileGlobeHome();
+    }
+
+    private void HomeCountryChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (loadingSettings || HomeCountryChoice.SelectedItem is not ComboBoxItem item) return;
+        AgentSettings.HomeCountry = item.Tag as string ?? string.Empty;
+        ReconcileGlobeHome();
+    }
+
+    /// Redraws the globe from the country now in force, without a restart,
+    /// and says so when there is none.
+    private void ReconcileGlobeHome()
+    {
+        Globe.ReloadHome();
+        GlobeNoHome.Visibility = Globe.HasHome ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void ApplyAccessibilityLabels()
@@ -1763,6 +1808,7 @@ public partial class MainWindow : Window
         Name(NotificationsEnabled, "NotificationsEnabled");
         Name(DailyLimitChoice, "DailyLimit");
         Name(FrameRateChoice, "GlobeFrameRate");
+        Name(HomeCountryChoice, "HomeCountry");
         Name(SettingsSectionChoice, "SettingsSections");
         Name(AiProviderChoice, "Provider");
         Name(AiModelChoice, "Model");

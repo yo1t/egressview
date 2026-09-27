@@ -7,6 +7,24 @@ internal static class WorldAtlas
 {
     internal sealed record Country(string? Code, string Name, IReadOnlyList<(double Lat, double Lon)[]> Rings);
 
+    private static readonly Lazy<IReadOnlyList<Country>> shared = new(Load);
+
+    /// Every country on the map that can be named, once each: the choices for
+    /// where this PC is (P3-178), not only the 22 with a capital in the table.
+    internal static IReadOnlyList<string> CountryCodes =>
+        [.. shared.Value.Select(country => country.Code).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase)];
+
+    /// The middle of a country on the map, for one the capital table lacks.
+    internal static (double Latitude, double Longitude)? CenterOf(string code) =>
+        EgressView.Agent.Core.HomeLocation.Center(shared.Value
+            .Where(country => string.Equals(country.Code, code, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(country => country.Rings));
+
+    /// Where the globe draws from: chosen in settings, else Windows's
+    /// country, else nowhere.
+    internal static (double Latitude, double Longitude)? Home() =>
+        EgressView.Agent.Core.HomeLocation.Resolve(AgentSettings.HomeCountry, EgressView.Agent.Core.HomeLocation.WindowsRegion(), CenterOf);
+
     internal static IReadOnlyList<Country> Load()
     {
         try

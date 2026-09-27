@@ -2823,9 +2823,46 @@ try
         // because every arc starts there.
         Assert(HomeLocation.PreferredTilt(35.68) > 0 && HomeLocation.PreferredTilt(-35.28) < 0,
             "the globe tips towards the hemisphere the traffic leaves from");
-        Assert(HomeLocation.Current("JP") == (35.68, 139.69), "a known region places home there");
-        Assert(HomeLocation.Current("ZZ") == HomeLocation.Current("JP"),
-            "an unknown region falls back rather than landing at null island");
+        // Where the globe draws from (P3-178): the chosen country, else the
+        // one Windows is set to, else nowhere -- never a silent Tokyo.
+        (double Latitude, double Longitude)? NoMap(string code) => null;
+        (double Latitude, double Longitude)? Bangkok(string code) => code == "TH" ? (15.1, 101.0) : null;
+        Assert(HomeLocation.Resolve(null, "JP", NoMap) == (35.68, 139.69), "Windows set to Japan draws from Tokyo");
+        Assert(HomeLocation.Resolve(null, "de", NoMap) == (52.52, 13.40),
+            "Windows set to Germany draws from Berlin, whatever the display format");
+        Assert(HomeLocation.Resolve("TH", "JP", Bangkok) == (15.1, 101.0),
+            "a chosen country outside the capital table draws from its middle on the map, not from Tokyo");
+        Assert(HomeLocation.Resolve("FR", "JP", NoMap) == (48.86, 2.35), "a chosen country wins over Windows");
+        Assert(HomeLocation.Resolve("", "DE", NoMap) == (52.52, 13.40), "an empty choice follows Windows");
+        Assert(HomeLocation.Resolve(null, null, NoMap) is null, "no choice and nothing from Windows is nowhere, not Japan");
+        Assert(HomeLocation.Resolve(null, "ZZ", NoMap) is null, "a country neither table nor map knows is nowhere");
+        Assert(HomeLocation.Resolve("TH", null, NoMap) is null, "and so is a chosen one the map cannot place");
+        // Windows's region can be a world region: "419" is Latin America.
+        Assert(HomeLocation.TwoLetters("DE") == "DE" && HomeLocation.TwoLetters("de") == "DE"
+               && HomeLocation.TwoLetters("419") is null && HomeLocation.TwoLetters("") is null && HomeLocation.TwoLetters("USA") is null,
+            "only a two-letter region names a country");
+        // The region of the machine running the tests, whatever it is, reads
+        // as two letters or not at all.
+        Assert(HomeLocation.WindowsRegion() is null or { Length: 2 }, "Windows's country is two letters or nothing");
+
+        // The middle of a country the capital table lacks: the largest
+        // outline's area-weighted centre.
+        (double Lat, double Lon)[] square = [(10, 20), (10, 30), (20, 30), (20, 20)];
+        (double Lat, double Lon)[] islet = [(0, 0), (0, 1), (1, 1), (1, 0)];
+        var middle = HomeLocation.Center([islet, square])!.Value;
+        Assert(Math.Abs(middle.Latitude - 15) < 1e-9 && Math.Abs(middle.Longitude - 25) < 1e-9,
+            "the centre is the largest outline's, not pulled towards a small island");
+        // Fiji's main island straddles the date line: 177 E to 179 W.
+        (double Lat, double Lon)[] fiji = [(-16, 177), (-16, -179), (-18, -179), (-18, 177)];
+        var fijiMiddle = HomeLocation.Center([fiji])!.Value;
+        Assert(Math.Abs(fijiMiddle.Latitude + 17) < 1e-9 && Math.Abs(Math.Abs(fijiMiddle.Longitude) - 179) < 1e-9,
+            $"a country across the date line is centred on it, not averaged to the far side of the world ({fijiMiddle})");
+        (double Lat, double Lon)[] fijiFromTheWest = [(-16, -179), (-18, -179), (-18, 177), (-16, 177)];
+        var westMiddle = HomeLocation.Center([fijiFromTheWest])!.Value;
+        Assert(Math.Abs(westMiddle.Latitude + 17) < 1e-9 && Math.Abs(Math.Abs(westMiddle.Longitude) - 179) < 1e-9,
+            $"whichever side of the line the outline starts on ({westMiddle})");
+        Assert(HomeLocation.Center([]) is null && HomeLocation.Center([[(0, 0), (1, 1)]]) is null,
+            "no outline, or one without an area, has no centre");
     }
 
     // A start that dies before it can open a run (P3-133). On 2026-09-18 an

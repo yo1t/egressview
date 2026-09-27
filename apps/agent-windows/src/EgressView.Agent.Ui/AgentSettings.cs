@@ -54,6 +54,15 @@ internal static class AgentSettings
         set => Write("GlobeFrameRate", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    /// The country the globe draws from; empty to follow Windows (P3-178).
+    /// Kept on this PC only: not in the exported settings file, not sent to
+    /// a Hub -- the same as the Mac.
+    internal static string HomeCountry
+    {
+        get => Read("HomeCountry") is { Length: 2 } value && value.All(char.IsAsciiLetter) ? value.ToUpperInvariant() : string.Empty;
+        set => Write("HomeCountry", value is { Length: 2 } ? value.ToUpperInvariant() : string.Empty);
+    }
+
     internal static string GlobeSpinSpeed
     {
         get => Read("GlobeSpinSpeed") is { } value && value is "slow" or "fast" ? value : "normal";
