@@ -18,9 +18,28 @@ struct AgentPeriodSummary: Equatable {
     var destinationNames = DestinationNameCoverage.empty
 }
 
+/// What one line of the connection log stands for (P3-107 stage 3).
+enum AgentLogView: String, CaseIterable, Identifiable {
+    /// One connection: first seen to end, with what it carried.
+    case connections
+    /// One thing that happened: a connection opened, or one ended.
+    case events
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .connections: return L("Per connection")
+        case .events: return L("Opens and ends")
+        }
+    }
+}
+
 struct AgentObservationRow: Identifiable {
     let id: String
     let observation: ConnectionObservation
+    /// Set when the row is one event rather than one connection.
+    var event: ConnectionLogEvent? = nil
     let countryCode: String?
     /// LAN, loopback or CGNAT for those destinations (P3-174). Held, like
     /// destinationText, so the column, its menu and its filter agree.
@@ -40,6 +59,26 @@ struct AgentObservationRow: Identifiable {
     /// are the first and last samples that found this flow.
     var firstObservedAt: Date { observation.firstObservedAt }
     var lastObservedAt: Date { observation.lastObservedAt }
+    /// When the event happened. For a connection row, its last observation.
+    var eventAt: Date { event == .opened ? firstObservedAt : lastObservedAt }
+    var eventText: String {
+        switch event {
+        case .opened: return L("Opened")
+        case .ended: return L("Ended")
+        case nil: return ""
+        }
+    }
+
+    /// The same connection, as one of the things that happened to it.
+    func asEvent(_ kind: ConnectionLogEvent) -> AgentObservationRow {
+        var row = AgentObservationRow(
+            id: id + (kind == .opened ? "|opened" : "|ended"),
+            observation: observation, countryCode: countryCode,
+            networkName: networkName, destinationText: destinationText
+        )
+        row.event = kind
+        return row
+    }
     /// Has the agent not seen this connection end?
     ///
     /// Judged by whether byte counts have arrived, which happens with the
@@ -85,7 +124,10 @@ struct AgentObservationRow: Identifiable {
         return Int64(clamping: (observation.bytesIn ?? 0) + (observation.bytesOut ?? 0))
     }
     var bytesText: String {
-        bytesSort < 0
+        // An opening carries no data volume by its nature; saying "not
+        // measured" beside it would suggest something went unmeasured.
+        if event == .opened { return "" }
+        return bytesSort < 0
             ? L("Not measured")
             : ByteCountFormatter.string(fromByteCount: bytesSort, countStyle: .binary)
     }
@@ -159,6 +201,17 @@ final class AgentMainViewModel: ObservableObject {
     }
 
     @Published private(set) var observationRows: [AgentObservationRow] = []
+    /// The same period read as openings and endings, newest first.
+    @Published private(set) var eventRows: [AgentObservationRow] = []
+    /// Kept apart from the filter and the pause, which both views share:
+    /// switching must not reset what the reader has set up (P3-107).
+    @Published var logView = AgentLogView.connections
+    @Published var eventSort = [KeyPathComparator(\AgentObservationRow.eventAt, order: .reverse)]
+
+    /// The rows of the view being shown, before filtering.
+    var logSourceRows: [AgentObservationRow] {
+        logView == .connections ? observationRows : eventRows
+    }
     /// Whether the log is following new connections, and what it has to say
     /// about its own currency.
     ///
@@ -190,17 +243,22 @@ final class AgentMainViewModel: ObservableObject {
 
     var visibleRows: [AgentObservationRow] {
         var hasher = Hasher()
-        hasher.combine(observationRows.count)
-        hasher.combine(observationRows.first?.id)
+        let source = logSourceRows
+        let sort = logView == .connections ? logSort : eventSort
+        hasher.combine(logView)
+        hasher.combine(source.count)
+        hasher.combine(source.first?.id)
         hasher.combine(logFilter)
-        hasher.combine(logSort.map { "\($0.order)" }.joined())
+        // The column as well as the direction: keyed on the direction alone,
+        // sorting by another column the same way returned the old order.
+        hasher.combine(sort.map { "\($0.keyPath)\($0.order)" }.joined())
         let key = hasher.finalize()
         if key == visibleRowsKey { return cachedVisibleRows }
-        let rows = observationRows.filter {
+        let rows = source.filter {
             logFilter.matches(
                 $0.observation, destinationText: $0.destinationText, countryCode: $0.countryKey
             )
-        }.sorted(using: logSort)
+        }.sorted(using: sort)
         // Caching inside a getter needs the box to be mutable; the model is
         // MainActor-isolated, so this is not a race.
         let model = self
@@ -724,7 +782,7 @@ final class AgentMainViewModel: ObservableObject {
                     let countries = try store.countryCodes(
                         forAddresses: observations.map(\.remoteAddress)
                     )
-                    data.rows = observations.enumerated().map { index, observation in
+                    let rows = observations.enumerated().map { index, observation in
                         AgentObservationRow(
                             // The flow, not its current state or its place in
                             // the list. An id containing the last-observed
@@ -733,14 +791,26 @@ final class AgentMainViewModel: ObservableObject {
                             // keep the reader's place, and a log that reloads
                             // as traffic arrives would have thrown the view
                             // away several times a minute (P3-107).
-                            id: observation.flowID?.uuidString
-                                ?? "\(observation.stableKey)|\(observation.firstObservedAt.timeIntervalSince1970)|\(index)",
+                            //
+                            // With the start, because since 0.5.93 a flow id
+                            // that macOS reuses has a row for each time it
+                            // opened, and two rows sharing an id confuse the
+                            // table about which is which.
+                            id: observation.flowID.map {
+                                "\($0.uuidString)|\(observation.firstObservedAt.timeIntervalSince1970)"
+                            } ?? "\(observation.stableKey)|\(observation.firstObservedAt.timeIntervalSince1970)|\(index)",
                             observation: observation,
                             countryCode: countries[observation.remoteAddress],
                             networkName: NonPublicAddress.networkName(observation.remoteAddress),
                             destinationText: Self.destinationText(observation, grouping: grouping)
                         )
                     }
+                    data.rows = rows
+                    // Built from the same rows, so both views describe the same
+                    // connections.
+                    data.eventRows = ConnectionLogEvent.events(
+                        from: observations, since: from, limit: 500
+                    ).map { rows[$0.index].asEvent($0.kind) }
                 }
                 return data
             }
@@ -780,6 +850,7 @@ final class AgentMainViewModel: ObservableObject {
         var sleepPeriods: [DateInterval]?
         var threats: ThreatReport?
         var rows: [AgentObservationRow]?
+        var eventRows: [AgentObservationRow]?
         var storage: ObservationStoreStatistics?
         var measuredBytes: Bool?
         var usesRolledUpHistory: Bool?
@@ -794,6 +865,7 @@ final class AgentMainViewModel: ObservableObject {
         if let value = data.coverage { coverage = value }
         if let value = data.sleepPeriods { sleepPeriods = value }
         if let value = data.threats { threats = value }
+        if let value = data.eventRows { eventRows = value }
         if let value = data.rows {
             observationRows = value
             logUpdatedAt = Date()
