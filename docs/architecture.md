@@ -93,7 +93,7 @@ Schema v5 stores router ownership only in `connection_observations`; the legacy 
 ## Interfaces
 
 - **Browser UI:** static single-page application with AI Insights as the start page plus authenticated Socket.IO updates.
-- **REST:** 71 administration and query endpoints rooted at `/api`, plus minimal `/healthz` and `/readyz`; see the [REST API reference](api-reference.md).
+- **REST:** administration and query endpoints rooted at `/api`, plus minimal `/healthz` and `/readyz`; see the [REST API reference](api-reference.md) for the current route list.
 - **AI providers:** explicit-action, read-only analysis through Ollama, Anthropic, OpenAI, or Amazon Bedrock; see the [AI Insights setup guide](setup-ai-insights.md) for configuration and privacy boundaries.
 - **MCP:** 11 read/write tools over stdio or authenticated HTTP. One SDK v2
   factory serves the legacy `2025-11-25` initialize flow and the stateless
@@ -109,9 +109,9 @@ Schema v5 stores router ownership only in `connection_observations`; the legacy 
 
 - Router SSH targets must be RFC 1918 private IPv4 addresses. SSH host keys use trust-on-first-use and saved fingerprints detect unexpected changes.
 - Router credentials and tokens stay in the local mode-`0600` configuration file; API responses expose only `passSet`/`enablePassSet` flags.
-- All REST endpoints except login, token verification, and the detail-free health/readiness checks require `X-Admin-Token`. Socket.IO applies the same authentication policy.
+- Protected REST endpoints accept an HttpOnly browser session cookie, a scoped API identity, or the legacy `X-Admin-Token` as appropriate to the route. Cookie-authenticated mutations also require `X-CSRF-Token`. Agent endpoints use a separate Agent bearer credential, and public MCP uses OAuth. Health/readiness checks return no sensitive detail; see the [API reference](api-reference.md) for route-level permissions.
 - The server sets CSP, clickjacking, MIME-sniffing, and referrer protections; HSTS is enabled when TLS is configured.
-- **Only the Hub can revoke an agent credential.** Disabling delivery on the client stops it sending; the token stays valid. The UI keeps the two apart rather than letting one be mistaken for the other.
+- An administrator can revoke an Agent credential from the Hub; an Agent can also revoke **its own** credential through the authenticated registration-revoke endpoint. Disabling delivery on the client only stops sending and does not revoke the token.
 - **Agents require HTTPS by default.** Plaintext off loopback is permitted only after an explicit acceptance that lists what it exposes: the connection inventory, the credential sent with every batch, and the ability to submit forged observations.
 - **Agent ingest authenticates before the body is read.** A caller with no credential is refused after the headers rather than after 512 KiB, and ingest holds a per-address budget separate from the general write limit.
 - EgressView is not an inline network device. Polling failure does not interrupt routed traffic, and one router's failure does not stop other collectors.

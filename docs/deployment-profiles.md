@@ -77,19 +77,23 @@ therefore needs an MCP-capable local agent and a local model such as Ollama.
 
 ## AWS mapping
 
-The planned AWS deployment is the `public-oauth` profile, not a separate
-application edition:
+An AWS deployment of the `public-oauth` profile can use these components; it
+is not a separate application edition. This is a reference mapping, not a
+statement that every component is deployed:
 
 - existing EC2 for EgressView and its loopback MCP process;
-- ECS Fargate plus RDS PostgreSQL for the selected Keycloak deployment;
+- an OAuth/OIDC provider such as Amazon Cognito; Keycloak on ECS Fargate plus
+  PostgreSQL is a self-hosted fallback, not a required AWS component;
 - ALB and ACM for TLS termination;
 - WAF and proxy limits for the public boundary;
 - Route 53 for `www`, `mcp`, and `auth` names;
 - security groups that prevent direct Internet ingress to EgressView and MCP.
 
 The same application can instead use an on-premises reverse proxy and internal
-Keycloak, or equivalent services in another cloud. AWS construction remains
-`publishDns=false` until the MCP protocol and publication gates pass.
+Keycloak, or equivalent services in another cloud. For a **new** deployment,
+keep DNS unpublished until its MCP protocol and publication gates pass; review
+DNS publication separately. See the [MCP OAuth evaluation](remote-mcp-oauth-evaluation.md)
+for the provider-specific compatibility caveats.
 
 ## Offline mode
 

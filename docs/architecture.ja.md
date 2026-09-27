@@ -93,7 +93,7 @@ Schema v5ではrouterの観測情報を`connection_observations`だけに保存�
 ## Interface
 
 - **Browser UI:** AI洞察をスタートページにしたstatic single-page applicationと認証済みSocket.IO update。
-- **REST:** `/api`配下の管理・検索API 71本と、最小情報だけを返す`/healthz`・`/readyz`。[REST APIリファレンス](api-reference.ja.md)を参照してください。
+- **REST:** `/api`配下の管理・検索APIと、最小情報だけを返す`/healthz`・`/readyz`。最新のルート一覧は[REST APIリファレンス](api-reference.ja.md)を参照してください。
 - **AI provider:** Ollama / Anthropic / OpenAI / Amazon Bedrockへの明示操作型read-only分析。設定とprivacy境界は[AI洞察設定ガイド](setup-ai-insights.ja.md)を参照してください。
 - **MCP:** stdioまたは認証済みHTTPで利用する11本のread/write tool。SDK v2の
   1つのfactoryがlegacy `2025-11-25` initialize flowとstateless
@@ -109,9 +109,9 @@ Schema v5ではrouterの観測情報を`connection_observations`だけに保存�
 
 - RouterのSSH接続先はRFC 1918 private IPv4 addressに限定します。SSH host keyはTOFUで保存し、fingerprint変化を検出します。
 - Router credentialとtokenはlocalのmode `0600`設定ファイルへ保存し、APIは`passSet`/`enablePassSet`だけを返します。
-- Login、token検証、詳細情報を返さないhealth/readiness以外のREST APIは`X-Admin-Token`必須です。Socket.IOも同じ認証方針です。
+- 保護されたREST APIは、ルートに応じてHttpOnly browser session cookie、scoped API identity、または従来の`X-Admin-Token`を受け付けます。cookie認証による変更操作には`X-CSRF-Token`も必要です。Agent用APIは別のAgent bearer credentialを使い、公開MCPはOAuthを使います。health/readinessは機密詳細を返しません。ルートごとの権限は[APIリファレンス](api-reference.ja.md)を参照してください。
 - ServerはCSP、clickjacking防止、MIME sniffing防止、referrer制限を設定し、TLS利用時はHSTSも有効にします。
-- **Agentの資格情報はHub側だけが失効させられます。** クライアント側の「無効化」は送信を止めるだけで、トークンは有効なままです。UIはこの区別を明示します。
+- 管理者はHubからAgentの資格情報を失効させられます。Agent自身も、認証済みの登録失効APIで**自分の**資格情報を失効させられます。クライアント側で送信を無効にするだけではトークンは失効しません。
 - **Agentは既定でHTTPSを要求します。** loopback以外での平文は、露出する内容（接続先一覧・毎回送られる認証トークン・偽データ送信の可能性）を具体的に示したうえで、明示的に承諾した場合にのみ許可します。
 - **Agentのingestは認証後にbody解析します。** 資格情報の無い相手には512 KiBを読む前に401を返します。全体のwrite枠とは別枠で、IP単位の上限が別に効きます。
 - EgressViewはinline装置ではありません。収集失敗はroutingを止めず、1台のrouter障害が他のcollectorを止めません。
