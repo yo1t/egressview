@@ -17,8 +17,10 @@ extension.
 
 ## The short version
 
-- **Observations stay on your hardware.** Connection metadata is written to a
-  store inside the app group container on your Mac.
+- **Observations are stored on your hardware by default.** Connection metadata
+  is written to a store inside the app group container on your Mac. Enrolment
+  with your own Hub, optional destination-location lookups, and cloud AI can
+  send selected data off-device as described below.
 - **There is no developer telemetry.** The agent has no analytics endpoint or
   crash reporter. Optional third-party lookups and cloud AI have separate,
   explicit controls below.
@@ -28,10 +30,16 @@ extension.
 - **If you enrol with a Hub, observations go to that Hub — which is yours.**
   You run it. The developer has no access to it.
 
-The shipped `PrivacyInfo.xcprivacy` manifest currently has an empty
-`NSPrivacyCollectedDataTypes` array. That declaration does not mean the agent
-never sends data off-device: the optional transfers below must be considered
-separately when reviewing privacy settings and distribution requirements.
+The host app's `PrivacyInfo.xcprivacy` declares data types that can be retained
+by the distribution CDN or optional external providers: other data (including
+request and destination IP addresses and connection aggregates), browsing
+history (websites in an AI context), other user content (AI questions and
+conversation), and user IDs (provider accounts). These are **possible** data
+flows, not a claim that all optional services are enabled. The system
+extension has a separate manifest with no collected data types: it passes
+observations to the host app locally and does not make these external requests.
+Sending observations to a Hub that you run yourself is not a transfer to the
+developer or an external service operated for the developer.
 
 ## Every outbound connection the agent makes
 
@@ -42,7 +50,7 @@ separately when reviewing privacy settings and distribution requirements.
 | **`feodotracker.abuse.ch`, `threatfox.abuse.ch`, `urlhaus.abuse.ch`, `www.spamhaus.org`** | **Only if you turn on direct feed download**, which is off when a Hub supplies feeds | An ordinary HTTPS GET for the whole public list. **Your observations are not sent** — matching happens on your Mac, against the downloaded list | The public indicator lists |
 | **`download.maxmind.com`** | Only if you configure a local GeoLite2 country table | Your MaxMind account ID and licence key; no observed destination address | The GeoLite2 database |
 | **`ipwho.is`** | Only if you enable fallback location lookups | Observed destination IP addresses, up to 500 a day | Location for each queried address |
-| **`api.openai.com`, `api.anthropic.com`** | Only if you configure that cloud AI provider and submit a question | The bounded context shown in the preview and your question | The model's answer |
+| **`api.openai.com`, `api.anthropic.com`** | Only if you configure that cloud AI provider and submit a question | The bounded context shown in the preview, your question, and conversation context | The model's answer |
 
 These are the configured service categories, not an allowlist of every network
 hostname: for example, a download host may redirect to a CDN. Report an
@@ -56,8 +64,28 @@ a property of making an HTTPS request at all, not something the agent adds. It
 is listed here because a privacy page that only mentions the flattering facts is
 not worth reading.
 
-Nothing in that request identifies you beyond the request itself: there is no
-installation ID, no account, and no observation data attached.
+The request includes the agent and OS versions in its User-Agent, but no
+installation ID, account, or observation data. The CDN's access log retains
+the requester's IP address; absence of an installation ID does not make that
+log anonymous.
+
+Cloud AI is opt-in, but that does not mean its inputs are transient. OpenAI's
+Responses API retains response state by default, and Anthropic's API normally
+retains inputs and outputs after processing. The context can include visited
+websites and connection aggregates; a question can contain whatever the user
+types. The host manifest therefore declares these possible data types even if
+the user never enables cloud AI. The `ipwho.is` fallback sends observed
+destination IPs only when enabled; its retention policy has not been verified,
+so the manifest conservatively covers those IPs too. The MaxMind account ID
+is sent only when the user configures a local GeoLite2 download.
+
+Apple's "collected data" definition depends on whether the developer or a
+third-party partner can access readable data beyond the time needed to serve
+the request; merely making a network request is not sufficient. The manifest
+is not a per-provider retention guarantee. For the current policies, see
+[Apple's App Privacy Details](https://developer.apple.com/app-store/app-privacy-details/),
+[OpenAI's API data controls](https://platform.openai.com/docs/models/default-usage-policies-by-endpoint),
+and [Anthropic's retention policy](https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data).
 
 ### The fields sent to a Hub
 

@@ -2,16 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- EgressView observes outbound connection metadata and keeps it on the
-	     user's own hardware. Nothing is sent to the developer. When the user
-	     enrols the agent with a Hub, observations go to that Hub, which the
-	     user runs themselves; the developer has no access to it.
-
-	     Apple's definition of collection is transmitting data off the device
-	     where the developer or a third party can access it. By that
-	     definition this app collects nothing, which is why the list below is
-	     empty rather than merely short. See docs/agent-privacy.md for what
-	     each outbound connection the app makes is for. -->
+	<!-- This extension observes connection metadata and hands it to the host
+	     app through the app group. It does not make the host app's outbound
+	     requests. The host app's separate privacy manifest declares data
+	     collected through update checks and optional external services.
+	     See docs/agent-privacy.md. -->
 	<key>NSPrivacyTracking</key>
 	<false/>
 	<key>NSPrivacyTrackingDomains</key>
