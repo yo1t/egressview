@@ -2226,10 +2226,10 @@ public sealed partial class ObservationStore : IDisposable
     private static ulong SumBytes(IEnumerable<OutboundRow> rows) => rows.Aggregate(0UL, (sum, row) => sum + row.BytesOut);
 
     /// The window's observations by destination and application, leaving out
-    /// every destination that cannot be on the internet: the LAN, loopback,
-    /// the tailnet's shared range, multicast and the other reserved ranges.
-    /// Grouped in SQL and filtered here, because the ranges are
-    /// PrivateAddress's, and a second copy of them written as SQL would drift.
+    /// every destination whose traffic stays on this network: the LAN,
+    /// loopback, the tailnet's shared range, multicast and broadcast. Grouped
+    /// in SQL and filtered here, because the ranges are PrivateAddress's, and
+    /// a second copy of them written as SQL would drift.
     private List<OutboundRow> ReadOutboundRows(DateTimeOffset start, DateTimeOffset end)
     {
         CheckOperation(WinSqlite.Prepare(db, "SELECT remote_address,MAX(remote_hostname),COALESCE(process_name,''),COUNT(*),COUNT(bytes_sent)," +
@@ -2241,7 +2241,7 @@ public sealed partial class ObservationStore : IDisposable
             while (WinSqlite.Step(statement) == WinSqlite.Row)
             {
                 var address = Text(statement, 0);
-                if (PrivateAddress.IsPrivateOrReserved(address)) continue;
+                if (PrivateAddress.StaysOnNetwork(address)) continue;
                 rows.Add(new(address, NullableTextValue(statement, 1), Text(statement, 2),
                     (int)WinSqlite.ColumnInt64(statement, 3), (int)WinSqlite.ColumnInt64(statement, 4),
                     (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 5))));

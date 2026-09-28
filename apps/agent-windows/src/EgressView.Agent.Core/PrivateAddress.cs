@@ -91,6 +91,37 @@ public static class PrivateAddress
         return null;
     }
 
+    /// What never leaves this network beyond the ranges the log names: nothing
+    /// is sent to multicast, broadcast or an unspecified address across the
+    /// internet, and site-local was a LAN range before it was deprecated.
+    private static readonly (byte[] Network, int PrefixLength, AddressFamily Family)[] alsoLocal =
+        [.. new[] { ("0.0.0.0", 8), ("224.0.0.0", 4), ("240.0.0.0", 4), ("::", 128), ("fec0::", 10), ("ff00::", 8) }
+            .Select(range =>
+            {
+                var network = IPAddress.Parse(range.Item1);
+                return (network.GetAddressBytes(), range.Item2, network.AddressFamily);
+            })];
+
+    /// Whether traffic to this address stays on this network: the LAN, the PC
+    /// itself, the tailnet's shared range, multicast and broadcast.
+    ///
+    /// Narrower than <see cref="IsPrivateOrReserved"/> on purpose. That one
+    /// answers "can anyone outside place this address?", and NAT64, 6to4,
+    /// Teredo and the documentation ranges cannot be placed -- but traffic to
+    /// the first three does leave through the router, and an outbound measure
+    /// that dropped them would miss real uploads. What does not parse is not
+    /// said to stay here.
+    public static bool StaysOnNetwork(string? address)
+    {
+        if (NetworkName(address) is not null) return true;
+        if (TryParse(address) is not { } parsed) return false;
+        if (parsed.IsIPv4MappedToIPv6) parsed = parsed.MapToIPv4();
+        var bytes = parsed.GetAddressBytes();
+        foreach (var (network, prefix, family) in alsoLocal)
+            if (family == parsed.AddressFamily && Within(bytes, network, prefix)) return true;
+        return false;
+    }
+
     /// Whether this is an address nothing outside this network can place.
     ///
     /// Something that is not an address at all is not "private or reserved",
