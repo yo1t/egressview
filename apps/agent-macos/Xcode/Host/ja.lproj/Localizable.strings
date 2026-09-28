@@ -157,6 +157,16 @@
 "Add names, location and threat context to observed destinations." = "観測した宛先に名前・位置情報・脅威情報を補います。";
 "Technical counters for troubleshooting network monitoring." = "ネットワーク監視の問題調査に使う技術情報です。";
 "QUIC destination-name diagnostics" = "QUIC通信先名の診断";
+"Connection capture diagnostics" = "接続記録の診断";
+"Aggregate counts only. No destination, application identity, or packet content is retained in these counters." = "集計件数だけを記録します。通信先、アプリの識別情報、パケット内容は診断カウンタに残しません。";
+"Extension since %@: new %lld · registered %lld · missing local endpoint %lld · missing remote endpoint %lld" = "拡張機能（%@以降）：新規 %lld・登録 %lld・送信元未確定 %lld・宛先未確定 %lld";
+"Other skipped flows: non-socket %lld · inbound %lld · unsupported protocol %lld" = "その他の対象外：ソケット以外 %lld・着信 %lld・未対応プロトコル %lld";
+"Extension delivery: outbound callbacks %lld · closed reports %lld · emitted %lld · queued %lld · dropped %lld · drained %lld · encode failures %lld" = "拡張機能からの受け渡し：送信コールバック %lld・終了報告 %lld・観測送出 %lld・キュー投入 %lld・破棄 %lld・引き渡し %lld・符号化失敗 %lld";
+"Unregistered closes: recovered %lld · unresolved %lld" = "未登録フローの終了：救済 %lld・記録不能 %lld";
+"Host since %@: received %lld · saved %lld · failed batches %lld · zero-byte closes %lld" = "本体（%@以降）：受信 %lld・保存 %lld・失敗バッチ %lld・通信量0の終了報告 %lld";
+"Host XPC: drain timeouts %lld · failures %lld" = "本体XPC：取得タイムアウト %lld・通信失敗 %lld";
+"Press Refresh to compare the Extension and local database stages." = "更新を押すと拡張機能からローカルDBまでの件数を比較できます。";
+"Refresh capture counters" = "記録カウンタを更新";
 "These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity." = "QUIC InitialパケットがNetwork Extensionへ届いているかを確認するための集計値です。パケット内容、IPアドレス、ホスト名、アプリの識別情報は保持しません。";
 "Enable destination-name reading in General settings to collect QUIC diagnostic counters." = "QUIC診断値を収集するには、一般設定で通信先名の読み取りを有効にしてください。";
 "Monitoring" = "監視";
@@ -763,6 +773,7 @@
 "Large changes from this Mac's recent baseline, including transfers spread across several applications and destinations." = "このMacの最近の傾向から大きく増えた送信を通知します。複数のアプリと宛先へ分散した送信も対象です。";
 "Outbound anomaly" = "外向き通信の異常";
 "Outbound anomalies" = "送信異常";
+"Large changes in non-local outbound traffic. LAN and loopback transfers are excluded, even when spread across applications and destinations." = "このMacからローカル外への送信量が普段と大きく変わったときに通知します。複数のアプリや宛先に分散した送信も対象ですが、LAN内とループバックへの送信は除外します。";
 "Received" = "受信量";
 "Sent" = "送信量";
 "Unusual outbound traffic detected" = "通常と異なる外向き通信を検出しました";

@@ -82,25 +82,33 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
 
     open override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
         let decision = policy.decision
-        if let socketFlow = flow as? NEFilterSocketFlow,
-           let metadata = adapter.metadata(from: socketFlow) {
-            let observedAt = Date()
-            lock.withLock {
-                openFlows.register(
-                    flowID: socketFlow.identifier,
-                    metadata: metadata,
-                    startedAt: observedAt
-                )
+        didRecordFlowCapture(.newFlow)
+        if let socketFlow = flow as? NEFilterSocketFlow {
+            switch adapter.metadataResult(from: socketFlow) {
+            case let .success(metadata):
+                let observedAt = Date()
+                lock.withLock {
+                    openFlows.register(
+                        flowID: socketFlow.identifier,
+                        metadata: metadata,
+                        startedAt: observedAt
+                    )
+                }
+                didRecordFlowCapture(.registeredFlow)
+                if decision == .allowAndReportMetadata {
+                    emit(mapper.map(metadata, observedAt: observedAt, flowID: socketFlow.identifier))
+                }
+                if decision == .allowAndReadServerName,
+                   metadata.networkProtocol == .udp, metadata.remotePort == 443 {
+                    didObserveQUICFeasibility(.udp443Flow)
+                }
+            case .nonOutbound: didRecordFlowCapture(.nonOutbound)
+            case .unsupportedProtocol: didRecordFlowCapture(.unsupportedProtocol)
+            case .missingLocalEndpoint: didRecordFlowCapture(.missingLocalEndpoint)
+            case .missingRemoteEndpoint: didRecordFlowCapture(.missingRemoteEndpoint)
             }
-            if decision == .allowAndReportMetadata {
-                didObserve(mapper.map(
-                    metadata, observedAt: observedAt, flowID: socketFlow.identifier
-                ))
-            }
-            if decision == .allowAndReadServerName,
-               metadata.networkProtocol == .udp, metadata.remotePort == 443 {
-                didObserveQUICFeasibility(.udp443Flow)
-            }
+        } else {
+            didRecordFlowCapture(.nonSocket)
         }
         switch decision {
         case .allowAndReportMetadata:
@@ -149,6 +157,7 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         guard let socketFlow = flow as? NEFilterSocketFlow else {
             return .allow()
         }
+        didRecordFlowCapture(.outboundCallback)
         var classification: QUICInitialCandidate?
         var isQUICCandidate = false
         let current = adapter.metadata(from: socketFlow)
@@ -197,14 +206,14 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         // A name that arrived after the flow was already reported has to be
         // sent on its own, or nothing carries it until the flow closes -- and
         // about one flow in ten never does (P3-114).
-        if let lateName { didObserve(lateName) }
+        if let lateName { emit(lateName) }
         let opening = lock.withLock {
             openFlows.openingObservation(
                 flowID: socketFlow.identifier,
                 observedAt: Date()
             )
         }
-        if let opening { didObserve(opening) }
+        if let opening { emit(opening) }
         if wantsMoreDatagrams {
             // Pass everything seen so far and ask for the next datagram. The
             // bound lives in the assembler; this cannot wait forever, and it
@@ -228,19 +237,35 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     /// no byte count -- the user cannot tell a wrong number from a right one.
     open override func handle(_ report: NEFilterReport) {
         guard let socketFlow = report.flow as? NEFilterSocketFlow else { return }
-        let observation = lock.withLock {
-            openFlows.complete(
+        let kind = FlowReportKind(report.event)
+        if kind == .flowClosed { didRecordFlowCapture(.closedReport) }
+        let (wasRegistered, observation) = lock.withLock {
+            let wasRegistered = openFlows.contains(flowID: socketFlow.identifier)
+            let observation = openFlows.complete(
                 flowID: socketFlow.identifier,
-                kind: FlowReportKind(report.event),
+                kind: kind,
                 bytesIn: UInt64(max(0, report.bytesInboundCount)),
                 bytesOut: UInt64(max(0, report.bytesOutboundCount)),
                 metadata: adapter.metadata(from: socketFlow),
                 reportedAt: Date()
             )
+            return (wasRegistered, observation)
+        }
+        if kind == .flowClosed && !wasRegistered {
+            didRecordFlowCapture(observation == nil ? .unregisteredCloseUnresolved : .unregisteredCloseRecovered)
         }
         if let observation {
-            didObserve(observation)
+            emit(observation)
         }
+    }
+
+    private func emit(_ observation: ConnectionObservation) {
+        didRecordFlowCapture(.emittedObservation)
+        didObserve(observation)
+    }
+
+    open func didRecordFlowCapture(_ stage: FlowCaptureDiagnostics.Stage) {
+        // The host extension owns the aggregate counters.
     }
 
     open func didObserve(_ observation: ConnectionObservation) {

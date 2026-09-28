@@ -17,6 +17,8 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private let historyMaintenanceQueue = DispatchQueue(label: "com.egressview.agent.history-maintenance")
     private var currentMonitoringStatus = AgentMonitoringStatus.paused
     private var currentQUICDiagnostics: QUICFeasibilityDiagnostics?
+    private var currentFlowDiagnostics: FlowCaptureDiagnostics?
+    private var currentFlowPersistenceDiagnostics: FlowPersistenceDiagnostics?
     private var checkedLaunchAtLoginForActiveMonitoring = false
     private var isPreparedForRemoval = false
     private lazy var storageResult = makeStorage()
@@ -104,6 +106,13 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self?.currentQUICDiagnostics = diagnostics
                 self?.settingsWindow?.updateQUICDiagnostics(diagnostics)
+            }
+        },
+        flowDiagnosticsHandler: { [weak self] extensionDiagnostics, hostDiagnostics in
+            DispatchQueue.main.async {
+                self?.currentFlowDiagnostics = extensionDiagnostics
+                self?.currentFlowPersistenceDiagnostics = hostDiagnostics
+                self?.settingsWindow?.updateFlowDiagnostics(extensionDiagnostics, hostDiagnostics: hostDiagnostics)
             }
         }
     )
@@ -388,11 +397,15 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 self?.controller.setReadsServerName(enabled)
             },
             onRefreshQUICDiagnostics: { [weak self] in self?.controller.requestQUICDiagnostics() },
+            onRefreshFlowDiagnostics: { [weak self] in self?.controller.requestFlowCaptureDiagnostics() },
             onSaveDiagnostics: { [weak self] in self?.diagnosticsExporter.export() },
             onClose: { [weak self] in self?.settingsWindow = nil }
         )
         controller.updateMonitoringStatus(currentMonitoringStatus)
         controller.updateQUICDiagnostics(currentQUICDiagnostics)
+        if let currentFlowDiagnostics, let currentFlowPersistenceDiagnostics {
+            controller.updateFlowDiagnostics(currentFlowDiagnostics, hostDiagnostics: currentFlowPersistenceDiagnostics)
+        }
         settingsWindow = controller
         return controller
     }

@@ -271,6 +271,7 @@ public final class ObservationStore: @unchecked Sendable {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=NORMAL")
         try execute("PRAGMA foreign_keys=ON")
+        try registerOutboundAnomalyDestinationFunction()
         try migrate()
         knownVisitedCountries = try loadVisitedCountryCodes()
         try? FileManager.default.setAttributes(
@@ -304,6 +305,23 @@ public final class ObservationStore: @unchecked Sendable {
 
     deinit { sqlite3_close_v2(handle) }
 
+    private func registerOutboundAnomalyDestinationFunction() throws {
+        let result = sqlite3_create_function_v2(
+            handle, "egressview_external_destination", 1,
+            SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil,
+            { context, _, values in
+                guard let context, let value = values?[0],
+                      let bytes = sqlite3_value_text(value) else {
+                    sqlite3_result_int(context, 1)
+                    return
+                }
+                let address = String(cString: UnsafeRawPointer(bytes).assumingMemoryBound(to: CChar.self))
+                sqlite3_result_int(context, NonPublicAddress.isExcludedFromOutboundAnomaly(address) ? 0 : 1)
+            }, nil, nil, nil
+        )
+        guard result == SQLITE_OK else { throw ObservationStoreError.statement(lastMessage) }
+    }
+
     /// The schema the open database is on. Read for the diagnostics report,
     /// which could not say what version a store was (P3-161).
     public func schemaVersion() -> Int {
@@ -320,7 +338,7 @@ public final class ObservationStore: @unchecked Sendable {
     ///
     /// Named rather than counted from the code so the backup and the progress
     /// file can say where the migration is heading before it starts.
-    static let latestSchemaVersion = 17
+    static let latestSchemaVersion = 18
 
     private func migrate() throws {
         let version = try scalar("PRAGMA user_version") ?? 0
@@ -753,6 +771,15 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("PRAGMA user_version=17")
             reportMigrationStep(17)
         }
+        if version < 18 {
+            // Keep historical findings but never compare old all-destination
+            // windows with the new Internet-only anomaly definition.
+            if try !columnExists(table: "outbound_traffic_windows", column: "scope_version") {
+                try execute("ALTER TABLE outbound_traffic_windows ADD COLUMN scope_version INTEGER NOT NULL DEFAULT 1")
+            }
+            try execute("PRAGMA user_version=18")
+            reportMigrationStep(18)
+        }
     }
 
     /// Says where the migration has got to, for a window that cannot ask.
@@ -1162,8 +1189,8 @@ public final class ObservationStore: @unchecked Sendable {
                 let insert = try prepare("""
                 INSERT INTO outbound_traffic_windows (
                     window_start, bytes_out, observation_count, observations_with_bytes,
-                    application_count, destination_count, largest_application_bytes_out
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    application_count, destination_count, largest_application_bytes_out, scope_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 2)
                 """)
                 defer { sqlite3_finalize(insert) }
                 sqlite3_bind_double(insert, 1, start)
@@ -1195,6 +1222,7 @@ public final class ObservationStore: @unchecked Sendable {
                COUNT(DISTINCT process_name), COUNT(DISTINCT remote_address)
         FROM observations
         WHERE last_observed_at >= ? AND last_observed_at < ?
+          AND egressview_external_destination(remote_address) = 1
         """)
         defer { sqlite3_finalize(summary) }
         sqlite3_bind_double(summary, 1, start)
@@ -1207,6 +1235,7 @@ public final class ObservationStore: @unchecked Sendable {
             SELECT SUM(COALESCE(bytes_out, 0)) AS app_bytes
             FROM observations
             WHERE last_observed_at >= ? AND last_observed_at < ?
+              AND egressview_external_destination(remote_address) = 1
             GROUP BY process_name
         )
         """)
@@ -1232,7 +1261,7 @@ public final class ObservationStore: @unchecked Sendable {
         SELECT window_start, bytes_out, observation_count, observations_with_bytes,
                application_count, destination_count, largest_application_bytes_out
         FROM outbound_traffic_windows
-        WHERE window_start >= ? AND window_start < ?
+        WHERE window_start >= ? AND window_start < ? AND scope_version = 2
         ORDER BY window_start
         """)
         defer { sqlite3_finalize(statement) }
@@ -1290,6 +1319,7 @@ public final class ObservationStore: @unchecked Sendable {
                 SELECT \(column) AS name, SUM(COALESCE(bytes_out, 0)) AS sent
                 FROM observations
                 WHERE last_observed_at >= ? AND last_observed_at < ?
+                  AND egressview_external_destination(remote_address) = 1
                 GROUP BY name
                 HAVING sent > 0
                 ORDER BY sent DESC
@@ -1314,6 +1344,7 @@ public final class ObservationStore: @unchecked Sendable {
             FROM observations
             WHERE last_observed_at >= ? AND last_observed_at < ?
               AND COALESCE(bytes_out, 0) > 0
+              AND egressview_external_destination(remote_address) = 1
             """)
             defer { sqlite3_finalize(counter) }
             sqlite3_bind_double(counter, 1, windowStart.timeIntervalSince1970)

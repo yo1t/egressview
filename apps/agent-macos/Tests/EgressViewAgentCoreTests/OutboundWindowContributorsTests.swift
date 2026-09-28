@@ -38,24 +38,24 @@ final class OutboundWindowContributorsTests: XCTestCase {
     }
 
     func test送った量の多い順に並ぶ() throws {
-        try send(900, process: "Chrome", host: "speedtest.example", address: "198.51.100.1", at: 60)
-        try send(80, process: "Mail", host: "mail.example", address: "198.51.100.2", at: 120)
-        try send(9, process: "Sync", host: nil, address: "198.51.100.3", at: 180)
+        try send(900, process: "Chrome", host: "speedtest.example", address: "8.8.8.1", at: 60)
+        try send(80, process: "Mail", host: "mail.example", address: "8.8.8.2", at: 120)
+        try send(9, process: "Sync", host: nil, address: "8.8.8.3", at: 180)
 
         let result = try store.outboundWindowContributors(windowStart: windowStart)
         XCTAssertEqual(result.applications.map(\.name), ["Chrome", "Mail", "Sync"])
         XCTAssertEqual(result.applications.first?.bytesOut, 900)
         XCTAssertEqual(
             result.destinations.map(\.name),
-            ["speedtest.example", "mail.example", "198.51.100.3"],
+            ["speedtest.example", "mail.example", "8.8.8.3"],
             "名前が無い宛先はアドレスで出るべき"
         )
         XCTAssertEqual(result.destinationCount, 3)
     }
 
     func test同じアプリの複数接続はまとめる() throws {
-        try send(400, process: "Chrome", host: "a.example", address: "198.51.100.1", at: 10)
-        try send(500, process: "Chrome", host: "b.example", address: "198.51.100.2", at: 20)
+        try send(400, process: "Chrome", host: "a.example", address: "8.8.8.1", at: 10)
+        try send(500, process: "Chrome", host: "b.example", address: "8.8.8.2", at: 20)
 
         let result = try store.outboundWindowContributors(windowStart: windowStart)
         XCTAssertEqual(result.applications.count, 1)
@@ -63,9 +63,9 @@ final class OutboundWindowContributorsTests: XCTestCase {
     }
 
     func test窓の外は数えない() throws {
-        try send(100, process: "Inside", host: "a.example", address: "198.51.100.1", at: 800)
-        try send(100, process: "After", host: "b.example", address: "198.51.100.2", at: 901)
-        try send(100, process: "Before", host: "c.example", address: "198.51.100.3", at: -1)
+        try send(100, process: "Inside", host: "a.example", address: "8.8.8.1", at: 800)
+        try send(100, process: "After", host: "b.example", address: "8.8.8.2", at: 901)
+        try send(100, process: "Before", host: "c.example", address: "8.8.8.3", at: -1)
 
         let result = try store.outboundWindowContributors(windowStart: windowStart)
         XCTAssertEqual(result.applications.map(\.name), ["Inside"])
@@ -75,7 +75,7 @@ final class OutboundWindowContributorsTests: XCTestCase {
         // The notice is about what left the Mac.
         try store.append([ConnectionObservation(
             networkProtocol: .tcp, localAddress: "192.0.2.5", localPort: 1,
-            remoteAddress: "198.51.100.9", remotePort: 443, processID: 1,
+            remoteAddress: "8.8.8.9", remotePort: 443, processID: 1,
             processName: "Downloader", bundleID: nil,
             firstObservedAt: windowStart.addingTimeInterval(30),
             lastObservedAt: windowStart.addingTimeInterval(30),
@@ -91,7 +91,7 @@ final class OutboundWindowContributorsTests: XCTestCase {
         for index in 0..<10 {
             try send(
                 UInt64(100 - index), process: "App\(index)",
-                host: "host\(index).example", address: "198.51.100.\(index + 1)",
+                host: "host\(index).example", address: "8.8.8.\(index + 1)",
                 at: TimeInterval(index)
             )
         }

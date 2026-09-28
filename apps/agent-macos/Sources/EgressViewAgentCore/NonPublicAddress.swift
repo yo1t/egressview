@@ -104,6 +104,12 @@ public enum NonPublicAddress {
         }
     }
 
+    /// Local or non-routable traffic is not an Internet upload anomaly.
+    /// CGNAT is deliberately retained: a shared address can be outside the LAN.
+    public static func isExcludedFromOutboundAnomaly(_ address: String) -> Bool {
+        isNonPublic(address) && networkName(address) != cgnat
+    }
+
     /// "LAN", "loopback" or "CGNAT" for a destination in one of those ranges;
     /// nil for everything else, including anything that is not an address.
     public static func networkName(_ address: String) -> String? {

@@ -157,6 +157,16 @@
 "Add names, location and threat context to observed destinations." = "Add names, location and threat context to observed destinations.";
 "Technical counters for troubleshooting network monitoring." = "Technical counters for troubleshooting network monitoring.";
 "QUIC destination-name diagnostics" = "QUIC destination-name diagnostics";
+"Connection capture diagnostics" = "Connection capture diagnostics";
+"Aggregate counts only. No destination, application identity, or packet content is retained in these counters." = "Aggregate counts only. No destination, application identity, or packet content is retained in these counters.";
+"Extension since %@: new %lld · registered %lld · missing local endpoint %lld · missing remote endpoint %lld" = "Extension since %@: new %lld · registered %lld · missing local endpoint %lld · missing remote endpoint %lld";
+"Other skipped flows: non-socket %lld · inbound %lld · unsupported protocol %lld" = "Other skipped flows: non-socket %lld · inbound %lld · unsupported protocol %lld";
+"Extension delivery: outbound callbacks %lld · closed reports %lld · emitted %lld · queued %lld · dropped %lld · drained %lld · encode failures %lld" = "Extension delivery: outbound callbacks %lld · closed reports %lld · emitted %lld · queued %lld · dropped %lld · drained %lld · encode failures %lld";
+"Unregistered closes: recovered %lld · unresolved %lld" = "Unregistered closes: recovered %lld · unresolved %lld";
+"Host since %@: received %lld · saved %lld · failed batches %lld · zero-byte closes %lld" = "Host since %@: received %lld · saved %lld · failed batches %lld · zero-byte closes %lld";
+"Host XPC: drain timeouts %lld · failures %lld" = "Host XPC: drain timeouts %lld · failures %lld";
+"Press Refresh to compare the Extension and local database stages." = "Press Refresh to compare the Extension and local database stages.";
+"Refresh capture counters" = "Refresh capture counters";
 "These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity." = "These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity.";
 "Enable destination-name reading in General settings to collect QUIC diagnostic counters." = "Enable destination-name reading in General settings to collect QUIC diagnostic counters.";
 "Monitoring" = "Monitoring";
@@ -761,6 +771,7 @@
 "Large changes from this Mac's recent baseline, including transfers spread across several applications and destinations." = "Large changes from this Mac's recent baseline, including transfers spread across several applications and destinations.";
 "Outbound anomaly" = "Outbound anomaly";
 "Outbound anomalies" = "Outbound anomalies";
+"Large changes in non-local outbound traffic. LAN and loopback transfers are excluded, even when spread across applications and destinations." = "Large changes in non-local outbound traffic. LAN and loopback transfers are excluded, even when spread across applications and destinations.";
 "Received" = "Received";
 "Sent" = "Sent";
 "Unusual outbound traffic detected" = "Unusual outbound traffic detected";

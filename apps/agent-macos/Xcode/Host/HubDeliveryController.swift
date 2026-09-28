@@ -348,6 +348,8 @@ private final class AgentSettingsViewModel: ObservableObject {
         }
     }
     @Published private(set) var quicDiagnostics: QUICFeasibilityDiagnostics?
+    @Published private(set) var flowDiagnostics: FlowCaptureDiagnostics?
+    @Published private(set) var flowPersistenceDiagnostics: FlowPersistenceDiagnostics?
     let isLightweightMonitoringAvailable = false
 
     var availableMonitoringModes: [AgentMonitoringMode] {
@@ -360,6 +362,7 @@ private final class AgentSettingsViewModel: ObservableObject {
     private let onRetentionChanged: (Int) -> Void
     private let onLanguageChanged: () -> Void
     private let onRefreshQUICDiagnostics: () -> Void
+    private let onRefreshFlowDiagnostics: () -> Void
     private let onSaveDiagnostics: () -> Void
     private let onServerNameChanged: (Bool) -> Void
     private let maintenanceQueue = DispatchQueue(label: "com.egressview.agent.settings-maintenance")
@@ -372,6 +375,7 @@ private final class AgentSettingsViewModel: ObservableObject {
         onLanguageChanged: @escaping () -> Void,
         onServerNameChanged: @escaping (Bool) -> Void,
         onRefreshQUICDiagnostics: @escaping () -> Void,
+        onRefreshFlowDiagnostics: @escaping () -> Void,
         onSaveDiagnostics: @escaping () -> Void
     ) {
         self.store = store
@@ -381,6 +385,7 @@ private final class AgentSettingsViewModel: ObservableObject {
         self.onLanguageChanged = onLanguageChanged
         self.onServerNameChanged = onServerNameChanged
         self.onRefreshQUICDiagnostics = onRefreshQUICDiagnostics
+        self.onRefreshFlowDiagnostics = onRefreshFlowDiagnostics
         self.onSaveDiagnostics = onSaveDiagnostics
         refreshLaunchAtLogin()
     }
@@ -411,6 +416,15 @@ private final class AgentSettingsViewModel: ObservableObject {
 
     func refreshQUICDiagnostics() {
         onRefreshQUICDiagnostics()
+    }
+
+    func updateFlowDiagnostics(_ extensionDiagnostics: FlowCaptureDiagnostics, hostDiagnostics: FlowPersistenceDiagnostics) {
+        flowDiagnostics = extensionDiagnostics
+        flowPersistenceDiagnostics = hostDiagnostics
+    }
+
+    func refreshFlowDiagnostics() {
+        onRefreshFlowDiagnostics()
     }
 
     func saveDiagnostics() {
@@ -867,7 +881,7 @@ private struct AgentSettingsView: View {
                 )
                 notificationToggle(
                     L("Unusual outbound traffic"),
-                    L("Large changes from this Mac's recent baseline, including transfers spread across several applications and destinations."),
+                    L("Large changes in non-local outbound traffic. LAN and loopback transfers are excluded, even when spread across applications and destinations."),
                     $notifications.outboundAnomaliesEnabled
                 )
                 notificationToggle(
@@ -1425,6 +1439,38 @@ private struct AgentSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            settingsGroup(L("Connection capture diagnostics")) {
+                Text(L("Aggregate counts only. No destination, application identity, or packet content is retained in these counters."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let extensionCounts = model.flowDiagnostics,
+                   let hostCounts = model.flowPersistenceDiagnostics {
+                    Text(L("Extension since %@: new %lld · registered %lld · missing local endpoint %lld · missing remote endpoint %lld",
+                           extensionCounts.startedAt.formatted(), extensionCounts.newFlows,
+                           extensionCounts.registeredFlows, extensionCounts.missingLocalEndpoints,
+                           extensionCounts.missingRemoteEndpoints))
+                    Text(L("Other skipped flows: non-socket %lld · inbound %lld · unsupported protocol %lld",
+                           extensionCounts.nonSocketFlows, extensionCounts.nonOutboundFlows,
+                           extensionCounts.unsupportedProtocols))
+                    Text(L("Extension delivery: outbound callbacks %lld · closed reports %lld · emitted %lld · queued %lld · dropped %lld · drained %lld · encode failures %lld",
+                           extensionCounts.outboundCallbacks, extensionCounts.closedReports,
+                           extensionCounts.emittedObservations, extensionCounts.enqueuedObservations,
+                           extensionCounts.droppedObservations, extensionCounts.drainedObservations,
+                           extensionCounts.encodingFailures))
+                    Text(L("Unregistered closes: recovered %lld · unresolved %lld",
+                           extensionCounts.unregisteredClosesRecovered,
+                           extensionCounts.unregisteredClosesUnresolved))
+                    Text(L("Host since %@: received %lld · saved %lld · failed batches %lld · zero-byte closes %lld",
+                           hostCounts.startedAt.formatted(), hostCounts.receivedObservations,
+                           hostCounts.persistedObservations, hostCounts.failedBatches,
+                           hostCounts.completedWithoutBytes))
+                    Text(L("Host XPC: drain timeouts %lld · failures %lld",
+                           hostCounts.drainTimeouts, hostCounts.xpcFailures))
+                } else {
+                    Text(L("Press Refresh to compare the Extension and local database stages."))
+                }
+                Button(L("Refresh capture counters")) { model.refreshFlowDiagnostics() }
+            }
         }
     }
 
@@ -1743,6 +1789,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         onLanguageChanged: @escaping () -> Void,
         onServerNameChanged: @escaping (Bool) -> Void,
         onRefreshQUICDiagnostics: @escaping () -> Void,
+        onRefreshFlowDiagnostics: @escaping () -> Void,
         onSaveDiagnostics: @escaping () -> Void,
         onClose: @escaping () -> Void = {}
     ) {
@@ -1761,6 +1808,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             onLanguageChanged: onLanguageChanged,
             onServerNameChanged: onServerNameChanged,
             onRefreshQUICDiagnostics: onRefreshQUICDiagnostics,
+            onRefreshFlowDiagnostics: onRefreshFlowDiagnostics,
             onSaveDiagnostics: onSaveDiagnostics
         )
         self.model = model
@@ -1803,6 +1851,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func updateQUICDiagnostics(_ diagnostics: QUICFeasibilityDiagnostics?) {
         model.updateQUICDiagnostics(diagnostics)
+    }
+
+    func updateFlowDiagnostics(_ extensionDiagnostics: FlowCaptureDiagnostics, hostDiagnostics: FlowPersistenceDiagnostics) {
+        model.updateFlowDiagnostics(extensionDiagnostics, hostDiagnostics: hostDiagnostics)
     }
 
     func refreshLocalization() {

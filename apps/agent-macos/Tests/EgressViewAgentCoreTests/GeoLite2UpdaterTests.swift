@@ -41,6 +41,8 @@ final class GeoLite2UpdaterTests: XCTestCase {
         process.arguments = [
             "-czf", archive.path, "-C", directory.path, "GeoLite2-Country_20260901",
         ]
+        // macOS tar can add ._ AppleDouble files; one also ends in .mmdb.
+        process.environment = ProcessInfo.processInfo.environment.merging(["COPYFILE_DISABLE": "1"]) { _, new in new }
         try process.run()
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0, "tarが作れていない")

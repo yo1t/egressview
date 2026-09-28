@@ -195,7 +195,8 @@ final class AgentMonitoringController {
         statusHandler: @escaping (AgentMonitoringStatus) -> Void,
         observationHandler: @escaping ([ConnectionObservation]) -> Void,
         storageErrorHandler: @escaping (Error) -> Void,
-        diagnosticsHandler: @escaping (QUICFeasibilityDiagnostics) -> Void = { _ in }
+        diagnosticsHandler: @escaping (QUICFeasibilityDiagnostics) -> Void = { _ in },
+        flowDiagnosticsHandler: @escaping (FlowCaptureDiagnostics, FlowPersistenceDiagnostics) -> Void = { _, _ in }
     ) {
         let gateState = MonitoringGateState()
         // While an update is stalled, nothing is being recorded, so the
@@ -284,7 +285,8 @@ final class AgentMonitoringController {
                     }
                 },
                 readsServerName: ServerNamePreferences().isEnabled,
-                diagnosticsHandler: diagnosticsHandler
+                diagnosticsHandler: diagnosticsHandler,
+                flowDiagnosticsHandler: flowDiagnosticsHandler
             )
         }
     }
@@ -343,6 +345,10 @@ final class AgentMonitoringController {
 
     func requestQUICDiagnostics() {
         fullMonitoringCollector?.requestQUICDiagnostics()
+    }
+
+    func requestFlowCaptureDiagnostics() {
+        fullMonitoringCollector?.requestFlowCaptureDiagnostics()
     }
 
     func setReadsServerName(_ enabled: Bool) {

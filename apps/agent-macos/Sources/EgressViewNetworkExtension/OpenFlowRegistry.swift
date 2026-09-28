@@ -51,6 +51,8 @@ public struct OpenFlowRegistry: Sendable {
 
     public var count: Int { entries.count }
 
+    public func contains(flowID: UUID) -> Bool { entries[flowID] != nil }
+
     public mutating func register(
         flowID: UUID,
         metadata: SocketFlowMetadata,
