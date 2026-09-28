@@ -50,7 +50,11 @@ jobs:
         # itself as the original, so search engines saw two copies and
         # indexed ours slowly or not at all. Jekyll still builds everything
         # here, which keeps this job a check on the site source.
-        run: node scripts/pages-redirect-to-www.js _site
+        # The Jekyll action builds in a container as root, so the output is
+        # not writable by the runner's user until it is handed back.
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" _site
+          node scripts/pages-redirect-to-www.js _site
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
 
