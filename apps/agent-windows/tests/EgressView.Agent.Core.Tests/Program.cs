@@ -3139,7 +3139,7 @@ try
             var previous = window - TimeSpan.FromMinutes(15);
             store.WriteBatch(Enumerable.Range(0, 12).Select(index => new NetworkObservation(
                 previous.AddMinutes(1), 500 + index, "TCP", "10.0.0.5", 50_000 + index,
-                $"93.184.216.{index + 10}", 443, 8 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw",
+                $"203.0.113.{index}", 443, 8 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw",
                 $"sender{index}")).ToArray());
             // What never leaves this network, in the same window: the hourly
             // copy to a machine on the LAN that was reported as unusual
@@ -3186,12 +3186,12 @@ try
 
             // One more sender with a host name, sending the most of anyone.
             store.WriteBatch([new NetworkObservation(previous.AddMinutes(2), 900, "TCP", "10.0.0.5", 51_000,
-                "93.184.217.7", 443, 40 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "backup.exe", "upload.example.com")]);
+                "198.51.100.7", 443, 40 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "backup.exe", "upload.example.com")]);
             var breakdown = store.ReadOutboundAnomalyBreakdown(previous, 3 * 1024 * 1024);
             Assert(breakdown.UsualBytesOut == 3 * 1024 * 1024 && breakdown.Applications.Count == 5 &&
                 breakdown.Applications[0] == new OutboundContributor("backup.exe", 40UL * 1024 * 1024) &&
                 breakdown.Destinations.Count == 5 &&
-                breakdown.Destinations[0] == new OutboundContributor("upload.example.com (93.184.217.7)", 40UL * 1024 * 1024) &&
+                breakdown.Destinations[0] == new OutboundContributor("upload.example.com (198.51.100.7)", 40UL * 1024 * 1024) &&
                 breakdown.SendingDestinationCount == 13,
                 "the breakdown keeps the five largest senders each way, names a host where one was read, and counts every destination");
             Assert(!breakdown.Applications.Any(item => item.Name is "System" or "tailscaled") &&
@@ -3214,6 +3214,17 @@ try
         using (var reopened = new ObservationStore(anomalyDatabase))
             Assert(reopened.ReadLatestOutboundAnomaly()?.Breakdown?.Applications[0].Name == "backup.exe",
                 "and survives a restart");
+
+        // What counts as staying on this network, for the outbound measure.
+        // NAT64, 6to4 and Teredo leave through the router, and the
+        // documentation ranges are what the tests are written in, so none of
+        // them is dropped as local though none can be placed on a map.
+        foreach (var local in new[] { "192.168.1.20", "10.0.0.1", "172.16.5.5", "169.254.1.1", "127.0.0.1", "::1",
+                     "100.64.0.9", "fd00::1", "fe80::1%12", "224.0.0.251", "239.255.255.250", "255.255.255.255", "ff02::fb", "0.0.0.0" })
+            Assert(PrivateAddress.StaysOnNetwork(local), $"{local} stays on this network");
+        foreach (var outward in new[] { "203.0.113.9", "198.51.100.7", "192.0.2.1", "2001:db8::1", "64:ff9b::c000:201",
+                     "2002:c000:201::1", "2001:0:4136:e378::1", "::ffff:203.0.113.9", "", "not an address" })
+            Assert(!PrivateAddress.StaysOnNetwork(outward), $"{outward} is not said to stay on this network");
 
         // Threat notices, as the Mac Agent decides them (P3-180).
         {
@@ -3270,7 +3281,7 @@ try
             {
                 var at = start.AddMinutes(15 * index);
                 store.WriteBatch([new NetworkObservation(at.AddMinutes(1), 700, "TCP", "10.0.0.5", 52_000 + index,
-                    "93.184.216.50", 443, 1024, 0, ObservationLayer.Logical, null, "etw", "app.exe")]);
+                    "203.0.113.50", 443, 1024, 0, ObservationLayer.Logical, null, "etw", "app.exe")]);
                 store.CaptureOutboundTrafficWindow(at + TimeSpan.FromMinutes(15));
                 store.RecordOutboundAnomaly(at, OutboundAnomalyKind.LargeTransfer);
             }
