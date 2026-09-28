@@ -1201,7 +1201,7 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 29, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 30, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
@@ -1627,7 +1627,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 29, "v1 database migrates through v2-v29");
+        Assert(migrated.SchemaVersion == 30, "v1 database migrates through v2-v30");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -1679,7 +1679,7 @@ try
     Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v29.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 29, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 30, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -3139,15 +3139,32 @@ try
             var previous = window - TimeSpan.FromMinutes(15);
             store.WriteBatch(Enumerable.Range(0, 12).Select(index => new NetworkObservation(
                 previous.AddMinutes(1), 500 + index, "TCP", "10.0.0.5", 50_000 + index,
-                $"203.0.113.{index}", 443, 8 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw",
+                $"93.184.216.{index + 10}", 443, 8 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw",
                 $"sender{index}")).ToArray());
+            // What never leaves this network, in the same window: the hourly
+            // copy to a machine on the LAN that was reported as unusual
+            // outbound traffic 105 times in a week, a tailnet peer, the PC
+            // itself, a link-local neighbour and multicast.
+            store.WriteBatch([
+                new NetworkObservation(previous.AddMinutes(1), 4, "TCP", "10.0.0.5", 50_445, "192.168.1.20", 445,
+                    400L * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "System"),
+                new NetworkObservation(previous.AddMinutes(1), 610, "TCP", "100.101.102.5", 50_500, "100.64.0.9", 22,
+                    90L * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "tailscaled"),
+                new NetworkObservation(previous.AddMinutes(1), 620, "TCP", "127.0.0.1", 50_600, "127.0.0.1", 8080,
+                    70L * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "sender0"),
+                new NetworkObservation(previous.AddMinutes(1), 630, "UDP", "fe80::5", 50_700, "fe80::1", 5353,
+                    1024, 0, ObservationLayer.Logical, null, "etw", "svchost"),
+                new NetworkObservation(previous.AddMinutes(1), 640, "UDP", "10.0.0.5", 50_800, "239.255.255.250", 1900,
+                    1024, 0, ObservationLayer.Logical, null, "etw", "svchost"),
+            ]);
 
             var captured = store.CaptureOutboundTrafficWindow(now);
             Assert(captured is { } first && first.Current.StartedAt == previous &&
                 first.Current.BytesOut == 12UL * 8 * 1024 * 1024 && first.Current.ObservationCount == 12 &&
                 first.Current.ObservationsWithBytes == 12 && first.Current.ApplicationCount == 12 &&
                 first.Current.DestinationCount == 12 && first.Current.LargestApplicationBytesOut == 8 * 1024 * 1024,
-                "a captured window measures bytes, coverage, applications and the largest single sender");
+                "a captured window measures bytes, coverage, applications and the largest single sender -- " +
+                "over destinations outside this network only, so a copy to the LAN is not outbound traffic");
 
             // Capturing twice would let a restart raise the same alert again.
             Assert(store.CaptureOutboundTrafficWindow(now) is null,
@@ -3159,6 +3176,109 @@ try
             Assert(store.ReadOutboundAnomalyCount(previous, now) == 1 &&
                 store.ReadOutboundAnomalyCount(previous.AddDays(-2), previous.AddDays(-1)) == 0,
                 "a recorded anomaly is counted inside its period and not outside it");
+
+            // What explains it (P3-180). A window flagged without a breakdown
+            // -- as every window before 0.1.140 was -- reads back as one with
+            // none, not as one nobody sent anything in.
+            Assert(store.ReadLatestOutboundAnomaly() is { Breakdown: null, Kind: OutboundAnomalyKind.DistributedTransfer } bare &&
+                bare.WindowStart == previous && bare.BytesOut == 12UL * 8 * 1024 * 1024,
+                "an anomaly recorded without a breakdown says it has none");
+
+            // One more sender with a host name, sending the most of anyone.
+            store.WriteBatch([new NetworkObservation(previous.AddMinutes(2), 900, "TCP", "10.0.0.5", 51_000,
+                "93.184.217.7", 443, 40 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "backup.exe", "upload.example.com")]);
+            var breakdown = store.ReadOutboundAnomalyBreakdown(previous, 3 * 1024 * 1024);
+            Assert(breakdown.UsualBytesOut == 3 * 1024 * 1024 && breakdown.Applications.Count == 5 &&
+                breakdown.Applications[0] == new OutboundContributor("backup.exe", 40UL * 1024 * 1024) &&
+                breakdown.Destinations.Count == 5 &&
+                breakdown.Destinations[0] == new OutboundContributor("upload.example.com (93.184.217.7)", 40UL * 1024 * 1024) &&
+                breakdown.SendingDestinationCount == 13,
+                "the breakdown keeps the five largest senders each way, names a host where one was read, and counts every destination");
+            Assert(!breakdown.Applications.Any(item => item.Name is "System" or "tailscaled") &&
+                !breakdown.Destinations.Any(item => item.Name.Contains("192.168.") || item.Name.Contains("100.64.") || item.Name.Contains("127.0.0.1")),
+                "and names none of what stayed inside this network, so it explains the number it sits beside");
+            Assert(store.ReadOutboundAnomalyBreakdown(previous.AddDays(-1), 0) is { Applications.Count: 0, Destinations.Count: 0, SendingDestinationCount: 0 },
+                "a window nobody sent in has an empty breakdown");
+
+            store.RecordOutboundAnomaly(previous, OutboundAnomalyKind.LargeTransfer, breakdown);
+            var kept = store.ReadOutboundAnomalies(previous, now);
+            Assert(kept.Count == 1 && kept[0].Kind == OutboundAnomalyKind.LargeTransfer && kept[0].Breakdown is { } read &&
+                read.UsualBytesOut == breakdown.UsualBytesOut && read.Applications.SequenceEqual(breakdown.Applications) &&
+                read.Destinations.SequenceEqual(breakdown.Destinations) && read.SendingDestinationCount == 13,
+                "the breakdown is kept with the window and reads back as it was written");
+            Assert(store.ReadPeriodAnalysis(previous, now).OutboundAnomalyDetails is [{ Breakdown: not null }],
+                "the overview carries the period's anomalies with their breakdowns");
+            Assert(OutboundAnomalyBreakdown.FromJson("not json") is null && OutboundAnomalyBreakdown.FromJson(null) is null,
+                "a breakdown that does not read back is treated as not recorded");
+        }
+        using (var reopened = new ObservationStore(anomalyDatabase))
+            Assert(reopened.ReadLatestOutboundAnomaly()?.Breakdown?.Applications[0].Name == "backup.exe",
+                "and survives a restart");
+
+        // Threat notices, as the Mac Agent decides them (P3-180).
+        {
+            var now = new DateTimeOffset(2026, 9, 28, 9, 0, 0, TimeSpan.Zero);
+            var since = now.AddMinutes(-1);
+            ThreatFinding Finding(string address, string confidence, DateTimeOffset lastSeen, string app = "app.exe") =>
+                new(address, address, null, app, 3, 2048, 0, lastSeen.AddMinutes(-10), lastSeen, "ip", address,
+                    "abuse.ch Feodo Tracker", "botnet C2", confidence);
+            ThreatReport Report(params ThreatFinding[] findings) => new("available", 100, now, 50, findings);
+            var planner = new ThreatNotificationPlanner();
+
+            Assert(planner.Plan(Report(Finding("192.0.2.1", "low", now)), since, now, false) is null,
+                "a low-confidence match stays in the Threats tab and interrupts nobody");
+            Assert(planner.Plan(Report(Finding("192.0.2.1", "high", since.AddSeconds(-1))), since, now, false) is null,
+                "a match last seen before the scan window is not announced again");
+            Assert(planner.Plan(Report(Finding("192.0.2.1", "high", now)), since, now, true) is null,
+                "while delivery to the Hub is healthy the Hub is the one to say so");
+            Assert(planner.Plan(Report(Finding("192.0.2.1", "high", now)) with { Availability = "stale" }, since, now, false) is null,
+                "threat information that is not available announces nothing");
+
+            var two = Report(Finding("192.0.2.1", "high", now.AddSeconds(-5)), Finding("192.0.2.1", "high", now, "other.exe"),
+                Finding("192.0.2.2", "high", now.AddSeconds(-30)), Finding("192.0.2.3", "low", now));
+            var notice = planner.Plan(two, since, now, false);
+            Assert(notice is { Addresses.Count: 2, More: 0 } && notice.Kept.Count == 3 && notice.Kept[0].Application == "other.exe" &&
+                notice.Kept[^1].Address == "192.0.2.2",
+                "a notice counts destinations, keeps every high-confidence match for them newest first, and leaves the low one out");
+            Assert(planner.Plan(two, since, now, false) is not null,
+                "a notice that was not shown is tried again at the next scan");
+            planner.Accept(notice!, now);
+            Assert(planner.Plan(two, since, now.AddHours(23), false) is null,
+                "a destination already announced is not announced again the same day");
+            Assert(planner.Plan(two, since, now.AddDays(1), false) is { Addresses.Count: 2 },
+                "and is again after a day");
+
+            var many = Report(Enumerable.Range(1, 14).Select(index => Finding($"198.51.100.{index}", "high", now.AddSeconds(-index))).ToArray());
+            Assert(new ThreatNotificationPlanner().Plan(many, since, now, false) is { Kept.Count: 10, More: 4 } capped &&
+                capped.Kept[0].Address == "198.51.100.1",
+                "at most ten matches are kept with a notice, and the rest are counted");
+
+            var healthy = new DeliveryNotificationSample(now, true, "acknowledged", 0, null, now);
+            Assert(ThreatNotificationPlanner.HubDeliveryHealthy(healthy) &&
+                !ThreatNotificationPlanner.HubDeliveryHealthy(healthy with { Active = false }) &&
+                !ThreatNotificationPlanner.HubDeliveryHealthy(healthy with { State = "retryable" }) &&
+                !ThreatNotificationPlanner.HubDeliveryHealthy(healthy with { Pending = 9, OldestPendingAt = now.AddMinutes(-6) }),
+                "delivery counts as healthy only when it is on, not failing, and not five minutes behind");
+        }
+
+        // Newest first, and no more than asked for.
+        var manyAnomalies = Path.Combine(directory, "outbound-anomaly-many.db");
+        using (var store = new ObservationStore(manyAnomalies))
+        {
+            var start = new DateTimeOffset(2026, 9, 27, 0, 0, 0, TimeSpan.Zero);
+            for (var index = 0; index < 7; index++)
+            {
+                var at = start.AddMinutes(15 * index);
+                store.WriteBatch([new NetworkObservation(at.AddMinutes(1), 700, "TCP", "10.0.0.5", 52_000 + index,
+                    "93.184.216.50", 443, 1024, 0, ObservationLayer.Logical, null, "etw", "app.exe")]);
+                store.CaptureOutboundTrafficWindow(at + TimeSpan.FromMinutes(15));
+                store.RecordOutboundAnomaly(at, OutboundAnomalyKind.LargeTransfer);
+            }
+            var newest = store.ReadOutboundAnomalies(start, start.AddDays(1));
+            Assert(newest.Count == 5 && newest[0].WindowStart == start.AddMinutes(90) && newest[4].WindowStart == start.AddMinutes(30),
+                "the period's anomalies come newest first, five at most");
+            Assert(store.ReadPeriodAnalysis(start, start.AddDays(1)) is { OutboundAnomalies: 7, OutboundAnomalyDetails.Count: 5 },
+                "and the overview still counts all of them");
         }
 
         // One overnight backup in the baseline must not become the new normal.
@@ -4187,7 +4307,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 29 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 30 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }

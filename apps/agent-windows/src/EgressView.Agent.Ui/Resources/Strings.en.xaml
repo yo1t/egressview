@@ -59,4 +59,23 @@
   <system:String x:Key="HomeCountryHint">Where the globe draws connections from. It stays on this PC: nothing is looked up and nothing is sent to a Hub.</system:String>
   <system:String x:Key="GlobeNoHome">Windows does not say which country this PC is in, so no lines are drawn. Choose one in Settings &gt; General.</system:String>
   <system:String x:Key="LogHeldBySelectionStatus">Holding while a row is selected · showing {0} · press Esc to clear the selection and resume</system:String>
+  <system:String x:Key="UsualFor15Minutes">Usual for 15 minutes</system:String>
+  <system:String x:Key="AppsSentMost">Applications that sent the most</system:String>
+  <system:String x:Key="DestinationsSentMost">Destinations sent the most</system:String>
+  <system:String x:Key="OtherDestinationsFormat">and {0:N0} other destinations</system:String>
+  <system:String x:Key="AnomalyBreakdownNotRecorded">Which applications and destinations sent it was not recorded for this anomaly. It was found before EgressView Agent 0.1.140, which began keeping them.</system:String>
+  <system:String x:Key="AnomalyLargeTransfer">Large transfer</system:String>
+  <system:String x:Key="AnomalyDistributedTransfer">Spread across many applications and destinations</system:String>
+  <system:String x:Key="AnomaliesInPeriod">Outbound anomalies in this period</system:String>
+  <system:String x:Key="NoAnomaliesInPeriod">No 15-minute window in this period sent unusually much compared with this PC's usual level.</system:String>
+  <system:String x:Key="AnomalyBaselineNotReady">Still learning what this PC usually sends. Once a day has been measured, unusually large 15-minute windows can be found.</system:String>
+  <system:String x:Key="ShowingNewestFormat">Showing the newest {0:N0} of {1:N0}.</system:String>
+  <system:String x:Key="AnomalyNotMalware">This is a behavioural anomaly, not a malware verdict.</system:String>
+  <system:String x:Key="NoticeDetailsNotRecorded">The details were not recorded for this notice. It was sent before EgressView Agent 0.1.140, which began keeping them.</system:String>
+  <system:String x:Key="OpenThreatsTab">Open the Threats tab</system:String>
+  <system:String x:Key="NotificationKindOutboundAnomaly">Outbound anomaly</system:String>
+  <system:String x:Key="ThreatNoticeTitle">New threat match detected</system:String>
+  <system:String x:Key="ThreatNoticeFormat">The latest scan found {0:N0} previously unnotified destinations that matched threat information. Open the Threats tab to review them. Addresses and host names are not shown in notifications.</system:String>
+  <system:String x:Key="MoreThreatsFormat">{0:N0} more matches in this notice are in the Threats tab.</system:String>
+  <system:String x:Key="FeedNotProof">A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point.</system:String>
 </ResourceDictionary>

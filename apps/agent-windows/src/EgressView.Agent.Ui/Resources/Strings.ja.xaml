@@ -59,4 +59,23 @@
   <system:String x:Key="HomeCountryHint">地球儀で通信の線を引く出発点です。この設定はこのPCの中だけで使い、どこにも問い合わせず、Hubにも送りません。</system:String>
   <system:String x:Key="GlobeNoHome">Windowsの設定からこのPCの国が分からないため、線を引いていません。設定 &gt; 一般で国を選んでください。</system:String>
   <system:String x:Key="LogHeldBySelectionStatus">行を選択中のため更新を止めています · 表示は {0} 時点です · Escで選択を解除すると再開します</system:String>
+  <system:String x:Key="UsualFor15Minutes">15分間の普段の送信量</system:String>
+  <system:String x:Key="AppsSentMost">送信量の多いアプリ</system:String>
+  <system:String x:Key="DestinationsSentMost">送信量の多い宛先</system:String>
+  <system:String x:Key="OtherDestinationsFormat">ほか{0:N0}件の宛先</system:String>
+  <system:String x:Key="AnomalyBreakdownNotRecorded">この異常では、送信したアプリと宛先は記録されていません。記録を始めたEgressView Agent 0.1.140より前に見つかった異常です。</system:String>
+  <system:String x:Key="AnomalyLargeTransfer">大量の送信</system:String>
+  <system:String x:Key="AnomalyDistributedTransfer">多数のアプリ・宛先に分散した送信</system:String>
+  <system:String x:Key="AnomaliesInPeriod">この期間の送信異常</system:String>
+  <system:String x:Key="NoAnomaliesInPeriod">この期間には、このPCの普段の送信量と比べて多すぎる15分間はありませんでした。</system:String>
+  <system:String x:Key="AnomalyBaselineNotReady">このPCの普段の送信量を学習中です。1日分の計測がそろうと、多すぎる15分間を見つけられるようになります。</system:String>
+  <system:String x:Key="ShowingNewestFormat">{1:N0}件のうち新しい{0:N0}件を表示しています。</system:String>
+  <system:String x:Key="AnomalyNotMalware">これは通信量の変化としての異常で、マルウェアという判定ではありません。</system:String>
+  <system:String x:Key="NoticeDetailsNotRecorded">この通知の詳細は記録されていません。詳細の記録を始めたEgressView Agent 0.1.140より前に送られた通知です。</system:String>
+  <system:String x:Key="OpenThreatsTab">「脅威」タブを開く</system:String>
+  <system:String x:Key="NotificationKindOutboundAnomaly">外向き通信の異常</system:String>
+  <system:String x:Key="ThreatNoticeTitle">新しい脅威の一致を検出しました</system:String>
+  <system:String x:Key="ThreatNoticeFormat">直近の照合で、まだ通知していない{0:N0}件の宛先が脅威情報と一致しました。脅威タブを開いて確認してください。アドレスとホスト名は通知に表示しません。</system:String>
+  <system:String x:Key="MoreThreatsFormat">この通知にはほかに{0:N0}件の一致があります。「脅威」タブで確認できます。</system:String>
+  <system:String x:Key="FeedNotProof">フィードに載っていることは、害がある証拠ではありません。誰かがある時点で、この宛先を上の理由に関係するものとして公開した、という意味です。</system:String>
 </ResourceDictionary>

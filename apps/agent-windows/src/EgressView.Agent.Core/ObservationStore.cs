@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 29;
+    private const int CurrentSchemaVersion = 30;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -476,6 +476,15 @@ public sealed partial class ObservationStore : IDisposable
         );
         """;
 
+    /// What explains an anomaly, kept with its window: the usual level it was
+    /// compared with and who sent the most. Both are known only when the
+    /// anomaly is found -- the usual level is not stored anywhere else, and
+    /// the window's observations age out -- so without this the overview
+    /// could count anomalies but never explain one (P3-180).
+    private const string Version30Schema = """
+        ALTER TABLE outbound_traffic_windows ADD COLUMN anomaly_breakdown TEXT;
+        """;
+
     private readonly object gate = new();
     private nint db;
     private bool disposed;
@@ -538,7 +547,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); {Version29Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); {Version29Schema} {Version30Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -578,7 +587,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 25) { MigrateVersion25To26(); version = 26; }
         if (version == 26) { MigrateVersion26To27(); version = 27; }
         if (version == 27) { MigrateVersion27To28(); version = 28; }
-        if (version == 28) MigrateVersion28To29();
+        if (version == 28) { MigrateVersion28To29(); version = 29; }
+        if (version == 29) MigrateVersion29To30();
         ValidateSchema();
         }
         catch { ReportMigrationFailed(startedAt); throw; }
@@ -587,7 +597,10 @@ public sealed partial class ObservationStore : IDisposable
         // migration as running.
         reporter.Stop();
         MigrationProgress.Clear(path);
-        PruneMigrationBackups(CurrentSchemaVersion);
+        // The newest backup there is, not the current version's: v30 takes
+        // none, and keeping "the current one" would delete v29's, leaving no
+        // copy at all.
+        PruneMigrationBackups(NewestMigrationBackupVersion() ?? CurrentSchemaVersion);
     }
 
     /// Threat information gains the source it came from.
@@ -965,6 +978,19 @@ public sealed partial class ObservationStore : IDisposable
                 FROM flows f WHERE NOT EXISTS(SELECT 1 FROM observations o WHERE o.flow_id=f.rowid)
                 """;
 
+    /// No backup copy for this one. Adding a column that may be empty changes
+    /// the table's definition and nothing else, inside one transaction that
+    /// either happens or does not; copying a database of several gigabytes
+    /// first would make the update minutes slower to protect nothing.
+    private void MigrateVersion29To30()
+    {
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version30Schema + " UPDATE schema_version SET version=30 WHERE version=29; COMMIT;");
+        }
+        catch { TryRollback(); throw; }
+    }
+
     private void MigrateVersion28To29()
     {
         // Eight steps, each reported before it starts. Measured on a copy of
@@ -1320,6 +1346,15 @@ public sealed partial class ObservationStore : IDisposable
         return freed;
     }
 
+    private int? NewestMigrationBackupVersion()
+    {
+        var prefix = Path.GetFileName(path) + ".pre-v";
+        return Directory.EnumerateFiles(Path.GetDirectoryName(path)!, prefix + "*.bak", SearchOption.TopDirectoryOnly)
+            .Select(candidate => int.TryParse(Path.GetFileName(candidate)[prefix.Length..^4], out var version) ? version : (int?)null)
+            .Where(version => version is not null)
+            .Max();
+    }
+
     private void PruneMigrationBackups(int keepTargetVersion)
     {
         var directory = Path.GetDirectoryName(path)!;
@@ -1542,6 +1577,8 @@ public sealed partial class ObservationStore : IDisposable
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing coverage confirmation timestamps.");
         if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('coverage_sessions') WHERE name='interrupted'") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing coverage interruption state.");
+        if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('outbound_traffic_windows') WHERE name='anomaly_breakdown'") != 1)
+            throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing the outbound anomaly breakdown.");
         // The rebuild in v16 is the whole of that migration; if it were
         // skipped, writing a system shutdown would fail the CHECK at the one
         // moment the process has no time left to handle it.
@@ -2165,28 +2202,53 @@ public sealed partial class ObservationStore : IDisposable
     /// Byte counts arrive only when a flow reports its final statistics, so
     /// observations_with_bytes is counted separately from observations: a
     /// window nobody could measure must not read as a quiet one.
+    ///
+    /// Only destinations outside this network count. Every hour this PC
+    /// copied about 400 MB to a machine on its own LAN, and for a week each
+    /// copy was reported as unusual outbound traffic -- 105 times -- though
+    /// none of it left the building. What stays on the LAN, on the PC itself
+    /// or on the tailnet is not what this measures.
     private OutboundTrafficWindow ReadOutboundWindow(DateTimeOffset start, DateTimeOffset end)
     {
-        var range = $"WHERE observed_at >= {start.UtcTicks} AND observed_at < {end.UtcTicks}";
-        ulong bytesOut = 0; var observations = 0; var withBytes = 0; var applications = 0; var destinations = 0;
-        CheckOperation(WinSqlite.Prepare(db, "SELECT COALESCE(SUM(bytes_sent),0), COUNT(*), COUNT(bytes_sent), " +
-            $"COUNT(DISTINCT COALESCE(process_name,'')), COUNT(DISTINCT remote_address) FROM observations {range}", -1, out var summary, 0));
+        var rows = ReadOutboundRows(start, end);
+        var applications = rows.GroupBy(row => row.Application, StringComparer.Ordinal)
+            .Select(group => SumBytes(group)).ToArray();
+        return new OutboundTrafficWindow(start, SumBytes(rows),
+            rows.Sum(row => row.Observations),
+            rows.Sum(row => row.ObservationsWithBytes),
+            applications.Length,
+            rows.Select(row => row.Address).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            applications.Length == 0 ? 0 : applications.Max());
+    }
+
+    private sealed record OutboundRow(string Address, string? Hostname, string Application, int Observations, int ObservationsWithBytes, ulong BytesOut);
+
+    private static ulong SumBytes(IEnumerable<OutboundRow> rows) => rows.Aggregate(0UL, (sum, row) => sum + row.BytesOut);
+
+    /// The window's observations by destination and application, leaving out
+    /// every destination that cannot be on the internet: the LAN, loopback,
+    /// the tailnet's shared range, multicast and the other reserved ranges.
+    /// Grouped in SQL and filtered here, because the ranges are
+    /// PrivateAddress's, and a second copy of them written as SQL would drift.
+    private List<OutboundRow> ReadOutboundRows(DateTimeOffset start, DateTimeOffset end)
+    {
+        CheckOperation(WinSqlite.Prepare(db, "SELECT remote_address,MAX(remote_hostname),COALESCE(process_name,''),COUNT(*),COUNT(bytes_sent)," +
+            "COALESCE(SUM(bytes_sent),0) FROM observations " +
+            $"WHERE observed_at >= {start.UtcTicks} AND observed_at < {end.UtcTicks} GROUP BY 1,3", -1, out var statement, 0));
+        var rows = new List<OutboundRow>();
         try
         {
-            if (WinSqlite.Step(summary) == WinSqlite.Row)
+            while (WinSqlite.Step(statement) == WinSqlite.Row)
             {
-                bytesOut = (ulong)Math.Max(0, WinSqlite.ColumnInt64(summary, 0));
-                observations = (int)WinSqlite.ColumnInt64(summary, 1);
-                withBytes = (int)WinSqlite.ColumnInt64(summary, 2);
-                applications = (int)WinSqlite.ColumnInt64(summary, 3);
-                destinations = (int)WinSqlite.ColumnInt64(summary, 4);
+                var address = Text(statement, 0);
+                if (PrivateAddress.IsPrivateOrReserved(address)) continue;
+                rows.Add(new(address, NullableTextValue(statement, 1), Text(statement, 2),
+                    (int)WinSqlite.ColumnInt64(statement, 3), (int)WinSqlite.ColumnInt64(statement, 4),
+                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 5))));
             }
         }
-        finally { WinSqlite.Finalize(summary); }
-
-        var largest = (ulong)Math.Max(0, ScalarInt64("SELECT COALESCE(MAX(app_bytes),0) FROM (SELECT SUM(COALESCE(bytes_sent,0)) " +
-            $"AS app_bytes FROM observations {range} GROUP BY COALESCE(process_name,''))"));
-        return new OutboundTrafficWindow(start, bytesOut, observations, withBytes, applications, destinations, largest);
+        finally { WinSqlite.Finalize(statement); }
+        return rows;
     }
 
     private IReadOnlyList<OutboundTrafficWindow> ReadOutboundWindows(DateTimeOffset from, DateTimeOffset before)
@@ -2209,29 +2271,78 @@ public sealed partial class ObservationStore : IDisposable
         return result;
     }
 
-    public void RecordOutboundAnomaly(DateTimeOffset windowStart, OutboundAnomalyKind kind)
+    /// Marks the window unusual and keeps what explains it. A breakdown that
+    /// could not be read is left out rather than written as "nobody sent
+    /// anything"; the screen then says it was not recorded.
+    public void RecordOutboundAnomaly(DateTimeOffset windowStart, OutboundAnomalyKind kind, OutboundAnomalyBreakdown? breakdown = null)
     {
-        var name = kind == OutboundAnomalyKind.DistributedTransfer ? "distributed-transfer" : "large-transfer";
-        lock (gate) Execute($"UPDATE outbound_traffic_windows SET anomaly_kind='{name}' WHERE window_start='{windowStart:O}'");
+        var name = OutboundAnomalyRecord.KindName(kind);
+        var json = breakdown is null ? "NULL" : $"'{Sql(breakdown.ToJson())}'";
+        lock (gate) Execute($"UPDATE outbound_traffic_windows SET anomaly_kind='{name}',anomaly_breakdown={json} WHERE window_start='{windowStart:O}'");
+    }
+
+    /// Who sent the most in one window, from the observations still in it.
+    ///
+    /// Read when the anomaly is found, while they are: raw observations age
+    /// out, and the window's summary row keeps only counts. A destination is
+    /// named by its host where one was read, with the address beside it,
+    /// because an address alone is rarely something a reader recognises.
+    /// Over the same destinations the window was measured over, so the list
+    /// explains the number rather than a larger one.
+    public OutboundAnomalyBreakdown ReadOutboundAnomalyBreakdown(DateTimeOffset windowStart, ulong usualBytesOut, int limit = OutboundAnomalyBreakdown.ContributorLimit)
+    {
+        if (limit is < 1 or > 50) throw new ArgumentOutOfRangeException(nameof(limit));
+        List<OutboundRow> rows;
+        lock (gate) rows = ReadOutboundRows(windowStart, windowStart + OutboundAnomalyRecord.WindowLength);
+        var sending = rows.Where(row => row.BytesOut > 0).ToArray();
+        var applications = sending.GroupBy(row => row.Application, StringComparer.Ordinal)
+            .Select(group => new OutboundContributor(group.Key, SumBytes(group)))
+            .OrderByDescending(item => item.BytesOut).ThenBy(item => item.Name, StringComparer.Ordinal)
+            .Take(limit).ToList();
+        var destinations = sending.GroupBy(row => row.Address, StringComparer.OrdinalIgnoreCase)
+            .Select(group => (Address: group.Key, Hostname: group.Max(row => row.Hostname), Bytes: SumBytes(group)))
+            .OrderByDescending(item => item.Bytes).ThenBy(item => item.Address, StringComparer.Ordinal)
+            .Take(limit)
+            .Select(item => new OutboundContributor(item.Hostname is null ? item.Address : $"{item.Hostname} ({item.Address})", item.Bytes))
+            .ToList();
+        var sendingDestinations = sending.Select(row => row.Address).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        return new(usualBytesOut, applications, destinations, sendingDestinations);
     }
 
     /// The newest window that was judged unusual, so the window can notice a
     /// new one rather than a count that says only how many there have been.
-    public (DateTimeOffset WindowStart, OutboundAnomalyKind Kind, ulong BytesOut)? ReadLatestOutboundAnomaly()
+    public OutboundAnomalyRecord? ReadLatestOutboundAnomaly()
     {
-        lock (gate)
+        lock (gate) return ReadOutboundAnomaliesLocked("anomaly_kind IS NOT NULL", 1).FirstOrDefault();
+    }
+
+    /// The period's anomalies, newest first, with whatever was kept about them.
+    public IReadOnlyList<OutboundAnomalyRecord> ReadOutboundAnomalies(DateTimeOffset from, DateTimeOffset to, int limit = 5)
+    {
+        lock (gate) return ReadOutboundAnomaliesLocked(from, to, limit);
+    }
+
+    private IReadOnlyList<OutboundAnomalyRecord> ReadOutboundAnomaliesLocked(DateTimeOffset from, DateTimeOffset to, int limit) =>
+        ReadOutboundAnomaliesLocked($"window_start >= '{from:O}' AND window_start < '{to:O}' AND anomaly_kind IS NOT NULL", limit);
+
+    private List<OutboundAnomalyRecord> ReadOutboundAnomaliesLocked(string where, int limit)
+    {
+        CheckOperation(WinSqlite.Prepare(db, "SELECT window_start,anomaly_kind,bytes_out,application_count,destination_count,anomaly_breakdown " +
+            $"FROM outbound_traffic_windows WHERE {where} ORDER BY window_start DESC LIMIT {Math.Max(1, limit)}", -1, out var statement, 0));
+        var result = new List<OutboundAnomalyRecord>();
+        try
         {
-            CheckOperation(WinSqlite.Prepare(db, "SELECT window_start,anomaly_kind,bytes_out FROM outbound_traffic_windows " +
-                "WHERE anomaly_kind IS NOT NULL ORDER BY window_start DESC LIMIT 1", -1, out var statement, 0));
-            try
-            {
-                if (WinSqlite.Step(statement) != WinSqlite.Row) return null;
-                return (DateTimeOffset.Parse(Text(statement, 0)),
-                    Text(statement, 1) == "distributed-transfer" ? OutboundAnomalyKind.DistributedTransfer : OutboundAnomalyKind.LargeTransfer,
-                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 2)));
-            }
-            finally { WinSqlite.Finalize(statement); }
+            while (WinSqlite.Step(statement) == WinSqlite.Row)
+                result.Add(new(
+                    OutboundAnomalyRecord.ParseKind(Text(statement, 1)),
+                    DateTimeOffset.Parse(Text(statement, 0)),
+                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 2)),
+                    (int)WinSqlite.ColumnInt64(statement, 3),
+                    (int)WinSqlite.ColumnInt64(statement, 4),
+                    OutboundAnomalyBreakdown.FromJson(NullableTextValue(statement, 5))));
         }
+        finally { WinSqlite.Finalize(statement); }
+        return result;
     }
 
     public int ReadOutboundAnomalyCount(DateTimeOffset from, DateTimeOffset to)
@@ -3277,6 +3388,7 @@ public sealed partial class ObservationStore : IDisposable
                 BytesSent = sent,
                 BytesReceived = received,
                 OutboundAnomalies = ReadOutboundAnomalyCountLocked(from, to),
+                OutboundAnomalyDetails = ReadOutboundAnomaliesLocked(from, to, 5),
                 OutboundBaselineReady = ReadUsableBaselineWindowsLocked() >= 96,
                 SleepPeriods = ReadSleepPeriodsLocked(from, to),
                 MonitoringGaps = ReadMonitoringGaps(from, to),
