@@ -9,6 +9,7 @@ final class FullMonitoringCollector {
     private let coverageHandler: () -> Void
     private let recoveryHandler: () -> Void
     private let diagnosticsHandler: (QUICFeasibilityDiagnostics) -> Void
+    private let flowDiagnosticsHandler: (FlowCaptureDiagnostics, FlowPersistenceDiagnostics) -> Void
     private let queue = DispatchQueue(label: "com.egressview.agent.full-monitoring")
     private var connection: NSXPCConnection?
     private var diagnosticsConnection: NSXPCConnection?
@@ -16,7 +17,9 @@ final class FullMonitoringCollector {
     /// True while a drain request is out. Guards against stacking requests on
     /// an extension that has stopped answering.
     private var isDraining = false
+    private var drainRequestGeneration: UInt64 = 0
     private var isReadingDiagnostics = false
+    private var persistenceDiagnostics = FlowPersistenceDiagnostics()
     private var diagnosticsRequestGeneration: UInt64 = 0
     private var readsServerName: Bool
     private var needsServerNamePolicySync = true
@@ -39,7 +42,8 @@ final class FullMonitoringCollector {
         coverageHandler: @escaping () -> Void = {},
         recoveryHandler: @escaping () -> Void = {},
         readsServerName: Bool = false,
-        diagnosticsHandler: @escaping (QUICFeasibilityDiagnostics) -> Void = { _ in }
+        diagnosticsHandler: @escaping (QUICFeasibilityDiagnostics) -> Void = { _ in },
+        flowDiagnosticsHandler: @escaping (FlowCaptureDiagnostics, FlowPersistenceDiagnostics) -> Void = { _, _ in }
     ) {
         self.store = store
         self.observationHandler = observationHandler
@@ -49,6 +53,7 @@ final class FullMonitoringCollector {
         self.recoveryHandler = recoveryHandler
         self.readsServerName = readsServerName
         self.diagnosticsHandler = diagnosticsHandler
+        self.flowDiagnosticsHandler = flowDiagnosticsHandler
     }
 
     func start() {
@@ -75,6 +80,7 @@ final class FullMonitoringCollector {
     private func startOnQueue() {
         stopOnQueue()
         isRunning = true
+        persistenceDiagnostics = FlowPersistenceDiagnostics()
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: FullMonitoringXPC.drainInterval)
         timer.setEventHandler { [weak self] in self?.poll() }
@@ -84,10 +90,13 @@ final class FullMonitoringCollector {
 
     private func stopOnQueue() {
         isRunning = false
+        drainRequestGeneration &+= 1
         isDraining = false
         isReadingDiagnostics = false
         timer?.cancel()
         timer = nil
+        connection?.interruptionHandler = nil
+        connection?.invalidationHandler = nil
         connection?.invalidate()
         connection = nil
         finishDiagnosticsRequest()
@@ -99,39 +108,42 @@ final class FullMonitoringCollector {
         guard isRunning else { return }
         // One question at a time.
         //
-        // The timer fires every second regardless of whether the last request
-        // came back. If the extension ever stops replying, that produces a new
-        // request and a retained reply block every second -- eighty thousand of
-        // them in a day -- and nothing here would notice or say so.
-        //
-        // Not the cause of the CPU measured on 2026-08-20, and worth fixing on
-        // its own: an unanswered request currently waits for ever.
+        // The timer fires every second, but a previous reply must arrive before
+        // starting another drain. Otherwise unanswered XPC requests accumulate.
         guard !isDraining else { return }
         isDraining = true
+        drainRequestGeneration &+= 1
+        let generation = drainRequestGeneration
+        // A completed request leaves its deadline callback scheduled. Without
+        // the generation check, that old callback can cut off a newer reply
+        // after the extension has already removed its observations from queue.
         let deadline = DispatchTime.now() + Self.drainTimeout
         queue.asyncAfter(deadline: deadline) { [weak self] in
-            guard let self, self.isDraining else { return }
+            guard let self, self.isDraining,
+                  generation == self.drainRequestGeneration else { return }
             // The reply never came. Drop the connection so the next tick starts
             // a fresh one rather than queueing behind a dead one.
-            self.isDraining = false
+            self.persistenceDiagnostics.recordDrainTimeout()
             self.resetConnection()
         }
         let connection = connection ?? makeConnection()
         guard let proxy = connection.remoteObjectProxyWithErrorHandler({ [weak self] _ in
             self?.queue.async {
-                self?.isDraining = false
-                self?.resetConnection()
+                guard let self, generation == self.drainRequestGeneration else { return }
+                self.persistenceDiagnostics.recordXPCFailure()
+                self.resetConnection()
             }
         }) as? FullMonitoringXPCProtocol else {
-            isDraining = false
+            persistenceDiagnostics.recordXPCFailure()
             resetConnection()
             return
         }
         syncServerNamePolicyIfNeeded(proxy)
         proxy.drainObservations { [weak self] data in
             self?.queue.async {
-                self?.isDraining = false
-                self?.consume(data)
+                guard let self, generation == self.drainRequestGeneration else { return }
+                self.isDraining = false
+                self.consume(data)
             }
         }
     }
@@ -146,10 +158,16 @@ final class FullMonitoringCollector {
     }
 
     func requestQUICDiagnostics() {
-        queue.async { [weak self] in self?.requestQUICDiagnosticsOnQueue() }
+        queue.async { [weak self] in self?.requestDiagnosticsOnQueue(.quic) }
     }
 
-    private func requestQUICDiagnosticsOnQueue() {
+    func requestFlowCaptureDiagnostics() {
+        queue.async { [weak self] in self?.requestDiagnosticsOnQueue(.flowCapture) }
+    }
+
+    private enum DiagnosticsKind { case quic, flowCapture }
+
+    private func requestDiagnosticsOnQueue(_ kind: DiagnosticsKind) {
         guard isRunning else { return }
         guard !isReadingDiagnostics else { return }
         isReadingDiagnostics = true
@@ -174,23 +192,35 @@ final class FullMonitoringCollector {
             finishDiagnosticsRequest(generation: generation)
             return
         }
-        let request: Void? = proxy.readQUICFeasibilityDiagnostics?(withReply: { [weak self] data in
+        let reply: (Data) -> Void = { [weak self] data in
             self?.queue.async {
                 guard let self else { return }
                 guard generation == self.diagnosticsRequestGeneration else { return }
                 defer { self.finishDiagnosticsRequest(generation: generation) }
                 guard self.isRunning, !data.isEmpty else { return }
                 do {
-                    let diagnostics = try FullMonitoringXPC.decoder().decode(
-                        QUICFeasibilityDiagnostics.self,
-                        from: data
-                    )
-                    self.diagnosticsHandler(diagnostics)
+                    switch kind {
+                    case .quic:
+                        let diagnostics = try FullMonitoringXPC.decoder().decode(
+                            QUICFeasibilityDiagnostics.self, from: data
+                        )
+                        self.diagnosticsHandler(diagnostics)
+                    case .flowCapture:
+                        let diagnostics = try FullMonitoringXPC.decoder().decode(
+                            FlowCaptureDiagnostics.self, from: data
+                        )
+                        self.flowDiagnosticsHandler(diagnostics, self.persistenceDiagnostics)
+                    }
                 } catch {
                     self.errorHandler(error)
                 }
             }
-        })
+        }
+        let request: Void?
+        switch kind {
+        case .quic: request = proxy.readQUICFeasibilityDiagnostics?(withReply: reply)
+        case .flowCapture: request = proxy.readFlowCaptureDiagnostics?(withReply: reply)
+        }
         if request == nil {
             finishDiagnosticsRequest(generation: generation)
         }
@@ -235,7 +265,12 @@ final class FullMonitoringCollector {
                 ? []
                 : try FullMonitoringXPC.decoder().decode([ConnectionObservation].self, from: data)
             if !observations.isEmpty {
+                let withoutBytes = observations.filter {
+                    $0.bytesIn != nil && $0.bytesOut != nil && $0.bytesIn == 0 && $0.bytesOut == 0
+                }.count
+                persistenceDiagnostics.recordReceived(observations.count, completedWithoutBytes: withoutBytes)
                 try store.append(observations)
+                persistenceDiagnostics.recordPersisted(observations.count)
                 observationHandler(observations)
                 // Data arriving is what proves the Mac is being watched, and it
                 // is what opens a coverage session. Relying on a status change
@@ -258,11 +293,14 @@ final class FullMonitoringCollector {
                 ))
             }
         } catch {
+            persistenceDiagnostics.recordFailure()
             errorHandler(error)
         }
     }
 
     private func resetConnection() {
+        drainRequestGeneration &+= 1
+        isDraining = false
         connection?.invalidationHandler = nil
         connection?.interruptionHandler = nil
         connection?.invalidate()

@@ -5,6 +5,19 @@ import XCTest
 /// calling them unknown (P3-174), from the same range table that keeps them
 /// away from location services.
 final class NonPublicAddressNetworkNameTests: XCTestCase {
+    func test_送信異常はLANを除外しCGNATを残す() {
+        let excluded = ["10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.1.1",
+                        "127.0.0.1", "::1", "fd12::1", "fe80::1%en0",
+                        "::ffff:192.168.1.1", "224.0.0.251", "ff02::fb"]
+        let included = ["100.64.0.1", "1.1.1.1", "2001:4860:4860::8888", "example.com"]
+        for address in excluded {
+            XCTAssertTrue(NonPublicAddress.isExcludedFromOutboundAnomaly(address), address)
+        }
+        for address in included {
+            XCTAssertFalse(NonPublicAddress.isExcludedFromOutboundAnomaly(address), address)
+        }
+    }
+
     func test_範囲ごとの名前() {
         let cases: [(String, String?)] = [
             ("10.0.0.1", "LAN"), ("172.16.0.1", "LAN"), ("172.31.255.255", "LAN"), ("192.168.1.1", "LAN"),

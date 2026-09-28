@@ -125,11 +125,11 @@ final class ObservationStoreTests: XCTestCase {
             let store = try ObservationStore(fileURL: url)
             try store.append([
                 observation(
-                    process: "Safari", remote: "203.0.113.5",
+                    process: "Safari", remote: "1.1.1.1",
                     at: completedWindowStart.addingTimeInterval(100), bytesOut: 40
                 ),
                 observation(
-                    process: "Mail", remote: "198.51.100.8",
+                    process: "Mail", remote: "8.8.8.8",
                     at: completedWindowStart.addingTimeInterval(200), bytesOut: 60
                 ),
             ])
@@ -150,12 +150,37 @@ final class ObservationStoreTests: XCTestCase {
         XCTAssertNil(try reopened.captureOutboundTrafficWindow(now: captureTime))
     }
 
+    func testOutboundAnomalyWindowExcludesLANButRetainsExternalTraffic() throws {
+        let store = try makeStore()
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let at = start.addingTimeInterval(30)
+        try store.append([
+            observation(process: "LAN", remote: "10.0.0.5", at: at, bytesOut: 1_000),
+            observation(process: "ULA", remote: "fd12::1", at: at, bytesOut: 2_000),
+            observation(process: "Multicast", remote: "224.0.0.251", at: at, bytesOut: 3_000),
+            observation(process: "Loopback", remote: "127.0.0.1", at: at, bytesOut: 4_000),
+            observation(process: "Public", remote: "1.1.1.1", at: at, bytesOut: 60),
+            observation(process: "CGNAT", remote: "100.64.0.1", at: at, bytesOut: 40),
+        ])
+        let captured = try XCTUnwrap(store.captureOutboundTrafficWindow(now: start.addingTimeInterval(901)))
+        XCTAssertEqual(captured.current.bytesOut, 100)
+        XCTAssertEqual(captured.current.observationCount, 2)
+        XCTAssertEqual(captured.current.observationsWithBytes, 2)
+        XCTAssertEqual(captured.current.applicationCount, 2)
+        XCTAssertEqual(captured.current.destinationCount, 2)
+        XCTAssertEqual(captured.current.largestApplicationBytesOut, 60)
+        let contributors = try store.outboundWindowContributors(windowStart: start)
+        XCTAssertEqual(contributors.applications.map(\.name), ["Public", "CGNAT"])
+        XCTAssertEqual(contributors.destinations.map(\.name), ["1.1.1.1", "100.64.0.1"])
+        XCTAssertEqual(contributors.destinationCount, 2)
+    }
+
     func testOutboundAnomalyCountUsesDetectionTimeAndSurvivesRestart() throws {
         let url = directory.appendingPathComponent("history.sqlite")
         let window = Date(timeIntervalSince1970: 1_800_000_000)
         do {
             let store = try ObservationStore(fileURL: url)
-            try store.append([observation(at: window.addingTimeInterval(30))])
+            try store.append([observation(remote: "1.1.1.1", at: window.addingTimeInterval(30))])
             let captured = try XCTUnwrap(
                 store.captureOutboundTrafficWindow(now: window.addingTimeInterval(901))
             )

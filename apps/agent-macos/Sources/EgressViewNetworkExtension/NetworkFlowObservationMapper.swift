@@ -95,16 +95,28 @@ public struct NetworkExtensionFlowAdapter {
     public init() {}
 
     public func metadata(from flow: NEFilterSocketFlow) -> SocketFlowMetadata? {
-        guard flow.direction == .outbound,
-              let networkProtocol = InternetProtocol(socketProtocol: flow.socketProtocol),
-              let local = endpointParts(flow.localEndpoint),
-              let remote = endpointParts(flow.remoteEndpoint)
-        else {
-            return nil
+        guard case let .success(metadata) = metadataResult(from: flow) else { return nil }
+        return metadata
+    }
+
+    public enum MetadataResult {
+        case success(SocketFlowMetadata)
+        case nonOutbound
+        case unsupportedProtocol
+        case missingLocalEndpoint
+        case missingRemoteEndpoint
+    }
+
+    public func metadataResult(from flow: NEFilterSocketFlow) -> MetadataResult {
+        guard flow.direction == .outbound else { return .nonOutbound }
+        guard let networkProtocol = InternetProtocol(socketProtocol: flow.socketProtocol) else {
+            return .unsupportedProtocol
         }
+        guard let local = endpointParts(flow.localEndpoint) else { return .missingLocalEndpoint }
+        guard let remote = endpointParts(flow.remoteEndpoint) else { return .missingRemoteEndpoint }
 
         let processID = processID(from: flow.sourceProcessAuditToken ?? flow.sourceAppAuditToken)
-        return SocketFlowMetadata(
+        return .success(SocketFlowMetadata(
             networkProtocol: networkProtocol,
             localAddress: local.address,
             localPort: local.port,
@@ -113,7 +125,7 @@ public struct NetworkExtensionFlowAdapter {
             processID: processID,
             processName: processName(for: processID),
             remoteHostname: normalizedHostname(flow.remoteHostname)
-        )
+        ))
     }
 
     /// Keeps only a plain host name. An empty or oversized value is dropped

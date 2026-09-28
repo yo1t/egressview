@@ -152,11 +152,14 @@ final class OpenFlowRegistryTests: XCTestCase {
         // Flows opened before monitoring started, or whose entry was evicted,
         // must not lose their byte counts as well as their start time.
         var registry = OpenFlowRegistry()
+        let id = UUID()
+        XCTAssertFalse(registry.contains(flowID: id))
         let observation = try XCTUnwrap(registry.complete(
-            flowID: UUID(), kind: .flowClosed, bytesIn: 7, bytesOut: 8,
+            flowID: id, kind: .flowClosed, bytesIn: 7, bytesOut: 8,
             metadata: metadata(), reportedAt: start
         ))
         XCTAssertEqual(observation.bytesIn, 7)
+        XCTAssertFalse(registry.contains(flowID: id))
         XCTAssertEqual(observation.firstObservedAt, start, "no start time is known, so the report time is used")
     }
 

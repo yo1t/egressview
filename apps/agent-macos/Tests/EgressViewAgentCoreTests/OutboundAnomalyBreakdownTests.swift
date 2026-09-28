@@ -34,7 +34,7 @@ final class OutboundAnomalyBreakdownTests: XCTestCase {
 
     /// Captures `start`'s window with one connection in it and flags it.
     private func flag(_ store: ObservationStore, _ start: Date, kind: OutboundAnomalyKind = .largeTransfer) throws {
-        try store.append([observation(process: "Safari", remote: "203.0.113.5",
+        try store.append([observation(process: "Safari", remote: "1.1.1.1",
                                       at: start.addingTimeInterval(30), bytesOut: 500)])
         _ = try XCTUnwrap(store.captureOutboundTrafficWindow(now: start.addingTimeInterval(901)))
         try store.recordOutboundAnomaly(windowStart: start, kind: kind)
@@ -88,7 +88,7 @@ final class OutboundAnomalyBreakdownTests: XCTestCase {
 
     func test異常でない窓は出ない() throws {
         let store = try ObservationStore(fileURL: url)
-        try store.append([observation(process: "Safari", remote: "203.0.113.5",
+        try store.append([observation(process: "Safari", remote: "1.1.1.1",
                                       at: window.addingTimeInterval(30), bytesOut: 500)])
         _ = try store.captureOutboundTrafficWindow(now: window.addingTimeInterval(901))
         XCTAssertTrue(try store.outboundAnomalies(
@@ -121,6 +121,32 @@ final class OutboundAnomalyBreakdownTests: XCTestCase {
         XCTAssertEqual(try reopened.outboundAnomalies(
             from: window.addingTimeInterval(-1), to: window.addingTimeInterval(900)
         ).first?.breakdown, breakdown)
+    }
+
+    func test17から18への移行で旧異常を残し旧基準は使わない() throws {
+        do {
+            let store = try ObservationStore(fileURL: url)
+            try flag(store, window)
+        }
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &database), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(database, """
+            ALTER TABLE outbound_traffic_windows DROP COLUMN scope_version;
+            PRAGMA user_version=17;
+            """, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(database)
+
+        let reopened = try ObservationStore(fileURL: url)
+        XCTAssertEqual(reopened.schemaVersion(), ObservationStore.latestSchemaVersion)
+        XCTAssertEqual(try reopened.outboundAnomalyCount(
+            from: window.addingTimeInterval(-1), to: window.addingTimeInterval(900)
+        ), 1)
+        let next = window.addingTimeInterval(900)
+        try reopened.append([observation(process: "Safari", remote: "1.1.1.1",
+                                         at: next.addingTimeInterval(30), bytesOut: 20)])
+        let captured = try XCTUnwrap(reopened.captureOutboundTrafficWindow(now: next.addingTimeInterval(901)))
+        XCTAssertEqual(captured.current.bytesOut, 20)
+        XCTAssertTrue(captured.baseline.isEmpty, "the old all-destination window must not be a baseline")
     }
 
     func test記録は通知の履歴として符号化して戻せる() throws {

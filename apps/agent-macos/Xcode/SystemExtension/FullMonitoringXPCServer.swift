@@ -12,6 +12,7 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
     private let maximumBufferedObservations = 10_000
     private var observations: [ConnectionObservation] = []
     private var quicDiagnostics = QUICFeasibilityDiagnostics()
+    private var flowDiagnostics = FlowCaptureDiagnostics()
     private var readsServerName = false
     private lazy var listener = NSXPCListener(machServiceName: FullMonitoringXPC.machServiceName)
 
@@ -24,8 +25,10 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
         lock.withLock {
             if observations.count == maximumBufferedObservations {
                 observations.removeFirst()
+                flowDiagnostics.record(.droppedObservation)
             }
             observations.append(observation)
+            flowDiagnostics.record(.enqueuedObservation)
         }
     }
 
@@ -35,11 +38,23 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
             return observations
         }
         do {
-            reply(try FullMonitoringXPC.encoder().encode(pending))
+            let data = try FullMonitoringXPC.encoder().encode(pending)
+            lock.withLock { flowDiagnostics.recordDrained(pending.count) }
+            reply(data)
         } catch {
+            lock.withLock { flowDiagnostics.record(.encodingFailure) }
             logger.error("Could not encode observations: \(error.localizedDescription, privacy: .public)")
             reply(Data())
         }
+    }
+
+    func recordFlowCapture(_ stage: FlowCaptureDiagnostics.Stage) {
+        lock.withLock { flowDiagnostics.record(stage) }
+    }
+
+    func readFlowCaptureDiagnostics(withReply reply: @escaping (Data) -> Void) {
+        let snapshot = lock.withLock { flowDiagnostics }
+        reply((try? FullMonitoringXPC.encoder().encode(snapshot)) ?? Data())
     }
 
     func record(_ event: QUICFeasibilityEvent) {
