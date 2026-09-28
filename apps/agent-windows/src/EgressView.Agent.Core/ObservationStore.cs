@@ -2202,28 +2202,53 @@ public sealed partial class ObservationStore : IDisposable
     /// Byte counts arrive only when a flow reports its final statistics, so
     /// observations_with_bytes is counted separately from observations: a
     /// window nobody could measure must not read as a quiet one.
+    ///
+    /// Only destinations outside this network count. Every hour this PC
+    /// copied about 400 MB to a machine on its own LAN, and for a week each
+    /// copy was reported as unusual outbound traffic -- 105 times -- though
+    /// none of it left the building. What stays on the LAN, on the PC itself
+    /// or on the tailnet is not what this measures.
     private OutboundTrafficWindow ReadOutboundWindow(DateTimeOffset start, DateTimeOffset end)
     {
-        var range = $"WHERE observed_at >= {start.UtcTicks} AND observed_at < {end.UtcTicks}";
-        ulong bytesOut = 0; var observations = 0; var withBytes = 0; var applications = 0; var destinations = 0;
-        CheckOperation(WinSqlite.Prepare(db, "SELECT COALESCE(SUM(bytes_sent),0), COUNT(*), COUNT(bytes_sent), " +
-            $"COUNT(DISTINCT COALESCE(process_name,'')), COUNT(DISTINCT remote_address) FROM observations {range}", -1, out var summary, 0));
+        var rows = ReadOutboundRows(start, end);
+        var applications = rows.GroupBy(row => row.Application, StringComparer.Ordinal)
+            .Select(group => SumBytes(group)).ToArray();
+        return new OutboundTrafficWindow(start, SumBytes(rows),
+            rows.Sum(row => row.Observations),
+            rows.Sum(row => row.ObservationsWithBytes),
+            applications.Length,
+            rows.Select(row => row.Address).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            applications.Length == 0 ? 0 : applications.Max());
+    }
+
+    private sealed record OutboundRow(string Address, string? Hostname, string Application, int Observations, int ObservationsWithBytes, ulong BytesOut);
+
+    private static ulong SumBytes(IEnumerable<OutboundRow> rows) => rows.Aggregate(0UL, (sum, row) => sum + row.BytesOut);
+
+    /// The window's observations by destination and application, leaving out
+    /// every destination that cannot be on the internet: the LAN, loopback,
+    /// the tailnet's shared range, multicast and the other reserved ranges.
+    /// Grouped in SQL and filtered here, because the ranges are
+    /// PrivateAddress's, and a second copy of them written as SQL would drift.
+    private List<OutboundRow> ReadOutboundRows(DateTimeOffset start, DateTimeOffset end)
+    {
+        CheckOperation(WinSqlite.Prepare(db, "SELECT remote_address,MAX(remote_hostname),COALESCE(process_name,''),COUNT(*),COUNT(bytes_sent)," +
+            "COALESCE(SUM(bytes_sent),0) FROM observations " +
+            $"WHERE observed_at >= {start.UtcTicks} AND observed_at < {end.UtcTicks} GROUP BY 1,3", -1, out var statement, 0));
+        var rows = new List<OutboundRow>();
         try
         {
-            if (WinSqlite.Step(summary) == WinSqlite.Row)
+            while (WinSqlite.Step(statement) == WinSqlite.Row)
             {
-                bytesOut = (ulong)Math.Max(0, WinSqlite.ColumnInt64(summary, 0));
-                observations = (int)WinSqlite.ColumnInt64(summary, 1);
-                withBytes = (int)WinSqlite.ColumnInt64(summary, 2);
-                applications = (int)WinSqlite.ColumnInt64(summary, 3);
-                destinations = (int)WinSqlite.ColumnInt64(summary, 4);
+                var address = Text(statement, 0);
+                if (PrivateAddress.IsPrivateOrReserved(address)) continue;
+                rows.Add(new(address, NullableTextValue(statement, 1), Text(statement, 2),
+                    (int)WinSqlite.ColumnInt64(statement, 3), (int)WinSqlite.ColumnInt64(statement, 4),
+                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 5))));
             }
         }
-        finally { WinSqlite.Finalize(summary); }
-
-        var largest = (ulong)Math.Max(0, ScalarInt64("SELECT COALESCE(MAX(app_bytes),0) FROM (SELECT SUM(COALESCE(bytes_sent,0)) " +
-            $"AS app_bytes FROM observations {range} GROUP BY COALESCE(process_name,''))"));
-        return new OutboundTrafficWindow(start, bytesOut, observations, withBytes, applications, destinations, largest);
+        finally { WinSqlite.Finalize(statement); }
+        return rows;
     }
 
     private IReadOnlyList<OutboundTrafficWindow> ReadOutboundWindows(DateTimeOffset from, DateTimeOffset before)
@@ -2262,34 +2287,26 @@ public sealed partial class ObservationStore : IDisposable
     /// out, and the window's summary row keeps only counts. A destination is
     /// named by its host where one was read, with the address beside it,
     /// because an address alone is rarely something a reader recognises.
+    /// Over the same destinations the window was measured over, so the list
+    /// explains the number rather than a larger one.
     public OutboundAnomalyBreakdown ReadOutboundAnomalyBreakdown(DateTimeOffset windowStart, ulong usualBytesOut, int limit = OutboundAnomalyBreakdown.ContributorLimit)
     {
         if (limit is < 1 or > 50) throw new ArgumentOutOfRangeException(nameof(limit));
-        var end = windowStart + OutboundAnomalyRecord.WindowLength;
-        var range = $"WHERE observed_at >= {windowStart.UtcTicks} AND observed_at < {end.UtcTicks} AND bytes_sent > 0";
-        lock (gate)
-        {
-            var applications = ReadContributors("SELECT COALESCE(process_name,''),SUM(bytes_sent) AS sent FROM observations " +
-                $"{range} GROUP BY COALESCE(process_name,'') ORDER BY sent DESC LIMIT {limit}");
-            var destinations = ReadContributors("SELECT CASE WHEN MAX(remote_hostname) IS NULL THEN remote_address " +
-                "ELSE MAX(remote_hostname)||' ('||remote_address||')' END,SUM(bytes_sent) AS sent FROM observations " +
-                $"{range} GROUP BY remote_address ORDER BY sent DESC LIMIT {limit}");
-            var sending = (int)ScalarInt64($"SELECT COUNT(DISTINCT remote_address) FROM observations {range}");
-            return new(usualBytesOut, applications, destinations, sending);
-        }
-    }
-
-    private List<OutboundContributor> ReadContributors(string sql)
-    {
-        CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
-        var result = new List<OutboundContributor>();
-        try
-        {
-            while (WinSqlite.Step(statement) == WinSqlite.Row)
-                result.Add(new(Text(statement, 0), (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 1))));
-        }
-        finally { WinSqlite.Finalize(statement); }
-        return result;
+        List<OutboundRow> rows;
+        lock (gate) rows = ReadOutboundRows(windowStart, windowStart + OutboundAnomalyRecord.WindowLength);
+        var sending = rows.Where(row => row.BytesOut > 0).ToArray();
+        var applications = sending.GroupBy(row => row.Application, StringComparer.Ordinal)
+            .Select(group => new OutboundContributor(group.Key, SumBytes(group)))
+            .OrderByDescending(item => item.BytesOut).ThenBy(item => item.Name, StringComparer.Ordinal)
+            .Take(limit).ToList();
+        var destinations = sending.GroupBy(row => row.Address, StringComparer.OrdinalIgnoreCase)
+            .Select(group => (Address: group.Key, Hostname: group.Max(row => row.Hostname), Bytes: SumBytes(group)))
+            .OrderByDescending(item => item.Bytes).ThenBy(item => item.Address, StringComparer.Ordinal)
+            .Take(limit)
+            .Select(item => new OutboundContributor(item.Hostname is null ? item.Address : $"{item.Hostname} ({item.Address})", item.Bytes))
+            .ToList();
+        var sendingDestinations = sending.Select(row => row.Address).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        return new(usualBytesOut, applications, destinations, sendingDestinations);
     }
 
     /// The newest window that was judged unusual, so the window can notice a

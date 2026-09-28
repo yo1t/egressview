@@ -3139,15 +3139,32 @@ try
             var previous = window - TimeSpan.FromMinutes(15);
             store.WriteBatch(Enumerable.Range(0, 12).Select(index => new NetworkObservation(
                 previous.AddMinutes(1), 500 + index, "TCP", "10.0.0.5", 50_000 + index,
-                $"203.0.113.{index}", 443, 8 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw",
+                $"93.184.216.{index + 10}", 443, 8 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw",
                 $"sender{index}")).ToArray());
+            // What never leaves this network, in the same window: the hourly
+            // copy to a machine on the LAN that was reported as unusual
+            // outbound traffic 105 times in a week, a tailnet peer, the PC
+            // itself, a link-local neighbour and multicast.
+            store.WriteBatch([
+                new NetworkObservation(previous.AddMinutes(1), 4, "TCP", "10.0.0.5", 50_445, "192.168.1.20", 445,
+                    400L * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "System"),
+                new NetworkObservation(previous.AddMinutes(1), 610, "TCP", "100.101.102.5", 50_500, "100.64.0.9", 22,
+                    90L * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "tailscaled"),
+                new NetworkObservation(previous.AddMinutes(1), 620, "TCP", "127.0.0.1", 50_600, "127.0.0.1", 8080,
+                    70L * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "sender0"),
+                new NetworkObservation(previous.AddMinutes(1), 630, "UDP", "fe80::5", 50_700, "fe80::1", 5353,
+                    1024, 0, ObservationLayer.Logical, null, "etw", "svchost"),
+                new NetworkObservation(previous.AddMinutes(1), 640, "UDP", "10.0.0.5", 50_800, "239.255.255.250", 1900,
+                    1024, 0, ObservationLayer.Logical, null, "etw", "svchost"),
+            ]);
 
             var captured = store.CaptureOutboundTrafficWindow(now);
             Assert(captured is { } first && first.Current.StartedAt == previous &&
                 first.Current.BytesOut == 12UL * 8 * 1024 * 1024 && first.Current.ObservationCount == 12 &&
                 first.Current.ObservationsWithBytes == 12 && first.Current.ApplicationCount == 12 &&
                 first.Current.DestinationCount == 12 && first.Current.LargestApplicationBytesOut == 8 * 1024 * 1024,
-                "a captured window measures bytes, coverage, applications and the largest single sender");
+                "a captured window measures bytes, coverage, applications and the largest single sender -- " +
+                "over destinations outside this network only, so a copy to the LAN is not outbound traffic");
 
             // Capturing twice would let a restart raise the same alert again.
             Assert(store.CaptureOutboundTrafficWindow(now) is null,
@@ -3169,14 +3186,17 @@ try
 
             // One more sender with a host name, sending the most of anyone.
             store.WriteBatch([new NetworkObservation(previous.AddMinutes(2), 900, "TCP", "10.0.0.5", 51_000,
-                "198.51.100.7", 443, 40 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "backup.exe", "upload.example.com")]);
+                "93.184.217.7", 443, 40 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "backup.exe", "upload.example.com")]);
             var breakdown = store.ReadOutboundAnomalyBreakdown(previous, 3 * 1024 * 1024);
             Assert(breakdown.UsualBytesOut == 3 * 1024 * 1024 && breakdown.Applications.Count == 5 &&
                 breakdown.Applications[0] == new OutboundContributor("backup.exe", 40UL * 1024 * 1024) &&
                 breakdown.Destinations.Count == 5 &&
-                breakdown.Destinations[0] == new OutboundContributor("upload.example.com (198.51.100.7)", 40UL * 1024 * 1024) &&
+                breakdown.Destinations[0] == new OutboundContributor("upload.example.com (93.184.217.7)", 40UL * 1024 * 1024) &&
                 breakdown.SendingDestinationCount == 13,
                 "the breakdown keeps the five largest senders each way, names a host where one was read, and counts every destination");
+            Assert(!breakdown.Applications.Any(item => item.Name is "System" or "tailscaled") &&
+                !breakdown.Destinations.Any(item => item.Name.Contains("192.168.") || item.Name.Contains("100.64.") || item.Name.Contains("127.0.0.1")),
+                "and names none of what stayed inside this network, so it explains the number it sits beside");
             Assert(store.ReadOutboundAnomalyBreakdown(previous.AddDays(-1), 0) is { Applications.Count: 0, Destinations.Count: 0, SendingDestinationCount: 0 },
                 "a window nobody sent in has an empty breakdown");
 
@@ -3250,7 +3270,7 @@ try
             {
                 var at = start.AddMinutes(15 * index);
                 store.WriteBatch([new NetworkObservation(at.AddMinutes(1), 700, "TCP", "10.0.0.5", 52_000 + index,
-                    "203.0.113.50", 443, 1024, 0, ObservationLayer.Logical, null, "etw", "app.exe")]);
+                    "93.184.216.50", 443, 1024, 0, ObservationLayer.Logical, null, "etw", "app.exe")]);
                 store.CaptureOutboundTrafficWindow(at + TimeSpan.FromMinutes(15));
                 store.RecordOutboundAnomaly(at, OutboundAnomalyKind.LargeTransfer);
             }
