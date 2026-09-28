@@ -62,7 +62,7 @@ describe('Windows Agent cards and notices explain themselves', () => {
       'AnomalyBreakdownNotRecorded', 'AnomalyLargeTransfer', 'AnomalyDistributedTransfer', 'AnomaliesInPeriod',
       'NoAnomaliesInPeriod', 'AnomalyBaselineNotReady', 'ShowingNewestFormat', 'AnomalyNotMalware',
       'NoticeDetailsNotRecorded', 'OpenThreatsTab', 'NotificationKindOutboundAnomaly', 'ThreatNoticeTitle',
-      'ThreatNoticeFormat', 'MoreThreatsFormat', 'FeedNotProof']) {
+      'ThreatNoticeFormat', 'MoreThreatsFormat', 'FeedNotProof', 'PairsSentMost']) {
       assert.ok(key(strings.ja, name), `ja ${name}`);
       assert.ok(key(strings.en, name), `en ${name}`);
     }

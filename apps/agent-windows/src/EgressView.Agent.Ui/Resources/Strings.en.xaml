@@ -78,4 +78,5 @@
   <system:String x:Key="ThreatNoticeFormat">The latest scan found {0:N0} previously unnotified destinations that matched threat information. Open the Threats tab to review them. Addresses and host names are not shown in notifications.</system:String>
   <system:String x:Key="MoreThreatsFormat">{0:N0} more matches in this notice are in the Threats tab.</system:String>
   <system:String x:Key="FeedNotProof">A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point.</system:String>
+  <system:String x:Key="PairsSentMost">Which application sent to where (most first)</system:String>
 </ResourceDictionary>

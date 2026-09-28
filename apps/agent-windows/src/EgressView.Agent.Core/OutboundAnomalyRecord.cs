@@ -5,6 +5,9 @@ namespace EgressView.Agent.Core;
 /// One application or destination and what it sent in an anomalous window.
 public sealed record OutboundContributor(string Name, ulong BytesOut);
 
+/// One application and one destination, and what the first sent the second.
+public sealed record OutboundPair(string Application, string Destination, ulong BytesOut);
+
 /// What explains an anomaly: the usual level it was compared with, and who
 /// sent the most.
 ///
@@ -12,11 +15,17 @@ public sealed record OutboundContributor(string Name, ulong BytesOut);
 /// be: the usual level is not kept anywhere else, and the window's
 /// observations age out of the store. Same content as the Mac Agent's
 /// breakdown (P3-180), so the two describe the same laptop the same way.
+///
+/// <paramref name="Pairs"/> says which application sent to which destination.
+/// The two ranked lists alone cannot: the largest sender and the largest
+/// destination need not be the same connection. Null in breakdowns kept by
+/// 0.1.140, which did not record it; the lists still stand on their own.
 public sealed record OutboundAnomalyBreakdown(
     ulong UsualBytesOut,
     IReadOnlyList<OutboundContributor> Applications,
     IReadOnlyList<OutboundContributor> Destinations,
-    int SendingDestinationCount)
+    int SendingDestinationCount,
+    IReadOnlyList<OutboundPair>? Pairs = null)
 {
     /// The most applications and destinations kept, each.
     public const int ContributorLimit = 5;

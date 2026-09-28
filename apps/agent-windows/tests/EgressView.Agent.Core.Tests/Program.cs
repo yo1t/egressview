@@ -3197,14 +3197,23 @@ try
             Assert(!breakdown.Applications.Any(item => item.Name is "System" or "tailscaled") &&
                 !breakdown.Destinations.Any(item => item.Name.Contains("192.168.") || item.Name.Contains("100.64.") || item.Name.Contains("127.0.0.1")),
                 "and names none of what stayed inside this network, so it explains the number it sits beside");
-            Assert(store.ReadOutboundAnomalyBreakdown(previous.AddDays(-1), 0) is { Applications.Count: 0, Destinations.Count: 0, SendingDestinationCount: 0 },
+            Assert(breakdown.Pairs is { Count: 5 } pairs &&
+                pairs[0] == new OutboundPair("backup.exe", "upload.example.com (198.51.100.7)", 40UL * 1024 * 1024) &&
+                pairs.Skip(1).All(pair => pair.BytesOut == 8UL * 1024 * 1024 && pair.Application.StartsWith("sender", StringComparison.Ordinal)),
+                "the breakdown says which application sent how much to which destination, largest first");
+            Assert(store.ReadOutboundAnomalyBreakdown(previous.AddDays(-1), 0) is { Applications.Count: 0, Destinations.Count: 0, SendingDestinationCount: 0, Pairs.Count: 0 },
                 "a window nobody sent in has an empty breakdown");
+            // Kept by 0.1.140, before pairs were recorded: the lists still read.
+            Assert(OutboundAnomalyBreakdown.FromJson("""{"UsualBytesOut":5,"Applications":[{"Name":"a.exe","BytesOut":9}],"Destinations":[],"SendingDestinationCount":1}""")
+                is { Pairs: null, Applications.Count: 1 },
+                "a breakdown kept before pairs were recorded reads, with no pairs rather than an error");
 
             store.RecordOutboundAnomaly(previous, OutboundAnomalyKind.LargeTransfer, breakdown);
             var kept = store.ReadOutboundAnomalies(previous, now);
             Assert(kept.Count == 1 && kept[0].Kind == OutboundAnomalyKind.LargeTransfer && kept[0].Breakdown is { } read &&
                 read.UsualBytesOut == breakdown.UsualBytesOut && read.Applications.SequenceEqual(breakdown.Applications) &&
-                read.Destinations.SequenceEqual(breakdown.Destinations) && read.SendingDestinationCount == 13,
+                read.Destinations.SequenceEqual(breakdown.Destinations) && read.SendingDestinationCount == 13 &&
+                read.Pairs is { } readPairs && readPairs.SequenceEqual(breakdown.Pairs!),
                 "the breakdown is kept with the window and reads back as it was written");
             Assert(store.ReadPeriodAnalysis(previous, now).OutboundAnomalyDetails is [{ Breakdown: not null }],
                 "the overview carries the period's anomalies with their breakdowns");

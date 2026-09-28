@@ -562,9 +562,14 @@ internal static class Entry
                 new OutboundAnomalyBreakdown(38_000_000,
                     [new("aws.exe", 398_000_000), new("chrome.exe", 9_100_000), new("OneDrive.exe", 4_400_000),
                      new("Teams.exe", 2_100_000), new("svchost.exe", 900_000)],
-                    [new("egressview-releases.s3.ap-northeast-1.amazonaws.com (52.219.8.10)", 398_000_000),
-                     new("www.google.com (142.250.196.100)", 6_000_000), new("13.107.42.12", 4_400_000),
-                     new("teams.microsoft.com (52.113.194.132)", 2_100_000), new("198.51.100.4", 800_000)], 31));
+                    [new("uploads.storage.example.com (203.0.113.10)", 398_000_000),
+                     new("www.example.com (198.51.100.20)", 6_000_000), new("192.0.2.12", 4_400_000),
+                     new("chat.example.net (198.51.100.32)", 2_100_000), new("198.51.100.4", 800_000)], 31,
+                    [new("aws.exe", "uploads.storage.example.com (203.0.113.10)", 398_000_000),
+                     new("chrome.exe", "www.example.com (198.51.100.20)", 6_000_000),
+                     new("OneDrive.exe", "192.0.2.12", 4_400_000),
+                     new("chrome.exe", "chat.example.net (198.51.100.32)", 2_100_000),
+                     new("Teams.exe", "198.51.100.4", 800_000)]));
             var unexplained = new OutboundAnomalyRecord(OutboundAnomalyKind.DistributedTransfer, at.AddHours(-3), 140_000_000, 4, 18, null);
             foreach (var (dark, suffix) in new[] { (false, "light"), (true, "dark") })
             {
