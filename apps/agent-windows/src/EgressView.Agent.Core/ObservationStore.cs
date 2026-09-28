@@ -2299,14 +2299,22 @@ public sealed partial class ObservationStore : IDisposable
             .Select(group => new OutboundContributor(group.Key, SumBytes(group)))
             .OrderByDescending(item => item.BytesOut).ThenBy(item => item.Name, StringComparer.Ordinal)
             .Take(limit).ToList();
+        static string Destination(string address, string? hostname) => hostname is null ? address : $"{hostname} ({address})";
         var destinations = sending.GroupBy(row => row.Address, StringComparer.OrdinalIgnoreCase)
             .Select(group => (Address: group.Key, Hostname: group.Max(row => row.Hostname), Bytes: SumBytes(group)))
             .OrderByDescending(item => item.Bytes).ThenBy(item => item.Address, StringComparer.Ordinal)
             .Take(limit)
-            .Select(item => new OutboundContributor(item.Hostname is null ? item.Address : $"{item.Hostname} ({item.Address})", item.Bytes))
+            .Select(item => new OutboundContributor(Destination(item.Address, item.Hostname), item.Bytes))
+            .ToList();
+        // A row is already one application to one destination.
+        var pairs = sending
+            .OrderByDescending(row => row.BytesOut).ThenBy(row => row.Application, StringComparer.Ordinal)
+            .ThenBy(row => row.Address, StringComparer.Ordinal)
+            .Take(limit)
+            .Select(row => new OutboundPair(row.Application, Destination(row.Address, row.Hostname), row.BytesOut))
             .ToList();
         var sendingDestinations = sending.Select(row => row.Address).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-        return new(usualBytesOut, applications, destinations, sendingDestinations);
+        return new(usualBytesOut, applications, destinations, sendingDestinations, pairs);
     }
 
     /// The newest window that was judged unusual, so the window can notice a

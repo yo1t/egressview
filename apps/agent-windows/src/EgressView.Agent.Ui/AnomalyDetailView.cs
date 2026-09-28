@@ -89,6 +89,11 @@ internal static class AnomalyDetailView
             panel.Children.Add(Secondary(LocalizationManager.Text("AnomalyBreakdownNotRecorded"), 6));
             return panel;
         }
+        // Which application sent to which destination, first: the two lists
+        // below rank each side on its own, and the largest sender and the
+        // largest destination need not be the same connection.
+        if (breakdown.Pairs is { Count: > 0 } pairs)
+            panel.Children.Add(Pairs(pairs));
         if (breakdown.Applications.Count > 0)
             panel.Children.Add(Contributors(LocalizationManager.Text("AppsSentMost"), breakdown.Applications));
         if (breakdown.Destinations.Count > 0)
@@ -189,6 +194,28 @@ internal static class AnomalyDetailView
                 Text = string.IsNullOrEmpty(row.Name) ? "—" : row.Name,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             });
+            panel.Children.Add(line);
+        }
+        return panel;
+    }
+
+    private static FrameworkElement Pairs(IReadOnlyList<OutboundPair> pairs)
+    {
+        var panel = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+        var heading = Secondary(LocalizationManager.Text("PairsSentMost"), 0);
+        heading.FontWeight = FontWeights.SemiBold;
+        panel.Children.Add(heading);
+        foreach (var pair in pairs)
+        {
+            var line = new DockPanel { Margin = new Thickness(0, 2, 0, 0) };
+            var amount = Secondary(Bytes(pair.BytesOut), 0);
+            amount.Margin = new Thickness(12, 0, 0, 0);
+            DockPanel.SetDock(amount, Dock.Right);
+            line.Children.Add(amount);
+            var text = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis };
+            text.Inlines.Add(new System.Windows.Documents.Run(string.IsNullOrEmpty(pair.Application) ? "—" : pair.Application) { FontWeight = FontWeights.SemiBold });
+            text.Inlines.Add(new System.Windows.Documents.Run(" → " + pair.Destination));
+            line.Children.Add(text);
             panel.Children.Add(line);
         }
         return panel;
