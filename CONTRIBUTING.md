@@ -143,6 +143,7 @@ x64. On anything else, install a toolchain and run `npm ci --ignore-scripts=fals
 - **Use the logger, not `console.*`,** in `src/` modules: `const logger = require('./logger')`.
 - **Validate API input** with the helpers in `src/utils.js` (`parseTimestamp`, `parsePositiveInt`, `isAllowedRouterIp`) rather than ad-hoc `parseInt`/`Number` calls.
 - **UI strings need both languages.** Any user-visible text goes through `public/js/i18n.js` — add the key to **both** the `ja` and `en` dictionaries (a unit test enforces parity).
+- **Commits name the person who submits them, and no one else.** Do not add `Co-authored-by:` trailers or "Generated with" lines for AI coding tools, in commits or in pull request descriptions. You may use such tools, but you are the author: you answer for the change, and you are the one who accepts the [CLA](CLA.md) below.
 - **Never commit real network data.** Use documentation addresses in code comments, tests, and fixtures: `192.0.2.x` / `198.51.100.x` / `203.0.113.x` (RFC 5737), `2001:db8::/32` (RFC 3849), and obviously-fake MAC addresses (`aa:bb:cc:dd:ee:ff`). No real LAN IPs, device MACs, hostnames, or credentials — even in log samples.
 
 ## Router support contributions
