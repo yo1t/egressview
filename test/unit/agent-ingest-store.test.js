@@ -261,7 +261,7 @@ describe('Agent ingest store', () => {
   it('prunes expired originals and their orphaned batch receipts', async () => {
     await store.storeBatch(agentId, copy(), { receivedAt });
     const result = store.pruneObservations({ before: receivedAt + 1 });
-    assert.deepEqual(result, { correlations: 0, observations: 1, batches: 1 });
+    assert.deepEqual(result, { correlations: 0, observations: 1, hourly: 1, batches: 1, more: false });
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 0);
   });
@@ -421,5 +421,92 @@ describe('終了時の報告で、開始時の行を完成させる', () => {
     const ack = await store.storeBatch(agentId, closing(), { receivedAt: receivedAt + 1 });
 
     assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(ack)), 'completed'), false);
+  });
+});
+
+// A day of observations deleted in one transaction held the Hub's event loop
+// past the watchdog's 120 seconds every night (2026-09-28 and 09-29): the Hub
+// was killed, the delete rolled back, and the restart's integrity check kept
+// it down for about eleven minutes.
+describe('期限切れの観測は、少しずつ消す', () => {
+  const { randomUUID } = require('node:crypto');
+  const hour = 3600 * 1000;
+
+  async function deliver(agent, times, batchId = randomUUID()) {
+    const envelope = copy();
+    envelope.batchId = batchId;
+    envelope.observations = times.map((at, index) => ({
+      ...golden.observations[0],
+      observationId: randomUUID(),
+      localPort: 40000 + index,
+      firstObservedAt: new Date(at - 1000).toISOString(),
+      lastObservedAt: new Date(at).toISOString(),
+    }));
+    await store.storeBatch(agent, envelope, { receivedAt: Math.max(...times) + 1000 });
+  }
+  const count = table => store._dbForTest().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+
+  it('時間の予算を使い切ったら残りがあると言い、次の呼び出しで続きを消す', async () => {
+    const base = receivedAt;
+    await deliver(agentId, Array.from({ length: 25 }, (_, i) => base + i));
+
+    const first = store.pruneObservations({ before: base + hour, batchSize: 10, budgetMs: 0 });
+    assert.equal(first.observations, 10, '1回目は1バッチだけ消す');
+    assert.equal(first.more, true);
+    assert.equal(count('agent_observations'), 15);
+
+    let pass = first;
+    let calls = 1;
+    while (pass.more) {
+      pass = store.pruneObservations({ before: base + hour, batchSize: 10, budgetMs: 0 });
+      calls += 1;
+      assert.ok(calls < 20, '有限回で終わる');
+    }
+    assert.equal(count('agent_observations'), 0);
+    assert.equal(count('agent_app_hourly'), 0);
+    assert.equal(count('agent_ingest_batches'), 0);
+  });
+
+  it('期限より新しい観測と、それが入っている時間の集計と受領記録は残す', async () => {
+    const base = receivedAt - (receivedAt % hour);
+    // One hour row holds an old observation and a newer one: the hour began
+    // before the cutoff, but its row was touched after it.
+    await deliver(agentId, [base + 60_000, base + 10 * 60_000], 'old-and-new');
+    await deliver(agentId, [base - 2 * hour], 'all-old');
+
+    const result = store.pruneObservations({ before: base + 5 * 60_000 });
+
+    assert.equal(result.more, false);
+    assert.equal(result.observations, 2);
+    assert.equal(count('agent_observations'), 1, '新しい観測は残る');
+    assert.equal(result.hourly, 1, '古い時間の行だけ消す');
+    assert.equal(count('agent_app_hourly'), 1, '新しい観測が入っている時間の行は残る');
+    assert.equal(result.batches, 1, 'まだ観測が参照している受領記録は残す');
+    assert.equal(count('agent_ingest_batches'), 1);
+  });
+
+  it('エージェントごとに、参照されなくなった受領記録を消す', async () => {
+    const other = '00000000-0000-4000-8000-000000000002';
+    await deliver(agentId, [receivedAt]);
+    await deliver(other, [receivedAt]);
+
+    const result = store.pruneObservations({ before: receivedAt + hour });
+
+    assert.equal(result.observations, 2);
+    assert.equal(result.batches, 2);
+    assert.equal(count('agent_ingest_batches'), 0);
+  });
+});
+
+describe('削除の件数は、ディスクの速さに合わせて変わる', () => {
+  const adapt = store._adaptPruneBatchForTest;
+  it('目標の100msを超えたら半分にし、十分短ければ倍にする', () => {
+    assert.equal(adapt(1000, 250), 500);
+    assert.equal(adapt(1000, 10), 2000);
+    assert.equal(adapt(1000, 60), 1000);
+  });
+  it('50行から5000行の範囲に収める', () => {
+    assert.equal(adapt(60, 5000), 50);
+    assert.equal(adapt(4000, 1), 5000);
   });
 });

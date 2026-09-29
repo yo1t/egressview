@@ -2,6 +2,16 @@ import Foundation
 
 @objc public protocol FullMonitoringXPCProtocol {
     func drainObservations(withReply reply: @escaping (Data) -> Void)
+    /// Hands over the batch in flight, or a new one, and releases the batch
+    /// the app says it has stored. The reply carries the batch's number, to be
+    /// acknowledged on the next request (P3-181). Host and Extension of one
+    /// build are the only pair that can connect, because the service name
+    /// carries the build number; the method without acknowledgement stays for
+    /// anything that still calls it.
+    @objc optional func drainObservations(
+        acknowledging acknowledgement: Int64,
+        withReply reply: @escaping (Int64, Data) -> Void
+    )
     /// Optional so a new Host can keep collecting from the previous extension
     /// while macOS is still completing an update.
     @objc optional func readQUICFeasibilityDiagnostics(withReply reply: @escaping (Data) -> Void)
@@ -26,7 +36,7 @@ public enum FullMonitoringXPC {
     // provider's endpoint while a System Extension update is being completed,
     // so reusing one fixed name can leave the new provider unable to register
     // until macOS restarts.
-    public static let machServiceName = "group.com.egressview.agent.xpc.175"
+    public static let machServiceName = "group.com.egressview.agent.xpc.178"
     public static let hostBundleIdentifier = "com.egressview.agent.macos"
 
     public static func encoder() -> JSONEncoder {

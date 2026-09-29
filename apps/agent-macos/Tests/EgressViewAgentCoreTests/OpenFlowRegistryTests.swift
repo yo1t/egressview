@@ -107,6 +107,49 @@ final class OpenFlowRegistryTests: XCTestCase {
         ))
     }
 
+    // 2026-09-29: the same download closed as 506 KB through curl and as 0/0
+    // through nscurl. A flow seen sending data that closes with zero is not
+    // "sent nothing"; it is not measured.
+    func test送信を見た接続が0で終わったら未計測として記録する() throws {
+        var registry = OpenFlowRegistry()
+        let id = UUID()
+        registry.register(flowID: id, metadata: metadata(), startedAt: start)
+        XCTAssertNotNil(registry.openingObservation(flowID: id, observedAt: start))
+        let closed = try XCTUnwrap(registry.complete(
+            flowID: id, kind: .flowClosed, bytesIn: 0, bytesOut: 0,
+            metadata: metadata(), reportedAt: start.addingTimeInterval(1)
+        ))
+        XCTAssertNil(closed.bytesIn)
+        XCTAssertNil(closed.bytesOut)
+    }
+
+    func test送信を見ていない接続の0はそのまま0として記録する() throws {
+        // A connection that never got as far as sending -- a refused or
+        // timed-out connect -- really did carry nothing.
+        var registry = OpenFlowRegistry()
+        let id = UUID()
+        registry.register(flowID: id, metadata: metadata(), startedAt: start)
+        let closed = try XCTUnwrap(registry.complete(
+            flowID: id, kind: .flowClosed, bytesIn: 0, bytesOut: 0,
+            metadata: metadata(), reportedAt: start.addingTimeInterval(1)
+        ))
+        XCTAssertEqual(closed.bytesIn, 0)
+        XCTAssertEqual(closed.bytesOut, 0)
+    }
+
+    func test送信を見た接続でも数えられた通信量はそのまま記録する() throws {
+        var registry = OpenFlowRegistry()
+        let id = UUID()
+        registry.register(flowID: id, metadata: metadata(), startedAt: start)
+        _ = registry.openingObservation(flowID: id, observedAt: start)
+        let closed = try XCTUnwrap(registry.complete(
+            flowID: id, kind: .flowClosed, bytesIn: 506_388, bytesOut: 542,
+            metadata: metadata(), reportedAt: start.addingTimeInterval(1)
+        ))
+        XCTAssertEqual(closed.bytesIn, 506_388)
+        XCTAssertEqual(closed.bytesOut, 542)
+    }
+
     func testStatisticsReportsProduceNothing() {
         // A running total for a still-open flow. Whether the counter is
         // cumulative or per-interval has not been measured, and an unverified

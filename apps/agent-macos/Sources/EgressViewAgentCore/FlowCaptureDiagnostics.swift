@@ -14,6 +14,17 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
     public private(set) var closedReports: UInt64 = 0
     public private(set) var unregisteredClosesRecovered: UInt64 = 0
     public private(set) var unregisteredClosesUnresolved: UInt64 = 0
+    /// Why an unresolved close could not be recorded. Inbound flows are not
+    /// recorded by design; the endpoint cases are outbound traffic that went
+    /// unrecorded, which is what P3-181 needs to count separately.
+    public private(set) var unresolvedClosesInbound: UInt64 = 0
+    public private(set) var unresolvedClosesMissingLocalEndpoint: UInt64 = 0
+    public private(set) var unresolvedClosesMissingRemoteEndpoint: UInt64 = 0
+    /// What the system's closing reports carried, and how many that said zero
+    /// came from a flow seen sending data, and so were recorded as unmeasured.
+    public private(set) var closedReportsWithBytes: UInt64 = 0
+    public private(set) var closedReportsWithoutBytes: UInt64 = 0
+    public private(set) var zeroClosesRecordedAsUnmeasured: UInt64 = 0
     public private(set) var emittedObservations: UInt64 = 0
     public private(set) var enqueuedObservations: UInt64 = 0
     public private(set) var droppedObservations: UInt64 = 0
@@ -28,6 +39,8 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
         case newFlow, nonSocket, nonOutbound, unsupportedProtocol
         case missingLocalEndpoint, missingRemoteEndpoint, registeredFlow
         case outboundCallback, closedReport, unregisteredCloseRecovered, unregisteredCloseUnresolved
+        case unresolvedCloseInbound, unresolvedCloseMissingLocalEndpoint, unresolvedCloseMissingRemoteEndpoint
+        case closedWithBytes, closedWithoutBytes, zeroCloseRecordedAsUnmeasured
         case emittedObservation, enqueuedObservation
         case droppedObservation, encodingFailure
     }
@@ -45,6 +58,15 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
         case .closedReport: closedReports = Self.increment(closedReports)
         case .unregisteredCloseRecovered: unregisteredClosesRecovered = Self.increment(unregisteredClosesRecovered)
         case .unregisteredCloseUnresolved: unregisteredClosesUnresolved = Self.increment(unregisteredClosesUnresolved)
+        case .unresolvedCloseInbound: unresolvedClosesInbound = Self.increment(unresolvedClosesInbound)
+        case .unresolvedCloseMissingLocalEndpoint:
+            unresolvedClosesMissingLocalEndpoint = Self.increment(unresolvedClosesMissingLocalEndpoint)
+        case .unresolvedCloseMissingRemoteEndpoint:
+            unresolvedClosesMissingRemoteEndpoint = Self.increment(unresolvedClosesMissingRemoteEndpoint)
+        case .closedWithBytes: closedReportsWithBytes = Self.increment(closedReportsWithBytes)
+        case .closedWithoutBytes: closedReportsWithoutBytes = Self.increment(closedReportsWithoutBytes)
+        case .zeroCloseRecordedAsUnmeasured:
+            zeroClosesRecordedAsUnmeasured = Self.increment(zeroClosesRecordedAsUnmeasured)
         case .emittedObservation: emittedObservations = Self.increment(emittedObservations)
         case .enqueuedObservation: enqueuedObservations = Self.increment(enqueuedObservations)
         case .droppedObservation: droppedObservations = Self.increment(droppedObservations)

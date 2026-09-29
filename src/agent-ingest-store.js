@@ -349,31 +349,130 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
   }, false, acceptedObservationIds, completedCount);
 }
 
-function pruneObservations({ before }) {
+// How much one call deletes: rows per transaction, and how long it may keep
+// going before handing the event loop back. A day of agent observations is
+// about 460,000 rows with eight indexes. Deleted in one transaction, that held
+// the loop for over 120 seconds, the watchdog killed the Hub, the delete rolled
+// back, and the restart spent 505 seconds on an integrity check -- about eleven
+// minutes without the Hub, every night, and the rows still there.
+//
+// The batch size adapts to the disk rather than being guessed: the same day
+// took 7.4 seconds on a development Mac and over 120 on the production
+// instance. Each observation batch aims at PRUNE_TARGET_MS; one that takes
+// longer halves the next, one well under it doubles the next.
+const PRUNE_BUDGET_MS = 200;
+const PRUNE_TARGET_MS = 100;
+const PRUNE_BATCH_MIN = 50;
+const PRUNE_BATCH_MAX = 5000;
+let adaptivePruneBatch = 500;
+
+function adaptPruneBatch(size, elapsedMs) {
+  if (elapsedMs > PRUNE_TARGET_MS) return Math.max(PRUNE_BATCH_MIN, Math.floor(size / 2));
+  if (elapsedMs < PRUNE_TARGET_MS / 4) return Math.min(PRUNE_BATCH_MAX, size * 2);
+  return size;
+}
+
+/**
+ * Deletes agent observations older than `before`, with their correlation
+ * links, the hourly attribution rows they fed, and batch receipts nothing
+ * refers to any more.
+ *
+ * Works in small transactions and stops when its time budget is spent,
+ * reporting `more: true`; the caller runs it again soon. Observations go
+ * first, because a batch receipt can only go once no observation points at it.
+ *
+ * @returns {{ correlations: number, observations: number, hourly: number,
+ *   batches: number, more: boolean }}
+ */
+function pruneObservations({
+  before, batchSize, budgetMs = PRUNE_BUDGET_MS, now = Date.now,
+} = {}) {
   const database = requireDb();
   if (!Number.isFinite(before)) throw new TypeError('before must be finite');
-  return database.transaction(() => {
-    const correlations = database.prepare(`
-      DELETE FROM connection_agent_observations
-      WHERE (agentId, observationId) IN (
-        SELECT agentId, observationId FROM agent_observations WHERE lastObservedAt < ?
-      )
-    `).run(before).changes;
-    const observations = database.prepare(
-      'DELETE FROM agent_observations WHERE lastObservedAt < ?'
-    ).run(before).changes;
-    database.prepare('DELETE FROM agent_app_hourly WHERE lastObservedAt < ?').run(before);
-    const batches = database.prepare(`
-      DELETE FROM agent_ingest_batches
-      WHERE receivedAt < ?
+  const startedAt = now();
+  const outOfTime = () => now() - startedAt >= budgetMs;
+  const result = { correlations: 0, observations: 0, hourly: 0, batches: 0, more: false };
+
+  const pickObservations = database.prepare(`
+    SELECT rowid AS id, agentId, observationId FROM agent_observations
+    WHERE lastObservedAt < ? LIMIT ?
+  `);
+  const unlink = database.prepare(
+    'DELETE FROM connection_agent_observations WHERE agentId = ? AND observationId = ?'
+  );
+  const dropObservation = database.prepare('DELETE FROM agent_observations WHERE rowid = ?');
+  // A caller that names a size gets exactly that size (tests do); otherwise
+  // the size carries over between calls and follows the disk.
+  const fixedSize = Number.isInteger(batchSize) && batchSize > 0;
+  let size = fixedSize ? batchSize : adaptivePruneBatch;
+  const observationBatch = database.transaction(() => {
+    const rows = pickObservations.all(before, size);
+    for (const row of rows) {
+      result.correlations += unlink.run(row.agentId, row.observationId).changes;
+      result.observations += dropObservation.run(row.id).changes;
+    }
+    return rows.length;
+  });
+  for (;;) {
+    const batchStartedAt = now();
+    const deleted = observationBatch.immediate();
+    const full = deleted >= size;
+    if (!fixedSize) {
+      size = adaptPruneBatch(size, now() - batchStartedAt);
+      adaptivePruneBatch = size;
+    }
+    if (!full) break;
+    if (outOfTime()) { result.more = true; return result; }
+  }
+
+  // An hour at a time, oldest first. The hour leads the primary key, so each
+  // delete is a range read; filtering on lastObservedAt alone read the whole
+  // table. An hour row can only be past `before` if its hour started before it.
+  const nextHour = database.prepare(
+    'SELECT MIN(hourStart) AS hour FROM agent_app_hourly WHERE hourStart > ?'
+  );
+  const dropHour = database.prepare(
+    'DELETE FROM agent_app_hourly WHERE hourStart = ? AND lastObservedAt < ?'
+  );
+  for (let cursor = -Infinity; ;) {
+    const hour = nextHour.get(cursor)?.hour;
+    if (hour == null || hour >= before) break;
+    result.hourly += database.transaction(() => dropHour.run(hour, before).changes).immediate();
+    cursor = hour;
+    if (outOfTime()) { result.more = true; return result; }
+  }
+
+  // Agent by agent, so the receipt lookup uses (agentId, receivedAt) instead
+  // of reading every receipt.
+  const nextAgent = database.prepare(
+    'SELECT MIN(agentId) AS agentId FROM agent_ingest_batches WHERE agentId > ?'
+  );
+  const dropBatches = database.prepare(`
+    DELETE FROM agent_ingest_batches WHERE rowid IN (
+      SELECT b.rowid FROM agent_ingest_batches b
+      WHERE b.agentId = ? AND b.receivedAt < ?
         AND NOT EXISTS (
           SELECT 1 FROM agent_observations o
-          WHERE o.agentId = agent_ingest_batches.agentId
-            AND o.batchId = agent_ingest_batches.batchId
+          WHERE o.agentId = b.agentId AND o.batchId = b.batchId
         )
-    `).run(before).changes;
-    return { correlations, observations, batches };
-  }).immediate();
+      LIMIT ?
+    )
+  `);
+  for (let cursor = ''; ;) {
+    const agentId = nextAgent.get(cursor)?.agentId;
+    if (agentId == null) break;
+    for (;;) {
+      const deleted = database.transaction(
+        () => dropBatches.run(agentId, before, size).changes
+      ).immediate();
+      result.batches += deleted;
+      if (deleted < size) break;
+      if (outOfTime()) { result.more = true; return result; }
+    }
+    cursor = agentId;
+    if (outOfTime()) { result.more = true; return result; }
+  }
+  return result;
 }
 
 function reconcileCorrelations(options) {
@@ -510,6 +609,7 @@ module.exports = {
   getAgentCollectionStatus,
   getCorrelationDiagnostics,
   pruneObservations,
+  _adaptPruneBatchForTest: adaptPruneBatch,
   queryCorrelationReadModel,
   queryUnifiedReadModel,
   reconcileCorrelations,

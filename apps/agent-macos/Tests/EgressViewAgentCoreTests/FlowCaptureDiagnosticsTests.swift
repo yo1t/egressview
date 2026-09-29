@@ -28,6 +28,22 @@ final class FlowCaptureDiagnosticsTests: XCTestCase {
         XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("processName"))
     }
 
+    /// P3-181: "unresolved" mixed inbound closes, which are not recorded by
+    /// design, with outbound ones that went unrecorded.
+    func testUnresolvedClosesAreCountedByReason() throws {
+        var counters = FlowCaptureDiagnostics(startedAt: Date(timeIntervalSince1970: 1))
+        counters.record(.unresolvedCloseInbound)
+        counters.record(.unresolvedCloseInbound)
+        counters.record(.unresolvedCloseMissingLocalEndpoint)
+        counters.record(.unresolvedCloseMissingRemoteEndpoint)
+        let restored = try FullMonitoringXPC.decoder().decode(
+            FlowCaptureDiagnostics.self, from: FullMonitoringXPC.encoder().encode(counters)
+        )
+        XCTAssertEqual(restored.unresolvedClosesInbound, 2)
+        XCTAssertEqual(restored.unresolvedClosesMissingLocalEndpoint, 1)
+        XCTAssertEqual(restored.unresolvedClosesMissingRemoteEndpoint, 1)
+    }
+
     func testHostCountsDistinguishReceiptFromPersistence() {
         var counters = FlowPersistenceDiagnostics()
         counters.recordReceived(3, completedWithoutBytes: 1)

@@ -1,5 +1,6 @@
 import EgressViewAgentCore
 import Foundation
+import OSLog
 
 final class FullMonitoringCollector {
     private let store: ObservationStore
@@ -18,6 +19,10 @@ final class FullMonitoringCollector {
     /// an extension that has stopped answering.
     private var isDraining = false
     private var drainRequestGeneration: UInt64 = 0
+    /// Which batch was last stored, sent back with each request so the
+    /// Extension can let it go (P3-181).
+    private var handoff = ObservationHandoffReceiver()
+    private let logger = Logger(subsystem: "com.egressview.agent.macos", category: "full-monitoring")
     private var isReadingDiagnostics = false
     private var persistenceDiagnostics = FlowPersistenceDiagnostics()
     private var diagnosticsRequestGeneration: UInt64 = 0
@@ -139,11 +144,11 @@ final class FullMonitoringCollector {
             return
         }
         syncServerNamePolicyIfNeeded(proxy)
-        proxy.drainObservations { [weak self] data in
+        proxy.drainObservations?(acknowledging: handoff.acknowledgement) { [weak self] batchID, data in
             self?.queue.async {
                 guard let self, generation == self.drainRequestGeneration else { return }
                 self.isDraining = false
-                self.consume(data)
+                self.consume(batchID: batchID, data: data)
             }
         }
     }
@@ -258,8 +263,28 @@ final class FullMonitoringCollector {
         return connection
     }
 
-    private func consume(_ data: Data) {
+    private func consume(batchID: Int64, data: Data) {
         guard isRunning else { return }
+        // Zero is "nothing to hand over". A batch already stored came back
+        // because the acknowledgement had not reached the Extension yet; this
+        // request carried it, so the Extension lets it go now.
+        guard batchID != 0 else {
+            consume(Data())
+            return
+        }
+        guard handoff.decide(batchID) == .store else { return }
+        if consume(data) {
+            handoff.stored(batchID)
+        } else if handoff.failed(batchID) {
+            logger.error("gave up on batch \(batchID, privacy: .public) after \(self.handoff.maximumAttempts, privacy: .public) failed attempts to store it")
+        }
+    }
+
+    /// Stores one batch. False when it could not be decoded or stored, so the
+    /// Extension hands it over again.
+    @discardableResult
+    private func consume(_ data: Data) -> Bool {
+        guard isRunning else { return false }
         do {
             let observations = data.isEmpty
                 ? []
@@ -295,7 +320,9 @@ final class FullMonitoringCollector {
         } catch {
             persistenceDiagnostics.recordFailure()
             errorHandler(error)
+            return false
         }
+        return true
     }
 
     private func resetConnection() {

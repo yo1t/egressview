@@ -239,6 +239,9 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         guard let socketFlow = report.flow as? NEFilterSocketFlow else { return }
         let kind = FlowReportKind(report.event)
         if kind == .flowClosed { didRecordFlowCapture(.closedReport) }
+        let described = adapter.metadataResult(from: socketFlow)
+        var metadata: SocketFlowMetadata?
+        if case let .success(value) = described { metadata = value }
         let (wasRegistered, observation) = lock.withLock {
             let wasRegistered = openFlows.contains(flowID: socketFlow.identifier)
             let observation = openFlows.complete(
@@ -246,13 +249,28 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
                 kind: kind,
                 bytesIn: UInt64(max(0, report.bytesInboundCount)),
                 bytesOut: UInt64(max(0, report.bytesOutboundCount)),
-                metadata: adapter.metadata(from: socketFlow),
+                metadata: metadata,
                 reportedAt: Date()
             )
             return (wasRegistered, observation)
         }
         if kind == .flowClosed && !wasRegistered {
             didRecordFlowCapture(observation == nil ? .unregisteredCloseUnresolved : .unregisteredCloseRecovered)
+            if observation == nil {
+                switch described {
+                case .nonOutbound: didRecordFlowCapture(.unresolvedCloseInbound)
+                case .missingLocalEndpoint: didRecordFlowCapture(.unresolvedCloseMissingLocalEndpoint)
+                case .missingRemoteEndpoint: didRecordFlowCapture(.unresolvedCloseMissingRemoteEndpoint)
+                case .success, .unsupportedProtocol: break
+                }
+            }
+        }
+        if kind == .flowClosed {
+            let counted = report.bytesInboundCount > 0 || report.bytesOutboundCount > 0
+            didRecordFlowCapture(counted ? .closedWithBytes : .closedWithoutBytes)
+            if !counted, let observation, observation.bytesIn == nil, observation.bytesOut == nil {
+                didRecordFlowCapture(.zeroCloseRecordedAsUnmeasured)
+            }
         }
         if let observation {
             emit(observation)
