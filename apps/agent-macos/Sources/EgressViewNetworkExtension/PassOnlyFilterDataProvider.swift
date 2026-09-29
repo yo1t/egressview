@@ -1,6 +1,5 @@
 import EgressViewAgentCore
 import NetworkExtension
-import OSLog
 
 public struct PassOnlyFlowPolicy: Sendable {
     /// Whether the user has asked for destination names to be read from the
@@ -69,13 +68,6 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     /// the flow is allowed through.
     private var quicAssemblers = QUICInitialAssemblerStore()
     private let lock = NSLock()
-    /// The largest counts a periodic report has given for each open flow, to
-    /// tell whether a closed report that says zero had seen bytes before.
-    private var statisticsSeen: [UUID: (inbound: UInt64, outbound: UInt64)] = [:]
-    /// Reports written to the log, by flow id and counts only, to see how the
-    /// system's counters behave. Bounded so the log is not flooded.
-    private var reportSamplesLeft = 400
-    private let reportLog = Logger(subsystem: "com.egressview.agent.filter", category: "report-bytes")
 
     public override init() {
         fixedPolicy = nil
@@ -121,7 +113,6 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         switch decision {
         case .allowAndReportMetadata:
             let verdict = NEFilterNewFlowVerdict.allow()
-            verdict.statisticsReportFrequency = .low
             // Asking for reports is what makes the closing byte counts arrive.
             // The verdict stays `.allow()`, so the flow's data never enters this
             // process: the system counts the bytes, we only receive the totals.
@@ -138,7 +129,6 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
                 peekOutboundBytes: TLSClientHello.maximumInterestingBytes
             )
             verdict.shouldReport = true
-            verdict.statisticsReportFrequency = .low
             return verdict
         }
     }
@@ -249,7 +239,6 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         guard let socketFlow = report.flow as? NEFilterSocketFlow else { return }
         let kind = FlowReportKind(report.event)
         if kind == .flowClosed { didRecordFlowCapture(.closedReport) }
-        noteReportBytes(report, flowID: socketFlow.identifier, kind: kind)
         let described = adapter.metadataResult(from: socketFlow)
         var metadata: SocketFlowMetadata?
         if case let .success(value) = described { metadata = value }
@@ -276,50 +265,15 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
                 }
             }
         }
+        if kind == .flowClosed {
+            let counted = report.bytesInboundCount > 0 || report.bytesOutboundCount > 0
+            didRecordFlowCapture(counted ? .closedWithBytes : .closedWithoutBytes)
+            if !counted, let observation, observation.bytesIn == nil, observation.bytesOut == nil {
+                didRecordFlowCapture(.zeroCloseRecordedAsUnmeasured)
+            }
+        }
         if let observation {
             emit(observation)
-        }
-    }
-
-    /// Counts what each report carried, and logs a bounded sample.
-    private func noteReportBytes(_ report: NEFilterReport, flowID: UUID, kind: FlowReportKind) {
-        let inbound = UInt64(max(0, report.bytesInboundCount))
-        let outbound = UInt64(max(0, report.bytesOutboundCount))
-        let hasBytes = inbound > 0 || outbound > 0
-        var sample = false
-        var seenBefore: (inbound: UInt64, outbound: UInt64)?
-        lock.withLock {
-            switch kind {
-            case .statistics:
-                let previous = statisticsSeen[flowID] ?? (0, 0)
-                if statisticsSeen[flowID] == nil, statisticsSeen.count >= 8_192 {
-                    statisticsSeen.removeAll(keepingCapacity: true)
-                }
-                statisticsSeen[flowID] = (max(previous.inbound, inbound), max(previous.outbound, outbound))
-            case .flowClosed:
-                seenBefore = statisticsSeen.removeValue(forKey: flowID)
-            case .other:
-                break
-            }
-            if reportSamplesLeft > 0 {
-                reportSamplesLeft -= 1
-                sample = true
-            }
-        }
-        switch kind {
-        case .statistics:
-            didRecordFlowCapture(hasBytes ? .statisticsWithBytes : .statisticsWithoutBytes)
-        case .flowClosed:
-            didRecordFlowCapture(hasBytes ? .closedWithBytes : .closedWithoutBytes)
-            if !hasBytes, let seenBefore, seenBefore.inbound > 0 || seenBefore.outbound > 0 {
-                didRecordFlowCapture(.zeroCloseAfterCountingStatistics)
-            }
-        case .other:
-            break
-        }
-        if sample {
-            let seen = seenBefore.map { "\($0.inbound)/\($0.outbound)" } ?? "-"
-            reportLog.log("report event=\(report.event.rawValue, privacy: .public) flow=\(flowID.uuidString, privacy: .public) in=\(inbound, privacy: .public) out=\(outbound, privacy: .public) statsBefore=\(seen, privacy: .public)")
         }
     }
 

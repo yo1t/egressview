@@ -187,13 +187,22 @@ public struct OpenFlowRegistry: Sendable {
             resolved = resolved.withLocalEndpoint(of: metadata)
         }
 
+        // Zero both ways from a flow this extension watched send data is not
+        // a measurement. On 2026-09-29 the same 500 KB download was reported
+        // as 506 KB through curl and as 0/0 through nscurl, which uses
+        // NSURLSession; about a quarter of named TCP flows closed that way,
+        // and no periodic report had counted anything for them either. Such a
+        // flow is recorded as unmeasured, so it reads "not measured" rather
+        // than "sent nothing" -- the difference that matters to someone asking
+        // how much left the Mac.
+        let sentButCountedNothing = bytesIn == 0 && bytesOut == 0 && entry?.hasReportedOpening == true
         return observation(
             flowID: flowID,
             metadata: resolved,
             firstObservedAt: entry?.startedAt ?? reportedAt,
             lastObservedAt: entry.map { Self.endedAt(reportedAt, entry: $0, uptime: uptime) } ?? reportedAt,
-            bytesIn: bytesIn,
-            bytesOut: bytesOut
+            bytesIn: sentButCountedNothing ? nil : bytesIn,
+            bytesOut: sentButCountedNothing ? nil : bytesOut
         )
     }
 

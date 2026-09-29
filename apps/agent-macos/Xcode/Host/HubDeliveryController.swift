@@ -1464,13 +1464,10 @@ private struct AgentSettingsView: View {
                            extensionCounts.unresolvedClosesInbound,
                            extensionCounts.unresolvedClosesMissingLocalEndpoint,
                            extensionCounts.unresolvedClosesMissingRemoteEndpoint))
-                    Text(L("Closed reports: with bytes %lld · zero bytes %lld · zero after periodic counts %lld",
+                    Text(L("Closed reports: with bytes %lld · zero bytes %lld · zero after sending, recorded as not measured %lld",
                            extensionCounts.closedReportsWithBytes,
                            extensionCounts.closedReportsWithoutBytes,
-                           extensionCounts.zeroClosesAfterCountingStatistics))
-                    Text(L("Periodic reports: with bytes %lld · zero bytes %lld",
-                           extensionCounts.statisticsReportsWithBytes,
-                           extensionCounts.statisticsReportsWithoutBytes))
+                           extensionCounts.zeroClosesRecordedAsUnmeasured))
                     Text(L("Host since %@: received %lld · saved %lld · failed batches %lld · zero-byte closes %lld",
                            hostCounts.startedAt.formatted(), hostCounts.receivedObservations,
                            hostCounts.persistedObservations, hostCounts.failedBatches,

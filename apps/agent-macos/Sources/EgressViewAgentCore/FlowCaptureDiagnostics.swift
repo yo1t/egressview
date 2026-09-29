@@ -20,15 +20,11 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
     public private(set) var unresolvedClosesInbound: UInt64 = 0
     public private(set) var unresolvedClosesMissingLocalEndpoint: UInt64 = 0
     public private(set) var unresolvedClosesMissingRemoteEndpoint: UInt64 = 0
-    /// What the system's reports carried. A closed report with no bytes in
-    /// either direction is recorded as a zero-byte connection; these say how
-    /// often that happens, and whether a periodic report for the same flow had
-    /// counted bytes the closing one did not.
+    /// What the system's closing reports carried, and how many that said zero
+    /// came from a flow seen sending data, and so were recorded as unmeasured.
     public private(set) var closedReportsWithBytes: UInt64 = 0
     public private(set) var closedReportsWithoutBytes: UInt64 = 0
-    public private(set) var statisticsReportsWithBytes: UInt64 = 0
-    public private(set) var statisticsReportsWithoutBytes: UInt64 = 0
-    public private(set) var zeroClosesAfterCountingStatistics: UInt64 = 0
+    public private(set) var zeroClosesRecordedAsUnmeasured: UInt64 = 0
     public private(set) var emittedObservations: UInt64 = 0
     public private(set) var enqueuedObservations: UInt64 = 0
     public private(set) var droppedObservations: UInt64 = 0
@@ -44,8 +40,7 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
         case missingLocalEndpoint, missingRemoteEndpoint, registeredFlow
         case outboundCallback, closedReport, unregisteredCloseRecovered, unregisteredCloseUnresolved
         case unresolvedCloseInbound, unresolvedCloseMissingLocalEndpoint, unresolvedCloseMissingRemoteEndpoint
-        case closedWithBytes, closedWithoutBytes, statisticsWithBytes, statisticsWithoutBytes
-        case zeroCloseAfterCountingStatistics
+        case closedWithBytes, closedWithoutBytes, zeroCloseRecordedAsUnmeasured
         case emittedObservation, enqueuedObservation
         case droppedObservation, encodingFailure
     }
@@ -70,10 +65,8 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
             unresolvedClosesMissingRemoteEndpoint = Self.increment(unresolvedClosesMissingRemoteEndpoint)
         case .closedWithBytes: closedReportsWithBytes = Self.increment(closedReportsWithBytes)
         case .closedWithoutBytes: closedReportsWithoutBytes = Self.increment(closedReportsWithoutBytes)
-        case .statisticsWithBytes: statisticsReportsWithBytes = Self.increment(statisticsReportsWithBytes)
-        case .statisticsWithoutBytes: statisticsReportsWithoutBytes = Self.increment(statisticsReportsWithoutBytes)
-        case .zeroCloseAfterCountingStatistics:
-            zeroClosesAfterCountingStatistics = Self.increment(zeroClosesAfterCountingStatistics)
+        case .zeroCloseRecordedAsUnmeasured:
+            zeroClosesRecordedAsUnmeasured = Self.increment(zeroClosesRecordedAsUnmeasured)
         case .emittedObservation: emittedObservations = Self.increment(emittedObservations)
         case .enqueuedObservation: enqueuedObservations = Self.increment(enqueuedObservations)
         case .droppedObservation: droppedObservations = Self.increment(droppedObservations)
