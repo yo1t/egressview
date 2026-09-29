@@ -265,6 +265,13 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
                 }
             }
         }
+        if kind == .flowClosed {
+            let counted = report.bytesInboundCount > 0 || report.bytesOutboundCount > 0
+            didRecordFlowCapture(counted ? .closedWithBytes : .closedWithoutBytes)
+            if !counted, let observation, observation.bytesIn == nil, observation.bytesOut == nil {
+                didRecordFlowCapture(.zeroCloseRecordedAsUnmeasured)
+            }
+        }
         if let observation {
             emit(observation)
         }

@@ -850,3 +850,4 @@
 "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point." = "フィードに載っていることは、害がある証拠ではありません。誰かがある時点で、この宛先を上の理由に関係するものとして公開した、という意味です。";
 "Open the Threats tab" = "「脅威」タブを開く";
 "Unresolved closes by reason: inbound %lld · source not known %lld · destination not known %lld" = "記録不能の内訳：着信 %lld・送信元未確定 %lld・宛先未確定 %lld";
+"Closed reports: with bytes %lld · zero bytes %lld · zero after sending, recorded as not measured %lld" = "終了報告の通信量：あり %lld・0 %lld・送信を見たのに0のため未計測として記録 %lld";
