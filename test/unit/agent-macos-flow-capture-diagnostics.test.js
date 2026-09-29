@@ -44,7 +44,17 @@ describe('macOS short-flow capture diagnostics', () => {
     const collector = read(...mac, 'Xcode', 'Host', 'FullMonitoringCollector.swift');
     assert.match(collector, /drainRequestGeneration\s*&\+=\s*1\s*\n\s*let generation = drainRequestGeneration/);
     assert.match(collector, /guard let self, self\.isDraining,\s*generation == self\.drainRequestGeneration else \{ return \}/);
-    assert.match(collector, /guard let self, generation == self\.drainRequestGeneration else \{ return \}\s*self\.isDraining = false\s*self\.consume\(data\)/);
+    assert.match(collector, /guard let self, generation == self\.drainRequestGeneration else \{ return \}\s*self\.isDraining = false\s*self\.consume\(batchID: batchID, data: data\)/);
     assert.match(collector, /private func resetConnection\(\) \{\s*drainRequestGeneration\s*&\+=\s*1/);
+  });
+
+  // P3-181: a reply that never arrived used to take its observations with it.
+  it('acknowledges each stored batch so the extension can hand a lost one over again', () => {
+    const collector = read(...mac, 'Xcode', 'Host', 'FullMonitoringCollector.swift');
+    const server = read(...mac, 'Xcode', 'SystemExtension', 'FullMonitoringXPCServer.swift');
+    assert.match(collector, /drainObservations\?\(acknowledging: handoff\.acknowledgement\)/);
+    assert.match(collector, /if consume\(data\) \{\s*handoff\.stored\(batchID\)/);
+    assert.match(server, /handoff\.take\(acknowledging: acknowledgement\)/);
+    assert.doesNotMatch(server, /observations\.removeAll/, 'the extension no longer empties its queue before the app has the batch');
   });
 });
