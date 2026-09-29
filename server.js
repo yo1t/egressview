@@ -725,16 +725,41 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
   setInterval(() => apiIdentities.pruneExpired(), 24 * 60 * 60 * 1000).unref();
   agentIdentities.pruneEnrollmentTokens();
   setInterval(() => agentIdentities.pruneEnrollmentTokens(), 24 * 60 * 60 * 1000).unref();
-  agentIngest.pruneObservations({ before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS });
   try {
     const startupCorrelation = agentIngest.reconcileCorrelations();
     logger.info(`[agent-correlation] startup ${JSON.stringify(startupCorrelation)}`);
   } catch (error) {
     logger.error('[agent-correlation] startup reconcile failed:', error.message);
   }
-  setInterval(() => {
-    agentIngest.pruneObservations({ before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS });
-  }, 24 * 60 * 60 * 1000).unref();
+  // Expired agent observations go a little at a time, off the startup path,
+  // and far more often than once a day: see pruneObservations for what a
+  // whole day in one transaction did to the Hub every night.
+  const AGENT_PRUNE_IDLE_MS = 30 * 60 * 1000;
+  const AGENT_PRUNE_CATCHUP_MS = 5 * 1000;
+  // One log line per run of passes, when it has caught up, not one every
+  // five seconds while it works through a backlog.
+  const agentPruneRun = { observations: 0, correlations: 0, hourly: 0, batches: 0, passes: 0 };
+  const agentPrunePass = () => {
+    let pruned = { more: false };
+    try {
+      pruned = runtimeProfiler.measureSync('agentIngest.pruneObservations',
+        () => agentIngest.pruneObservations({ before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS }));
+      for (const key of ['observations', 'correlations', 'hourly', 'batches']) agentPruneRun[key] += pruned[key];
+      agentPruneRun.passes += 1;
+      if (!pruned.more) {
+        if (agentPruneRun.observations || agentPruneRun.hourly || agentPruneRun.batches) {
+          logger.info(`[agent-ingest] Pruned ${agentPruneRun.observations} expired observations, `
+            + `${agentPruneRun.correlations} correlation links, ${agentPruneRun.hourly} hourly rows, `
+            + `${agentPruneRun.batches} batch receipts in ${agentPruneRun.passes} passes`);
+        }
+        for (const key of Object.keys(agentPruneRun)) agentPruneRun[key] = 0;
+      }
+    } catch (error) {
+      logger.error('[agent-ingest] prune failed:', error.message);
+    }
+    setTimeout(agentPrunePass, pruned.more ? AGENT_PRUNE_CATCHUP_MS : AGENT_PRUNE_IDLE_MS).unref?.();
+  };
+  setTimeout(agentPrunePass, AGENT_PRUNE_CATCHUP_MS).unref?.();
   agentCorrelationRunner.init({ agentIngest, logger });
   agentCorrelationRunner.start();
   authAudit.prune();
