@@ -18,6 +18,8 @@ describe('macOS short-flow capture diagnostics', () => {
     assert.match(provider, /didRecordFlowCapture\(\.missingLocalEndpoint\)/);
     assert.match(provider, /didRecordFlowCapture\(\.registeredFlow\)/);
     assert.match(provider, /didRecordFlowCapture\(observation == nil \? \.unregisteredCloseUnresolved : \.unregisteredCloseRecovered\)/);
+    assert.match(provider, /case \.nonOutbound: didRecordFlowCapture\(\.unresolvedCloseInbound\)/);
+    assert.match(provider, /case \.missingLocalEndpoint: didRecordFlowCapture\(\.unresolvedCloseMissingLocalEndpoint\)/);
     assert.match(counters, /var unregisteredClosesRecovered: UInt64/);
     assert.match(counters, /var unregisteredClosesUnresolved: UInt64/);
     assert.doesNotMatch(counters, /\b(?:var|let)\s+(?:remoteAddress|remoteHostname|processName|bundleID|payload)\b/);

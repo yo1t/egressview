@@ -1460,6 +1460,10 @@ private struct AgentSettingsView: View {
                     Text(L("Unregistered closes: recovered %lld · unresolved %lld",
                            extensionCounts.unregisteredClosesRecovered,
                            extensionCounts.unregisteredClosesUnresolved))
+                    Text(L("Unresolved closes by reason: inbound %lld · source not known %lld · destination not known %lld",
+                           extensionCounts.unresolvedClosesInbound,
+                           extensionCounts.unresolvedClosesMissingLocalEndpoint,
+                           extensionCounts.unresolvedClosesMissingRemoteEndpoint))
                     Text(L("Host since %@: received %lld · saved %lld · failed batches %lld · zero-byte closes %lld",
                            hostCounts.startedAt.formatted(), hostCounts.receivedObservations,
                            hostCounts.persistedObservations, hostCounts.failedBatches,
