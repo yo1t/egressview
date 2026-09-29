@@ -1,0 +1,19 @@
+{%- comment -%}
+  Tells search engines which pages are the same document in the other
+  language. Without it, docs/architecture.html and docs/architecture.ja.html
+  are two unrelated pages to a crawler, and it has to guess which one to show
+  a reader -- or show neither. Emitted only when both languages exist, so a
+  page written in one language never points at a page that is not there.
+{%- endcomment -%}
+{%- if page.path contains "docs/" and page.path contains ".md" -%}
+  {%- assign base = page.path | replace: ".ja.md", "" | replace: ".md", "" -%}
+  {%- assign en_path = base | append: ".md" -%}
+  {%- assign ja_path = base | append: ".ja.md" -%}
+  {%- assign en = site.pages | where: "path", en_path | first -%}
+  {%- assign ja = site.pages | where: "path", ja_path | first -%}
+  {%- if en and ja %}
+<link rel="alternate" hreflang="en" href="{{ en.url | absolute_url }}">
+<link rel="alternate" hreflang="ja" href="{{ ja.url | absolute_url }}">
+<link rel="alternate" hreflang="x-default" href="{{ en.url | absolute_url }}">
+  {%- endif -%}
+{%- endif -%}
