@@ -10,7 +10,7 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
     private let logger = Logger(subsystem: "com.egressview.agent.filter", category: "xpc")
     private let lock = NSLock()
     private let maximumBufferedObservations = 10_000
-    private var observations: [ConnectionObservation] = []
+    private lazy var handoff = ObservationHandoff(capacity: maximumBufferedObservations)
     private var quicDiagnostics = QUICFeasibilityDiagnostics()
     private var flowDiagnostics = FlowCaptureDiagnostics()
     private var readsServerName = false
@@ -23,28 +23,49 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
 
     func enqueue(_ observation: ConnectionObservation) {
         lock.withLock {
-            if observations.count == maximumBufferedObservations {
-                observations.removeFirst()
+            if handoff.enqueue(observation) {
                 flowDiagnostics.record(.droppedObservation)
             }
-            observations.append(observation)
             flowDiagnostics.record(.enqueuedObservation)
         }
     }
 
+    /// Without acknowledgement: whatever is waiting, handed over once. Kept
+    /// for a caller that does not acknowledge; a batch in flight under the
+    /// acknowledged method is left for that method to resend.
     func drainObservations(withReply reply: @escaping (Data) -> Void) {
-        let pending: [ConnectionObservation] = lock.withLock {
-            defer { observations.removeAll(keepingCapacity: true) }
-            return observations
+        let pending = lock.withLock { handoff.takePendingWithoutAcknowledgement() }
+        reply(encode(pending) ?? Data())
+    }
+
+    func drainObservations(
+        acknowledging acknowledgement: Int64,
+        withReply reply: @escaping (Int64, Data) -> Void
+    ) {
+        let (batch, isResend) = lock.withLock { handoff.take(acknowledging: acknowledgement) }
+        guard let batch else {
+            reply(0, Data())
+            return
         }
+        if isResend {
+            // Rare: the app did not confirm the last batch. Worth one line, so
+            // a run of them can be seen.
+            logger.log("handing over batch \(batch.id, privacy: .public) again: \(batch.observations.count, privacy: .public) observations")
+        } else {
+            lock.withLock { flowDiagnostics.recordDrained(batch.observations.count) }
+        }
+        // An observation that cannot be encoded cannot be handed over at all;
+        // the empty reply is acknowledged like any other and counted as a failure.
+        reply(batch.id, encode(batch.observations) ?? Data())
+    }
+
+    private func encode(_ observations: [ConnectionObservation]) -> Data? {
         do {
-            let data = try FullMonitoringXPC.encoder().encode(pending)
-            lock.withLock { flowDiagnostics.recordDrained(pending.count) }
-            reply(data)
+            return try FullMonitoringXPC.encoder().encode(observations)
         } catch {
             lock.withLock { flowDiagnostics.record(.encodingFailure) }
             logger.error("Could not encode observations: \(error.localizedDescription, privacy: .public)")
-            reply(Data())
+            return nil
         }
     }
 

@@ -82,6 +82,22 @@ jobs:
             exit 1
           fi
 
+      - name: Check each document names its other-language version
+        # Without these, a crawler has no way to know architecture.html and
+        # architecture.ja.html are one document, and has to guess which to
+        # show.
+        run: |
+          set -euo pipefail
+          for page in docs/architecture.html docs/architecture.ja.html; do
+            for lang in en ja x-default; do
+              grep -q "hreflang=\"$lang\"" "_site/$page" || {
+                echo "$page has no hreflang=$lang link" >&2; exit 1; }
+            done
+          done
+          grep -q 'hreflang="ja" href="https://www.egressview.com/docs/architecture.ja.html"' \
+            _site/docs/architecture.html || {
+            echo 'hreflang does not point at the Japanese page on www' >&2; exit 1; }
+
       - name: Check the sitemap lists this site, and only this site
         # It was hand-written and listed two URLs while the site served over
         # forty, so every documentation page was invisible to search engines --
