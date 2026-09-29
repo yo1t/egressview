@@ -110,8 +110,8 @@
     "api:check-responses": "node scripts/check-response-contracts.js"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock": "^3.1131.0",
-    "@aws-sdk/client-bedrock-runtime": "^3.1131.0",
+    "@aws-sdk/client-bedrock": "^3.1136.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1136.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "axios": "^1.20.0",
@@ -128,7 +128,7 @@
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/client": "^2.0.0",
     "@playwright/test": "^1.63.0",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "globals": "^17.12.0",
     "socket.io-client": "^4.8.3"
   },
