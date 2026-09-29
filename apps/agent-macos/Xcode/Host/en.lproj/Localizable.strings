@@ -848,3 +848,5 @@
 "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point." = "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point.";
 "Open the Threats tab" = "Open the Threats tab";
 "Unresolved closes by reason: inbound %lld · source not known %lld · destination not known %lld" = "Unresolved closes by reason: inbound %lld · source not known %lld · destination not known %lld";
+"Closed reports: with bytes %lld · zero bytes %lld · zero after periodic counts %lld" = "Closed reports: with bytes %lld · zero bytes %lld · zero after periodic counts %lld";
+"Periodic reports: with bytes %lld · zero bytes %lld" = "Periodic reports: with bytes %lld · zero bytes %lld";
