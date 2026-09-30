@@ -18,6 +18,9 @@ const { MIGRATED_IDS, expandSourceToRouterIds, routerKindForId } = require('./ro
 const { checkObservationConsistency: checkConsistency } = require('./observation-consistency');
 const { createHistoryCache, DEFAULT_HOT_MAX_ENTRIES } = require('./history-cache');
 const { createHistoryQueries } = require('./history-queries');
+const {
+  connectionReadColumns, normalizeObservedBy, createRowHydration,
+} = require('./connection-rows');
 const { createAgentAttribution } = require('./agent-attribution');
 const { createAiConversationStore } = require('./ai-conversation-store');
 const { createAiUsageStore } = require('./ai-usage-store');
@@ -65,47 +68,13 @@ const connectionHistory = hotCache.map;
 // no router identity.
 const AGENT_SOURCE = 'agent';
 
-const CONNECTION_READ_COLUMNS = [
-  'src', 'dst', 'dport', 'proto', 'sport', 'ttl', 'srcMac', 'srcVendor',
-  'srcDnsName', 'srcMdnsName', 'dstHost', 'country', 'org', 'lat', 'lon',
-  'city', 'firstSeen', 'lastSeen', 'agentHost', 'process', 'pid',
-];
-
-function connectionReadColumns(alias = 'c') {
-  const columns = CONNECTION_READ_COLUMNS.map(column => `${alias}.${column}`).join(', ');
-  return `${columns}, (
-    SELECT GROUP_CONCAT(o.routerId)
-    FROM connection_observations o
-    WHERE o.src = ${alias}.src AND o.dst = ${alias}.dst
-      AND o.dport = ${alias}.dport AND o.proto = ${alias}.proto
-  ) AS observedByCsv`;
-}
-
-function normalizeObservedBy(value) {
-  const values = Array.isArray(value) ? value : String(value || '').split(',');
-  return [...new Set(values.map(id => String(id).trim()).filter(Boolean))].sort();
-}
-
-function compatibilitySource(observedBy) {
-  const kinds = new Set(normalizeObservedBy(observedBy).map(id =>
-    routerKinds.get(id) || routerKindForId(id, sourceRouterMap)
-  ));
-  if (kinds.has('yamaha') && kinds.has('cisco')) return 'yamaha+cisco';
-  if (kinds.has('cisco')) return 'cisco';
-  if (kinds.has('yamaha')) return 'yamaha';
-  return 'unknown';
-}
-
-function hydrateConnectionRow(row) {
-  const observedBy = normalizeObservedBy(row.observedByCsv ?? row.observedBy);
-  const hydrated = { ...row, observedBy, source: compatibilitySource(observedBy) };
-  delete hydrated.observedByCsv;
-  return hydrated;
-}
-
-function hydrateConnectionRows(rows) {
-  return rows.map(hydrateConnectionRow);
-}
+const {
+  compatibilitySource,
+  hydrateConnectionRow,
+  hydrateConnectionRows,
+} = createRowHydration({
+  routerKind: id => routerKinds.get(id) || routerKindForId(id, sourceRouterMap),
+});
 
 const {
   queryByTimeRange,

@@ -34,16 +34,22 @@ class DbWorkerHost {
     this.requestTimeoutMs = requestTimeoutMs;
     this.closeTimeoutMs = closeTimeoutMs;
     this.dbPath = null;
+    this.options = {};
     this.worker = null;
     this.pending = new Map();
     this.nextId = 1;
     this.closed = true;
   }
 
-  /** Starts the thread against `dbPath`. Requests are refused until then. */
-  open(dbPath) {
+  /**
+   * Starts the thread against `dbPath`. Requests are refused until then.
+   * `options` go to the thread as they are (its role, and what that role
+   * needs), and are kept for resume().
+   */
+  open(dbPath, options = this.options) {
     if (!dbPath) throw new TypeError('dbPath is required');
     this.dbPath = dbPath;
+    this.options = options;
     this.closed = false;
     this._spawn();
   }
@@ -118,7 +124,7 @@ class DbWorkerHost {
   }
 
   _spawn() {
-    const worker = this.workerFactory({ dbPath: this.dbPath });
+    const worker = this.workerFactory({ ...this.options, dbPath: this.dbPath });
     this.worker = worker;
     worker.unref?.();
     worker.on('message', message => this._settle(message));

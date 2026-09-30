@@ -179,7 +179,7 @@ describe('connections route: GET /connections pagination', () => {
 
   const connectionsRoutes = require('../../src/routes/connections');
 
-  function callRoute(rows, query, threatMap = null) {
+  async function callRoute(rows, query, threatMap = null) {
     const router = connectionsRoutes({
       requireAdmin: (_req, _res, next) => next(),
       history: makeHistory(rows),
@@ -190,62 +190,62 @@ describe('connections route: GET /connections pagination', () => {
     const handler = layer.route.stack[layer.route.stack.length - 1].handle;
     const req = makeReq(query);
     const res = makeRes();
-    handler(req, res);
+    await handler(req, res);
     return res;
   }
 
-  it('returns connections array without pagination when limit is absent', () => {
+  it('returns connections array without pagination when limit is absent', async () => {
     const rows = [{ src: '192.168.1.1', dst: '10.0.0.1', dport: 443, proto: 'TCP' }];
-    const res = callRoute(rows, {});
+    const res = await callRoute(rows, {});
     assert.ok(Array.isArray(res._body.connections));
     assert.equal(res._body.total, undefined, 'total should not be present in non-paged response');
   });
 
-  it('returns paginated response with total, limit, offset when limit is provided', () => {
+  it('returns paginated response with total, limit, offset when limit is provided', async () => {
     const rows = Array.from({ length: 10 }, (_, i) => ({ src: '192.168.1.1', dst: `10.0.0.${i + 1}`, dport: 80, proto: 'TCP' }));
-    const res = callRoute(rows, { limit: '3', offset: '0' });
+    const res = await callRoute(rows, { limit: '3', offset: '0' });
     assert.equal(res._body.connections.length, 3);
     assert.equal(res._body.total, 10);
     assert.equal(res._body.limit, 3);
     assert.equal(res._body.offset, 0);
   });
 
-  it('applies offset correctly', () => {
+  it('applies offset correctly', async () => {
     const rows = Array.from({ length: 5 }, (_, i) => ({ src: '192.168.1.1', dst: `10.0.0.${i + 1}`, dport: 80, proto: 'TCP' }));
-    const res = callRoute(rows, { limit: '2', offset: '3' });
+    const res = await callRoute(rows, { limit: '2', offset: '3' });
     assert.equal(res._body.connections.length, 2);
     assert.equal(res._body.offset, 3);
   });
 
-  it('clamps limit to MAX_LIMIT', () => {
+  it('clamps limit to MAX_LIMIT', async () => {
     const rows = Array.from({ length: 3 }, (_, i) => ({ src: '192.168.1.1', dst: `10.0.0.${i + 1}`, dport: 80, proto: 'TCP' }));
-    const res = callRoute(rows, { limit: String(MAX_LIMIT + 9999), offset: '0' });
+    const res = await callRoute(rows, { limit: String(MAX_LIMIT + 9999), offset: '0' });
     assert.equal(res._body.limit, MAX_LIMIT);
   });
 
-  it('returns 400 for non-numeric limit', () => {
-    const res = callRoute([], { limit: 'abc' });
+  it('returns 400 for non-numeric limit', async () => {
+    const res = await callRoute([], { limit: 'abc' });
     assert.equal(res._status, 400);
     assert.ok(res._body?.error);
   });
 
-  it('returns 400 for negative limit', () => {
-    const res = callRoute([], { limit: '-1' });
+  it('returns 400 for negative limit', async () => {
+    const res = await callRoute([], { limit: '-1' });
     assert.equal(res._status, 400);
   });
 
-  it('returns 400 for negative offset', () => {
-    const res = callRoute([], { limit: '10', offset: '-5' });
+  it('returns 400 for negative offset', async () => {
+    const res = await callRoute([], { limit: '10', offset: '-5' });
     assert.equal(res._status, 400);
   });
 
-  it('defaults offset to 0 when not provided', () => {
+  it('defaults offset to 0 when not provided', async () => {
     const rows = Array.from({ length: 5 }, (_, i) => ({ src: '192.168.1.1', dst: `10.0.0.${i + 1}`, dport: 80, proto: 'TCP' }));
-    const res = callRoute(rows, { limit: '10' });
+    const res = await callRoute(rows, { limit: '10' });
     assert.equal(res._body.offset, 0);
   });
 
-  it('applies fThreat before pagination and returns the filtered total', () => {
+  it('applies fThreat before pagination and returns the filtered total', async () => {
     const rows = [
       { src: '192.168.1.1', dst: 'safe-1.example', dport: 443, proto: 'TCP' },
       { src: '192.168.1.1', dst: 'warn-1.example', dport: 443, proto: 'TCP' },
@@ -258,7 +258,7 @@ describe('connections route: GET /connections pagination', () => {
       'danger-1.example': { confidence: 'high', tag: 'danger' },
     };
 
-    const res = callRoute(rows, { limit: '1', offset: '1', fThreat: 'warn' }, threatMap);
+    const res = await callRoute(rows, { limit: '1', offset: '1', fThreat: 'warn' }, threatMap);
 
     assert.equal(res._body.total, 2);
     assert.equal(res._body.limit, 1);
@@ -268,15 +268,15 @@ describe('connections route: GET /connections pagination', () => {
     assert.equal(res._body.connections[0].threat.confidence, 'low');
   });
 
-  it('rejects unknown, array, and oversized query values before querying history', () => {
-    assert.equal(callRoute([], { unexpected: '1' })._status, 400);
-    assert.equal(callRoute([], { from: ['1', '2'] })._status, 400);
-    assert.equal(callRoute([], { fOrg: 'x'.repeat(513) })._status, 400);
+  it('rejects unknown, array, and oversized query values before querying history', async () => {
+    assert.equal((await callRoute([], { unexpected: '1' }))._status, 400);
+    assert.equal((await callRoute([], { from: ['1', '2'] }))._status, 400);
+    assert.equal((await callRoute([], { fOrg: 'x'.repeat(513) }))._status, 400);
   });
 
-  it('preserves the existing fallback for bounded unknown sort values', () => {
+  it('preserves the existing fallback for bounded unknown sort values', async () => {
     const rows = [{ src: '192.168.1.1', dst: '10.0.0.1', dport: 443, proto: 'TCP' }];
-    const res = callRoute(rows, { limit: '10', sort: 'unknown', sortDir: 'sideways' });
+    const res = await callRoute(rows, { limit: '10', sort: 'unknown', sortDir: 'sideways' });
     assert.equal(res._status, 200);
     assert.equal(res._body.connections.length, 1);
   });
@@ -343,7 +343,7 @@ describe('connections route: GET /connections/summary', () => {
     };
   }
 
-  function callSummaryRoute(query = {}, overrides = {}) {
+  async function callSummaryRoute(query = {}, overrides = {}) {
     lastSummaryArgs = null;
     const connectionsRoutes = require('../../src/routes/connections');
     const router = connectionsRoutes({
@@ -356,83 +356,83 @@ describe('connections route: GET /connections/summary', () => {
     const res = { _status: 200, _body: null };
     res.status = (code) => { res._status = code; return res; };
     res.json   = (body) => { res._body  = body; return res; };
-    handler({ query }, res);
+    await handler({ query }, res);
     return res;
   }
 
-  it('returns byDst and byDevice arrays', () => {
-    const res = callSummaryRoute({});
+  it('returns byDst and byDevice arrays', async () => {
+    const res = await callSummaryRoute({});
     assert.ok(Array.isArray(res._body.byDst),    'byDst should be an array');
     assert.ok(Array.isArray(res._body.byDevice), 'byDevice should be an array');
   });
 
-  it('includes serverTime', () => {
+  it('includes serverTime', async () => {
     const before = Date.now();
-    const res = callSummaryRoute({});
+    const res = await callSummaryRoute({});
     assert.ok(typeof res._body.serverTime === 'number' && res._body.serverTime >= before);
   });
 
-  it('returns 400 for invalid from timestamp', () => {
-    const res = callSummaryRoute({ from: 'bad' });
+  it('returns 400 for invalid from timestamp', async () => {
+    const res = await callSummaryRoute({ from: 'bad' });
     assert.equal(res._status, 400);
   });
 
-  it('passes src and buckets options to summary aggregation', () => {
-    const res = callSummaryRoute({ src: '192.168.1.10', buckets: '120' });
+  it('passes src and buckets options to summary aggregation', async () => {
+    const res = await callSummaryRoute({ src: '192.168.1.10', buckets: '120' });
     assert.equal(res._status, 200);
     assert.deepEqual(lastSummaryArgs[2], {
       src: '192.168.1.10', buckets: 120, timelineSource: 'observed',
     });
   });
 
-  it('設定で選ばれた記録から時間推移を描く', () => {
+  it('設定で選ばれた記録から時間推移を描く', async () => {
     // The two settings answer the same question from different records, so the
     // choice has to reach the query -- and the cache must not hand one of them
     // the other's answer.
     // Distinct src values so neither call can be answered from a cache entry
     // an earlier test left behind.
-    const asked = callSummaryRoute({ src: '10.10.0.1' }, { appState: { timelineSource: 'lastSeen' } });
+    const asked = await callSummaryRoute({ src: '10.10.0.1' }, { appState: { timelineSource: 'lastSeen' } });
     assert.equal(asked._status, 200);
     assert.equal(lastSummaryArgs[2].timelineSource, 'lastSeen');
 
-    const fresh = callSummaryRoute({ src: '10.10.0.2' }, { appState: { timelineSource: 'observed' } });
+    const fresh = await callSummaryRoute({ src: '10.10.0.2' }, { appState: { timelineSource: 'observed' } });
     assert.equal(fresh._status, 200);
     assert.equal(lastSummaryArgs[2].timelineSource, 'observed');
 
     // Same request, only the setting differs: the cache must not hand one the
     // other's answer.
-    callSummaryRoute({ src: '10.10.0.3' }, { appState: { timelineSource: 'observed' } });
+    await callSummaryRoute({ src: '10.10.0.3' }, { appState: { timelineSource: 'observed' } });
     lastSummaryArgs = null;
-    callSummaryRoute({ src: '10.10.0.3' }, { appState: { timelineSource: 'lastSeen' } });
+    await callSummaryRoute({ src: '10.10.0.3' }, { appState: { timelineSource: 'lastSeen' } });
     assert.equal(lastSummaryArgs?.[2]?.timelineSource, 'lastSeen',
       '別の設定の答えをキャッシュから返してはいけない');
   });
 
-  it('returns 400 for invalid buckets', () => {
-    const res = callSummaryRoute({ buckets: 'bad' });
+  it('returns 400 for invalid buckets', async () => {
+    const res = await callSummaryRoute({ buckets: 'bad' });
     assert.equal(res._status, 400);
   });
 
-  it('passes a known source scope and rejects unavailable source IDs', () => {
+  it('passes a known source scope and rejects unavailable source IDs', async () => {
     const routerManager = { list: () => [{ id: 'router-1', enabled: true }] };
-    const accepted = callSummaryRoute(
+    const accepted = await callSummaryRoute(
       { sourceKind: 'router', sourceId: 'router-1' },
       { routerManager }
     );
     assert.equal(accepted._status, 200);
     assert.deepEqual(lastSummaryArgs[2].sourceScope, { sourceKind: 'router', sourceId: 'router-1' });
 
-    const rejected = callSummaryRoute(
+    const rejected = await callSummaryRoute(
       { sourceKind: 'router', sourceId: "x' OR 1=1 --" },
       { routerManager }
     );
     assert.equal(rejected._status, 400);
   });
 
-  it('rejects unknown and structured summary query values', () => {
-    assert.equal(callSummaryRoute({ extra: '1' })._status, 400);
-    assert.equal(callSummaryRoute({ buckets: ['60'] })._status, 400);
-    assert.equal(callSummaryRoute({ src: 'x'.repeat(65) })._status, 400);
+  it('rejects unknown and structured summary query values', async () => {
+    assert.equal((await callSummaryRoute({ extra: '1' }))._status, 400);
+    assert.equal((await callSummaryRoute({ buckets: ['60'] }))._status, 400);
+    assert.equal((await callSummaryRoute({ src: 'x'.repeat(65) }))._status, 400);
   });
 });
 
@@ -647,7 +647,7 @@ describe('connections route: GET /connections/threat-counts', () => {
 
   const connectionsRoutes = require('../../src/routes/connections');
 
-  function callThreatCountsRoute(groups, threatMap, query = {}) {
+  async function callThreatCountsRoute(groups, threatMap, query = {}) {
     const history = {
       queryByTimeRangePaged: () => [],
       countByTimeRange:      () => 0,
@@ -665,11 +665,11 @@ describe('connections route: GET /connections/threat-counts', () => {
     const res = { _status: 200, _body: null };
     res.status = (code) => { res._status = code; return res; };
     res.json   = (body) => { res._body  = body; return res; };
-    handler({ query }, res);
+    await handler({ query }, res);
     return res;
   }
 
-  it('counts safe, warn and danger sessions correctly', () => {
+  it('counts safe, warn and danger sessions correctly', async () => {
     const groups = [
       { dst: '1.1.1.1', dstHost: null, cnt: 10 },
       { dst: '2.2.2.2', dstHost: null, cnt: 5  },
@@ -679,22 +679,22 @@ describe('connections route: GET /connections/threat-counts', () => {
       '2.2.2.2': { confidence: 'low'  },
       '3.3.3.3': { confidence: 'high' },
     };
-    const res = callThreatCountsRoute(groups, threatMap, {});
+    const res = await callThreatCountsRoute(groups, threatMap, {});
     assert.equal(res._body.safe,   10);
     assert.equal(res._body.warn,    5);
     assert.equal(res._body.danger,  3);
   });
 
-  it('returns all safe when no threats match', () => {
+  it('returns all safe when no threats match', async () => {
     const groups = [{ dst: '8.8.8.8', dstHost: 'dns.google', cnt: 20 }];
-    const res = callThreatCountsRoute(groups, {}, {});
+    const res = await callThreatCountsRoute(groups, {}, {});
     assert.equal(res._body.safe,   20);
     assert.equal(res._body.warn,    0);
     assert.equal(res._body.danger,  0);
   });
 
-  it('returns zeros when no groups', () => {
-    const res = callThreatCountsRoute([], {}, {});
+  it('returns zeros when no groups', async () => {
+    const res = await callThreatCountsRoute([], {}, {});
     assert.equal(res._body.safe,   0);
     assert.equal(res._body.warn,   0);
     assert.equal(res._body.danger, 0);
@@ -706,7 +706,47 @@ describe('connections route: GET /connections/threat-counts', () => {
   // one tab reached 8-12s. The grouping is what costs that, so it is what has to
   // be shared. Verdicts stay outside the cache: feeds change between polls and
   // re-matching them is free.
-  it('does not repeat the scan behind a second request for the same window', () => {
+  // Once the read runs on its own thread, the second request for the same
+  // window arrives while the first is still being computed. It has to wait for
+  // that answer rather than send the same query to the thread a second time.
+  it('同じ窓の要求が集計中に届いたら、集計をもう一度走らせずに待ち合わせる', async () => {
+    let reads = 0;
+    const pending = [];
+    const finish = () => pending.splice(0).forEach(resolve => resolve([{ dst: '192.0.2.1', dstHost: null, cnt: 3 }]));
+    const historyReader = {
+      read: (fn) => {
+        assert.equal(fn, 'groupDstByTimeRange');
+        reads += 1;
+        return new Promise(resolve => { pending.push(resolve); });
+      },
+    };
+    const router = connectionsRoutes({
+      requireAdmin: (_req, _res, next) => next(),
+      history: {},
+      historyReader,
+      threatIntel: { matchThreatIntel: () => null },
+    });
+    const layer = router.stack.find(l => l.route?.path === '/connections/threat-counts' && l.route?.methods?.get);
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const makeRes = () => {
+      const res = { _status: 200, _body: null };
+      res.status = (code) => { res._status = code; return res; };
+      res.json = (body) => { res._body = body; return res; };
+      return res;
+    };
+    const first = makeRes();
+    const second = makeRes();
+    const both = Promise.all([handler({ query: { from: '1790000000000' } }, first),
+      handler({ query: { from: '1790000000001' } }, second)]);
+    await new Promise(resolve => setImmediate(resolve));
+    finish();
+    await both;
+    assert.equal(reads, 1);
+    assert.equal(first._body.safe, 3);
+    assert.equal(second._body.safe, 3);
+  });
+
+  it('does not repeat the scan behind a second request for the same window', async () => {
     let scans = 0;
     const history = {
       queryByTimeRangePaged: () => [],
@@ -725,11 +765,11 @@ describe('connections route: GET /connections/threat-counts', () => {
     });
     const layer = router.stack.find(l => l.route?.path === '/connections/threat-counts' && l.route?.methods?.get);
     const handler = layer.route.stack[layer.route.stack.length - 1].handle;
-    const call = () => {
+    const call = async () => {
       const res = { _status: 200, _body: null };
       res.status = (code) => { res._status = code; return res; };
       res.json = (body) => { res._body = body; return res; };
-      handler({ query: {} }, res);
+      await handler({ query: {} }, res);
       return res._body;
     };
 
@@ -740,7 +780,7 @@ describe('connections route: GET /connections/threat-counts', () => {
     // enough to redden CI now and then -- it did on Node 22 and 26 for #491,
     // and passed on rerun. Two responses differing in `serverTime` is the
     // correct behaviour; expecting them to match was the defect (P3-123).
-    const first = call();
+    const first = await call();
     assert.deepEqual(
       { safe: first.safe, warn: first.warn, danger: first.danger },
       { safe: 4, warn: 0, danger: 0 }
@@ -749,13 +789,13 @@ describe('connections route: GET /connections/threat-counts', () => {
 
     // The second request is the subject of this test: it must answer from the
     // first scan rather than running another one.
-    call();
+    await call();
     assert.equal(scans, 1, 'the second request reused the first scan');
 
     // A feed that changes within the TTL still changes the answer, because only
     // the grouping was cached.
     threats = { '8.8.8.8': { confidence: 'high' } };
-    const after = call();
+    const after = await call();
     assert.deepEqual(
       { safe: after.safe, warn: after.warn, danger: after.danger },
       { safe: 0, warn: 0, danger: 4 }
@@ -763,14 +803,14 @@ describe('connections route: GET /connections/threat-counts', () => {
     assert.equal(scans, 1, 'still no rescan');
   });
 
-  it('returns 400 for invalid from timestamp', () => {
-    const res = callThreatCountsRoute([], {}, { from: 'bad' });
+  it('returns 400 for invalid from timestamp', async () => {
+    const res = await callThreatCountsRoute([], {}, { from: 'bad' });
     assert.equal(res._status, 400);
   });
 
-  it('includes serverTime in response', () => {
+  it('includes serverTime in response', async () => {
     const before = Date.now();
-    const res = callThreatCountsRoute([], {}, {});
+    const res = await callThreatCountsRoute([], {}, {});
     assert.ok(typeof res._body.serverTime === 'number' && res._body.serverTime >= before);
   });
 });
