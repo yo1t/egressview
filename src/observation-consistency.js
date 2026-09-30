@@ -1,5 +1,7 @@
 'use strict';
 
+const { AGENT_INGEST_DEFAULT_RETENTION_MS } = require('./agent-ingest-schema');
+
 /**
  * Validate the observation junction table. While the v4 compatibility column
  * exists, also compare its expected router kinds and merge cardinality. After
@@ -10,8 +12,10 @@ function checkObservationConsistency(db, checkedAt = Date.now()) {
   if (!db) return null;
 
   return db.transaction(() => {
-    const hasSource = db.prepare('PRAGMA table_info(connections)').all()
-      .some(column => column.name === 'source');
+    const connectionColumns = new Set(
+      db.prepare('PRAGMA table_info(connections)').all().map(column => column.name)
+    );
+    const hasSource = connectionColumns.has('source');
     // "Every connection was observed by a router" stopped being true when an
     // endpoint agent became a collection source of its own: an agent has no
     // router identity, so its flows deliberately record no router observation.
@@ -27,13 +31,25 @@ function checkObservationConsistency(db, checkedAt = Date.now()) {
         WHERE a.localAddress = c.src AND a.remoteAddress = c.dst
           AND a.remotePort = c.dport AND LOWER(a.networkProtocol) = LOWER(c.proto)
       )` : '';
+    // An agent's observations are kept for seven days and the connection rows
+    // built from them for two years, so once an agent-only flow ages out its
+    // row has nothing left to account for it. That is retention working, not
+    // a missing record: on 2026-09-30 it was 903 of the 920 rows this check
+    // reported, and an expected ERROR that size would hide a real one.
+    const agentRowsKnown = hasAgentObservations
+      && connectionColumns.has('agentHost') && connectionColumns.has('lastSeen');
+    const pastAgentRetention = agentRowsKnown
+      ? ' AND NOT (c.agentHost IS NOT NULL AND c.lastSeen < @agentRetentionStart)'
+      : '';
     const missingObservations = db.prepare(`
       SELECT COUNT(*) AS n FROM connections c
       WHERE NOT EXISTS (
         SELECT 1 FROM connection_observations o
         WHERE o.src = c.src AND o.dst = c.dst AND o.dport = c.dport AND o.proto = c.proto
-      )${agentObserved}
-    `).get().n;
+      )${agentObserved}${pastAgentRetention}
+    `).get(agentRowsKnown
+      ? { agentRetentionStart: checkedAt - AGENT_INGEST_DEFAULT_RETENTION_MS }
+      : {}).n;
     const orphanObservations = db.prepare(`
       SELECT COUNT(*) AS n FROM connection_observations o
       LEFT JOIN connections c
