@@ -1,6 +1,6 @@
 'use strict';
 
-const { describe, it, after } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
@@ -39,6 +39,13 @@ class FakeWorker extends EventEmitter {
 }
 
 const quietLogger = { error() {}, warn() {}, info() {} };
+
+// The host unrefs its thread and timers so they never keep the Hub from
+// exiting. In the Hub the HTTP server keeps the loop alive; here nothing
+// else does, and a test awaiting a reply would end with the loop.
+let keepAlive;
+before(() => { keepAlive = setInterval(() => {}, 60_000); });
+after(() => clearInterval(keepAlive));
 
 function hostWith(workers, options = {}) {
   const spawned = [];
