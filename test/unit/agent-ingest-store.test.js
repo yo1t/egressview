@@ -261,7 +261,11 @@ describe('Agent ingest store', () => {
   it('prunes expired originals and their orphaned batch receipts', async () => {
     await store.storeBatch(agentId, copy(), { receivedAt });
     const result = store.pruneObservations({ before: receivedAt + 1 });
-    assert.deepEqual(result, { correlations: 0, observations: 1, hourly: 1, batches: 1, more: false });
+    const { timings, ...counts } = result;
+    assert.deepEqual(counts, { correlations: 0, observations: 1, hourly: 1, batches: 1, more: false });
+    assert.deepEqual(Object.keys(timings).sort(),
+      ['hourlyMs', 'observationsMs', 'receiptsMs', 'slowestTransactionMs']);
+    assert.ok(timings.slowestTransactionMs <= timings.observationsMs + timings.hourlyMs + timings.receiptsMs);
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 0);
   });

@@ -60,6 +60,10 @@ const agentIdentities = require('./src/agent-identities');
 const agentIngest    = require('./src/agent-ingest-store');
 const agentCorrelationRunner = require('./src/agent-correlation-runner');
 const { AGENT_INGEST_DEFAULT_RETENTION_MS } = require('./src/agent-ingest-schema');
+const { DbWorkerHost } = require('./src/db-worker-host');
+// Heavy database jobs run here, on their own thread and connection, so they
+// never hold the thread that answers requests (db-worker-host.js).
+const dbWorker = new DbWorkerHost({ logger });
 const authCookies    = require('./src/auth-cookies');
 const oidcModule = require('./src/oidc-google');
 const { createGoogleOidc } = oidcModule;
@@ -427,7 +431,7 @@ const routeCtx = {
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io, beacons, sessions, authPassword,
   authAudit, authCookies, oidc, apiIdentities,
-  agentIdentities, agentIngest, requireAgent,
+  agentIdentities, agentIngest, requireAgent, dbWorker,
   // Agent flows go through the same recording path as a router poll, so they
   // are enriched, threat-matched, and counted as device activity rather than
   // sitting in a table nothing checks.
@@ -731,35 +735,41 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
   } catch (error) {
     logger.error('[agent-correlation] startup reconcile failed:', error.message);
   }
-  // Expired agent observations go a little at a time, off the startup path,
-  // and far more often than once a day: see pruneObservations for what a
-  // whole day in one transaction did to the Hub every night.
+  dbWorker.open(runtimeDbPath);
+  // Expired agent observations are deleted on the database thread, a little at
+  // a time: see pruneObservations for what a whole day in one transaction did
+  // to the Hub every night, and P3-182 for the one-to-two-second stalls that
+  // even small deletes still caused while they ran on this thread.
   const AGENT_PRUNE_IDLE_MS = 30 * 60 * 1000;
-  const AGENT_PRUNE_CATCHUP_MS = 5 * 1000;
-  // One log line per run of passes, when it has caught up, not one every
-  // five seconds while it works through a backlog.
-  const agentPruneRun = { observations: 0, correlations: 0, hourly: 0, batches: 0, passes: 0 };
-  const agentPrunePass = () => {
-    let pruned = { more: false };
+  const AGENT_PRUNE_FIRST_MS = 5 * 1000;
+  // A run whose slowest transaction or write-back is above this is logged as
+  // a warning with its breakdown: an upload on this thread may have waited
+  // that long for the write lock.
+  const AGENT_PRUNE_SLOW_MS = 500;
+  const agentPrunePass = async () => {
+    let more = false;
     try {
-      pruned = runtimeProfiler.measureSync('agentIngest.pruneObservations',
-        () => agentIngest.pruneObservations({ before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS }));
-      for (const key of ['observations', 'correlations', 'hourly', 'batches']) agentPruneRun[key] += pruned[key];
-      agentPruneRun.passes += 1;
-      if (!pruned.more) {
-        if (agentPruneRun.observations || agentPruneRun.hourly || agentPruneRun.batches) {
-          logger.info(`[agent-ingest] Pruned ${agentPruneRun.observations} expired observations, `
-            + `${agentPruneRun.correlations} correlation links, ${agentPruneRun.hourly} hourly rows, `
-            + `${agentPruneRun.batches} batch receipts in ${agentPruneRun.passes} passes`);
-        }
-        for (const key of Object.keys(agentPruneRun)) agentPruneRun[key] = 0;
+      const run = await runtimeProfiler.measureAsync('dbWorker.agentIngest.prune',
+        () => dbWorker.run('agentIngest.prune', { before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS }));
+      more = run.more;
+      const slow = run.slowestTransactionMs > AGENT_PRUNE_SLOW_MS || run.slowestCheckpointMs > AGENT_PRUNE_SLOW_MS;
+      if (run.observations || run.hourly || run.batches || slow) {
+        const line = `[agent-ingest] Pruned ${run.observations} expired observations, `
+          + `${run.correlations} correlation links, ${run.hourly} hourly rows, `
+          + `${run.batches} batch receipts in ${run.passes} passes `
+          + `(observations ${Math.round(run.observationsMs)} ms, hourly ${Math.round(run.hourlyMs)} ms, `
+          + `receipts ${Math.round(run.receiptsMs)} ms, slowest transaction ${Math.round(run.slowestTransactionMs)} ms, `
+          + `write-back ${Math.round(run.checkpointMs)} ms, slowest write-back ${Math.round(run.slowestCheckpointMs)} ms, `
+          + `log frames left ${run.logFramesAtEnd ?? 'unknown'})`;
+        if (slow) logger.warn(line); else logger.info(line);
       }
     } catch (error) {
+      if (error.code === 'DB_WORKER_CLOSED') return;
       logger.error('[agent-ingest] prune failed:', error.message);
     }
-    setTimeout(agentPrunePass, pruned.more ? AGENT_PRUNE_CATCHUP_MS : AGENT_PRUNE_IDLE_MS).unref?.();
+    setTimeout(agentPrunePass, more ? AGENT_PRUNE_FIRST_MS : AGENT_PRUNE_IDLE_MS).unref?.();
   };
-  setTimeout(agentPrunePass, AGENT_PRUNE_CATCHUP_MS).unref?.();
+  setTimeout(agentPrunePass, AGENT_PRUNE_FIRST_MS).unref?.();
   agentCorrelationRunner.init({ agentIngest, logger });
   agentCorrelationRunner.start();
   authAudit.prune();
@@ -997,8 +1007,20 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 
+let shuttingDown = false;
 function shutdown(exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   healthState.markNotReady();
+  // The database thread holds a handle to the file too; it has to be gone
+  // before the clean stop is recorded below. close() gives up waiting after a
+  // few seconds and terminates the thread, which closes the handle anyway.
+  dbWorker.close()
+    .catch(error => logger.warn('[shutdown] Could not stop the database thread cleanly:', error.message))
+    .finally(() => finishShutdown(exitCode));
+}
+
+function finishShutdown(exitCode) {
   logger.info('[shutdown] Saving history...');
   try { routerManager?.stopAll();   } catch {}
   aiNotificationService.stop();
