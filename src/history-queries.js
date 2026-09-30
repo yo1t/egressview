@@ -134,6 +134,49 @@ function connectionBucketCoverage(db) {
   }
 }
 
+// The agent-only half of an agent-scoped source: the agent's observations no
+// router flow accounts for, grouped per flow. `rangeSql` bounds the
+// observations and takes its parameters after the agent id.
+function agentOnlyFlowsSql(rangeSql) {
+  return `SELECT
+        o.localAddress AS src, o.remoteAddress AS dst, o.remotePort AS dport,
+        LOWER(o.networkProtocol) AS proto, NULLIF(o.localPort, 0) AS sport,
+        NULL AS ttl, NULL AS srcMac, NULL AS srcVendor,
+        NULL AS srcDnsName, NULL AS srcMdnsName, MAX(ac.dstHost) AS dstHost,
+        MAX(ac.country) AS country, MAX(ac.org) AS org,
+        MAX(ac.lat) AS lat, MAX(ac.lon) AS lon, MAX(ac.city) AS city,
+        MIN(o.firstObservedAt) AS firstSeen, MAX(o.lastObservedAt) AS lastSeen,
+        MAX(a.hostName) AS agentHost, MAX(o.processName) AS process,
+        MAX(o.processId) AS pid
+      FROM agent_observations o
+      JOIN agents a ON a.agentId = o.agentId
+      LEFT JOIN connections ac
+        ON ac.src = o.localAddress AND ac.dst = o.remoteAddress
+          AND ac.dport = o.remotePort AND ac.proto = UPPER(o.networkProtocol)
+      WHERE o.agentId = ?
+        ${rangeSql}
+        AND NOT EXISTS (
+          SELECT 1 FROM connection_agent_observations link
+          WHERE link.agentId = o.agentId AND link.observationId = o.observationId
+        )
+      GROUP BY o.localAddress, o.remoteAddress, o.remotePort, LOWER(o.networkProtocol)`;
+}
+
+function scopedConnectionsCte(agentOnlySql) {
+  return `WITH scoped_connections AS (
+      SELECT c.*
+      FROM connections c
+      WHERE EXISTS (
+        SELECT 1 FROM connection_agent_observations scoped_a
+        WHERE scoped_a.src = c.src AND scoped_a.dst = c.dst
+          AND scoped_a.dport = c.dport AND scoped_a.proto = c.proto
+          AND scoped_a.agentId = ?
+      )
+      UNION ALL
+      ${agentOnlySql}
+    )`;
+}
+
 function connectionSource(scope, alias = 'c', { from = null, to = null } = {}) {
   if (scope?.sourceKind !== 'agent') {
     return { cte: '', from: `connections ${alias}`, params: [] };
@@ -154,43 +197,33 @@ function connectionSource(scope, alias = 'c', { from = null, to = null } = {}) {
     ? ` AND ${observationRange.join(' AND ')}`
     : '';
   return {
-    cte: `WITH scoped_connections AS (
-      SELECT c.*
-      FROM connections c
-      WHERE EXISTS (
-        SELECT 1 FROM connection_agent_observations scoped_a
-        WHERE scoped_a.src = c.src AND scoped_a.dst = c.dst
-          AND scoped_a.dport = c.dport AND scoped_a.proto = c.proto
-          AND scoped_a.agentId = ?
-      )
-      UNION ALL
-      SELECT
-        o.localAddress AS src, o.remoteAddress AS dst, o.remotePort AS dport,
-        LOWER(o.networkProtocol) AS proto, NULLIF(o.localPort, 0) AS sport,
-        NULL AS ttl, NULL AS srcMac, NULL AS srcVendor,
-        NULL AS srcDnsName, NULL AS srcMdnsName, MAX(ac.dstHost) AS dstHost,
-        MAX(ac.country) AS country, MAX(ac.org) AS org,
-        MAX(ac.lat) AS lat, MAX(ac.lon) AS lon, MAX(ac.city) AS city,
-        MIN(o.firstObservedAt) AS firstSeen, MAX(o.lastObservedAt) AS lastSeen,
-        MAX(a.hostName) AS agentHost, MAX(o.processName) AS process,
-        MAX(o.processId) AS pid
-      FROM agent_observations o
-      JOIN agents a ON a.agentId = o.agentId
-      LEFT JOIN connections ac
-        ON ac.src = o.localAddress AND ac.dst = o.remoteAddress
-          AND ac.dport = o.remotePort AND ac.proto = UPPER(o.networkProtocol)
-      WHERE o.agentId = ?
-        ${observationRangeSql}
-        AND NOT EXISTS (
-          SELECT 1 FROM connection_agent_observations link
-          WHERE link.agentId = o.agentId AND link.observationId = o.observationId
-        )
-      GROUP BY o.localAddress, o.remoteAddress, o.remotePort, LOWER(o.networkProtocol)
-    )`,
+    cte: scopedConnectionsCte(agentOnlyFlowsSql(observationRangeSql)),
     from: `scoped_connections ${alias}`,
     params: [scope.sourceId, scope.sourceId, ...observationRangeParams],
   };
 }
+
+// Opening the connection log with an agent selected sends four requests at
+// once (the page, its total, the summary, the threat counts), and each built
+// the agent-only half above from scratch. On the production Hub on 2026-10-01
+// that was 444,056 of a Mac's 470,874 observations in seven days, grouped into
+// 6,937 flows, 2.3 s each time -- on the thread that answers every request, so
+// one look at the log stopped the Hub for about ten seconds (P3-184).
+//
+// The grouped rows are now built once into a temporary table on the history
+// connection and shared by the requests that follow within a minute. The
+// table starts at `from` rounded down to the minute, so it holds a little more
+// than any one request asked for; each query still filters on its own exact
+// `from`, so the same flows come back. A flow's firstSeen can come out up to a
+// minute earlier than an exact build would give -- the only difference.
+//
+// Only a rolling window is shared. With an upper bound, a flow observed on
+// both sides of `to` would take its later lastSeen from the wider table and
+// could be filtered out, so those requests build their own as before. The
+// browser never sends one.
+const AGENT_ONLY_FLOWS_QUANTUM_MS = 60_000;
+const AGENT_ONLY_FLOWS_TTL_MS = 60_000;
+const AGENT_ONLY_FLOWS_MAX_TABLES = 8;
 
 // The browser never sends an upper bound: every rolling range is `from = now -
 // N` with `to` left null. That makes the time filter one-sided, and SQLite
@@ -260,12 +293,58 @@ function createHistoryQueries({
   // Names for the destinations a chart draws, kept between renders. One per
   // set of queries, because it is about one database.
   destinationLabels = createDestinationLabels(),
+  now = Date.now,
 }) {
+  // Per connection: temporary tables vanish when the connection closes (a
+  // restore reopens it), so the bookkeeping has to go with it.
+  const agentOnlyTables = new WeakMap();
+  let agentOnlyTableSeq = 0;
+
+  function sharedAgentOnlyFlows(db, agentId, from) {
+    let tables = agentOnlyTables.get(db);
+    if (!tables) { tables = new Map(); agentOnlyTables.set(db, tables); }
+    const at = now();
+    for (const [key, entry] of tables) {
+      if (at - entry.builtAt >= AGENT_ONLY_FLOWS_TTL_MS) {
+        db.exec(`DROP TABLE IF EXISTS temp.${entry.name}`);
+        tables.delete(key);
+      }
+    }
+    const start = from == null ? null : Math.floor(from / AGENT_ONLY_FLOWS_QUANTUM_MS) * AGENT_ONLY_FLOWS_QUANTUM_MS;
+    const key = `${agentId}|${start}`;
+    const found = tables.get(key);
+    if (found) return found.name;
+    while (tables.size >= AGENT_ONLY_FLOWS_MAX_TABLES) {
+      const [oldestKey, oldest] = tables.entries().next().value;
+      db.exec(`DROP TABLE IF EXISTS temp.${oldest.name}`);
+      tables.delete(oldestKey);
+    }
+    const name = `agent_only_flows_${++agentOnlyTableSeq}`;
+    const rangeSql = start == null ? '' : ' AND o.lastObservedAt >= ?';
+    db.prepare(`CREATE TEMP TABLE ${name} AS ${agentOnlyFlowsSql(rangeSql)}`)
+      .run(...(start == null ? [agentId] : [agentId, start]));
+    tables.set(key, { name, builtAt: at });
+    return name;
+  }
+
+  function scopedSource(scope, alias = 'c', range = {}) {
+    const db = getDb();
+    if (scope?.sourceKind !== 'agent' || !db || range.to != null) {
+      return connectionSource(scope, alias, range);
+    }
+    const table = sharedAgentOnlyFlows(db, scope.sourceId, range.from ?? null);
+    return {
+      cte: scopedConnectionsCte(`SELECT * FROM temp.${table}`),
+      from: `scoped_connections ${alias}`,
+      params: [scope.sourceId],
+    };
+  }
+
   function queryByTimeRange(from, to, { sourceScope = null } = {}) {
     const db = getDb();
     if (!db) return [];
     const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
-    const source = connectionSource(sourceScope, 'c', { from, to });
+    const source = scopedSource(sourceScope, 'c', { from, to });
     return hydrateConnectionRows(db.prepare(
       `${source.cte} SELECT ${connectionReadColumns('c')} FROM ${source.from}${where} ORDER BY c.lastSeen DESC`
     ).all(...source.params, ...params));
@@ -278,7 +357,7 @@ function createHistoryQueries({
     const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
     const { where, params } = buildWhereAndParams(from, to, buildFilterConditions(filters), sourceScope, 'c');
     const orderClause = sortSql.split(',').map(column => `${column.trim()} ${direction}`).join(', ');
-    const source = connectionSource(sourceScope, 'c', { from, to });
+    const source = scopedSource(sourceScope, 'c', { from, to });
     const sql = `${source.cte} SELECT ${connectionReadColumns('c')} FROM ${source.from}${where} ORDER BY ${orderClause}`;
     if (limit == null) return hydrateConnectionRows(db.prepare(sql).all(...source.params, ...params));
     return hydrateConnectionRows(db.prepare(`${sql} LIMIT ? OFFSET ?`).all(...source.params, ...params, limit, offset));
@@ -288,7 +367,7 @@ function createHistoryQueries({
     const db = getDb();
     if (!db) return 0;
     const { where, params } = buildWhereAndParams(from, to, buildFilterConditions(filters), sourceScope, 'c');
-    const source = connectionSource(sourceScope, 'c', { from, to });
+    const source = scopedSource(sourceScope, 'c', { from, to });
     return db.prepare(`${source.cte} SELECT COUNT(*) AS cnt FROM ${source.from}${where}`)
       .get(...source.params, ...params)?.cnt || 0;
   }
@@ -297,7 +376,7 @@ function createHistoryQueries({
     const db = getDb();
     if (!db) return { connections: 0, devices: 0, destinations: 0 };
     const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
-    const source = connectionSource(sourceScope, 'c', { from, to });
+    const source = scopedSource(sourceScope, 'c', { from, to });
     const row = db.prepare(`${source.cte}
       SELECT COUNT(*) AS connections,
              COUNT(DISTINCT COALESCE(NULLIF(srcMac, ''), src)) AS devices,
@@ -328,7 +407,7 @@ function createHistoryQueries({
       snapshotDb.pragma('query_only = ON');
       snapshotDb.exec('BEGIN');
       const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
-      const source = connectionSource(sourceScope, 'c', { from, to });
+      const source = scopedSource(sourceScope, 'c', { from, to });
       const count = snapshotDb.prepare(`${source.cte} SELECT COUNT(*) AS cnt FROM ${source.from}${where}`)
         .get(...source.params, ...params)?.cnt || 0;
       const pageStatement = snapshotDb.prepare(
@@ -393,7 +472,7 @@ function createHistoryQueries({
     const db = getDb();
     if (!db) return [];
     const { where, params } = buildWhereAndParams(from, to, buildFilterConditions(filters), sourceScope, 'c');
-    const source = connectionSource(sourceScope, 'c', { from, to });
+    const source = scopedSource(sourceScope, 'c', { from, to });
     return db.prepare(
       `${source.cte} SELECT dst, MAX(dstHost) AS dstHost, COUNT(*) AS cnt FROM ${source.from}${where} GROUP BY dst`
     ).all(...source.params, ...params);
@@ -403,7 +482,7 @@ function createHistoryQueries({
     const db = getDb();
     if (!db) return [];
     const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
-    const source = connectionSource(sourceScope, 'c', { from, to });
+    const source = scopedSource(sourceScope, 'c', { from, to });
     return db.prepare(
       `${source.cte} SELECT dport, proto, COUNT(*) AS count FROM ${source.from}${where}
        GROUP BY dport, proto ORDER BY count DESC LIMIT 20`
@@ -429,7 +508,7 @@ function createHistoryQueries({
     if (scoped.condition) conditions.push(scoped.condition);
     params.push(...scoped.params);
     const where = ' WHERE ' + conditions.join(' AND ');
-    const source = connectionSource(sourceScope, 'c', { from, to });
+    const source = scopedSource(sourceScope, 'c', { from, to });
     return db.prepare(
       `${source.cte} SELECT dst, src,
               MAX(srcDnsName) AS srcDnsName,
@@ -448,7 +527,7 @@ function createHistoryQueries({
     if (!db) return [];
     const cappedLimit = Math.max(1, Math.min(100, Number(limit) || 30));
     const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
-    const source = connectionSource(sourceScope, 'c', { from, to });
+    const source = scopedSource(sourceScope, 'c', { from, to });
     return db.prepare(
       `${source.cte} SELECT src,
               MAX(srcMac) AS srcMac,
@@ -495,7 +574,7 @@ function createHistoryQueries({
         WHERE o.agentId = ?
       `).all(sourceScope.sourceId, sourceScope.sourceId);
     }
-    const source = connectionSource(sourceScope);
+    const source = scopedSource(sourceScope);
     const scoped = sourceScopeCondition(sourceScope, 'c');
     const where = scoped.condition ? ` WHERE ${scoped.condition}` : '';
     return db.prepare(
@@ -520,7 +599,7 @@ function createHistoryQueries({
       timelineBucketMs: null,
       timelineScopeFallback: false,
     };
-    const source = connectionSource(sourceScope, 'connections', { from, to });
+    const source = scopedSource(sourceScope, 'connections', { from, to });
     const conditions = [];
     const params = [];
     const timeRange = timeRangeConditions(from, to);
