@@ -270,7 +270,8 @@ describe('Agent/router correlation read model', () => {
 
     const result = store.pruneObservations({ before: observedAt + 1 });
 
-    assert.deepEqual(result, { correlations: 1, observations: 1, hourly: 1, batches: 0, more: false });
+    const { timings: _timings, ...counts } = result;
+    assert.deepEqual(counts, { correlations: 1, observations: 1, hourly: 1, batches: 0, more: false });
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
   });
 });
