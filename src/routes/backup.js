@@ -38,12 +38,15 @@ const backupPruneJobSchema = z.object({ jobId: z.string().uuid() }).strict();
 module.exports = function backupRoutes(ctx) {
   const {
     requireAdmin, backup, history, runtime, devices, enrichment, beacons,
-    sessions, authAudit, apiIdentities, agentIdentities, agentIngest, io,
+    sessions, authAudit, apiIdentities, agentIdentities, agentIngest, io, dbWorker,
   } = ctx;
   const router = Router();
   let uploadInProgress = false;
 
-  function closeDbConnections() {
+  // The database thread first: it may be partway through a delete, and its
+  // handle to the file must be gone before the file is replaced.
+  async function closeDbConnections() {
+    await dbWorker?.close();
     history.closeDb();
     sessions?.closeDb();
     devices.closeDb();
@@ -67,6 +70,7 @@ module.exports = function backupRoutes(ctx) {
     apiIdentities?.reopen();
     agentIdentities?.reopen();
     agentIngest?.reopen();
+    dbWorker?.resume();
     if (io) io.disconnectSockets(true);
   }
 

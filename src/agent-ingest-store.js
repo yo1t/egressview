@@ -381,8 +381,13 @@ function adaptPruneBatch(size, elapsedMs) {
  * reporting `more: true`; the caller runs it again soon. Observations go
  * first, because a batch receipt can only go once no observation points at it.
  *
+ * `timings` says where the time went, so a slow pass can be told apart: the
+ * observation deletes, the hourly rows, the batch receipts, and the slowest
+ * single transaction among them (the longest a writer elsewhere had to wait).
+ *
  * @returns {{ correlations: number, observations: number, hourly: number,
- *   batches: number, more: boolean }}
+ *   batches: number, more: boolean, timings: { observationsMs: number,
+ *   hourlyMs: number, receiptsMs: number, slowestTransactionMs: number } }}
  */
 function pruneObservations({
   before, batchSize, budgetMs = PRUNE_BUDGET_MS, now = Date.now,
@@ -391,7 +396,17 @@ function pruneObservations({
   if (!Number.isFinite(before)) throw new TypeError('before must be finite');
   const startedAt = now();
   const outOfTime = () => now() - startedAt >= budgetMs;
-  const result = { correlations: 0, observations: 0, hourly: 0, batches: 0, more: false };
+  const timings = { observationsMs: 0, hourlyMs: 0, receiptsMs: 0, slowestTransactionMs: 0 };
+  const result = { correlations: 0, observations: 0, hourly: 0, batches: 0, more: false, timings };
+  // Runs one transaction and charges its time to a phase.
+  const timed = (phase, run) => {
+    const began = now();
+    const value = run();
+    const elapsed = now() - began;
+    timings[phase] += elapsed;
+    timings.slowestTransactionMs = Math.max(timings.slowestTransactionMs, elapsed);
+    return value;
+  };
 
   const pickObservations = database.prepare(`
     SELECT rowid AS id, agentId, observationId FROM agent_observations
@@ -415,7 +430,7 @@ function pruneObservations({
   });
   for (;;) {
     const batchStartedAt = now();
-    const deleted = observationBatch.immediate();
+    const deleted = timed('observationsMs', () => observationBatch.immediate());
     const full = deleted >= size;
     if (!fixedSize) {
       size = adaptPruneBatch(size, now() - batchStartedAt);
@@ -437,7 +452,8 @@ function pruneObservations({
   for (let cursor = -Infinity; ;) {
     const hour = nextHour.get(cursor)?.hour;
     if (hour == null || hour >= before) break;
-    result.hourly += database.transaction(() => dropHour.run(hour, before).changes).immediate();
+    result.hourly += timed('hourlyMs',
+      () => database.transaction(() => dropHour.run(hour, before).changes).immediate());
     cursor = hour;
     if (outOfTime()) { result.more = true; return result; }
   }
@@ -462,9 +478,9 @@ function pruneObservations({
     const agentId = nextAgent.get(cursor)?.agentId;
     if (agentId == null) break;
     for (;;) {
-      const deleted = database.transaction(
+      const deleted = timed('receiptsMs', () => database.transaction(
         () => dropBatches.run(agentId, before, size).changes
-      ).immediate();
+      ).immediate());
       result.batches += deleted;
       if (deleted < size) break;
       if (outOfTime()) { result.more = true; return result; }
@@ -473,6 +489,23 @@ function pruneObservations({
     if (outOfTime()) { result.more = true; return result; }
   }
   return result;
+}
+
+/**
+ * Copies what it can of the write-ahead log back into the database, without
+ * waiting for anyone (PASSIVE). Run on the database thread after each prune
+ * pass, so the write-back of a delete is paid there rather than by whichever
+ * connection's commit next crosses the automatic threshold.
+ */
+function checkpointLog({ now = Date.now } = {}) {
+  const began = now();
+  const [row] = requireDb().pragma('wal_checkpoint(PASSIVE)');
+  return {
+    ms: now() - began,
+    busy: row?.busy ?? null,
+    logFrames: row?.log ?? null,
+    checkpointedFrames: row?.checkpointed ?? null,
+  };
 }
 
 function reconcileCorrelations(options) {
@@ -609,6 +642,7 @@ module.exports = {
   getAgentCollectionStatus,
   getCorrelationDiagnostics,
   pruneObservations,
+  checkpointLog,
   _adaptPruneBatchForTest: adaptPruneBatch,
   queryCorrelationReadModel,
   queryUnifiedReadModel,
