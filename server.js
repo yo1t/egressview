@@ -61,9 +61,15 @@ const agentIngest    = require('./src/agent-ingest-store');
 const agentCorrelationRunner = require('./src/agent-correlation-runner');
 const { AGENT_INGEST_DEFAULT_RETENTION_MS } = require('./src/agent-ingest-schema');
 const { DbWorkerHost } = require('./src/db-worker-host');
+const { createHistoryReader } = require('./src/history-reader');
 // Heavy database jobs run here, on their own thread and connection, so they
 // never hold the thread that answers requests (db-worker-host.js).
 const dbWorker = new DbWorkerHost({ logger });
+// The connection log's heavy reads, on a second thread with a read-only
+// connection. Separate from dbWorker so a long delete never queues a page
+// behind it (P3-184).
+const dbReadWorker = new DbWorkerHost({ logger, requestTimeoutMs: 2 * 60 * 1000 });
+const historyReader = createHistoryReader({ history, host: dbReadWorker, logger, profiler: runtimeProfiler });
 const authCookies    = require('./src/auth-cookies');
 const oidcModule = require('./src/oidc-google');
 const { createGoogleOidc } = oidcModule;
@@ -431,7 +437,7 @@ const routeCtx = {
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io, beacons, sessions, authPassword,
   authAudit, authCookies, oidc, apiIdentities,
-  agentIdentities, agentIngest, requireAgent, dbWorker,
+  agentIdentities, agentIngest, requireAgent, dbWorker, dbReadWorker, historyReader,
   // Agent flows go through the same recording path as a router poll, so they
   // are enriched, threat-matched, and counted as device activity rather than
   // sitting in a table nothing checks.
@@ -735,7 +741,8 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
   } catch (error) {
     logger.error('[agent-correlation] startup reconcile failed:', error.message);
   }
-  dbWorker.open(runtimeDbPath);
+  dbWorker.open(runtimeDbPath, { role: 'maintenance' });
+  dbReadWorker.open(runtimeDbPath, { role: 'read', sourceRouterMap });
   // Expired agent observations are deleted on the database thread, a little at
   // a time: see pruneObservations for what a whole day in one transaction did
   // to the Hub every night, and P3-182 for the one-to-two-second stalls that
@@ -1012,11 +1019,11 @@ function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   healthState.markNotReady();
-  // The database thread holds a handle to the file too; it has to be gone
+  // The database threads hold handles to the file too; they have to be gone
   // before the clean stop is recorded below. close() gives up waiting after a
   // few seconds and terminates the thread, which closes the handle anyway.
-  dbWorker.close()
-    .catch(error => logger.warn('[shutdown] Could not stop the database thread cleanly:', error.message))
+  Promise.all([dbWorker.close(), dbReadWorker.close()])
+    .catch(error => logger.warn('[shutdown] Could not stop the database threads cleanly:', error.message))
     .finally(() => finishShutdown(exitCode));
 }
 

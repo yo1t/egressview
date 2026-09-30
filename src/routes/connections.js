@@ -12,6 +12,7 @@ const logger = require('../logger');
 const {
   sourceScopeShape, validateSourceScopePair, requireKnownSourceScope,
 } = require('../source-scope');
+const { createHistoryReader } = require('../history-reader');
 
 // Send helper for compatibility consumers that request an unpaged response
 // (up to 50k rows, 20MB+). The graph uses the bounded summary endpoint.
@@ -200,7 +201,13 @@ const summaryCacheStats = {
   slowestMs: 0,
   slowestRange: null,
   ttlGrantedMs: 0,
+  // Requests that arrived while the same read was running and waited for it
+  // instead of starting a second one (see cachedReadAsync).
+  joined: 0,
 };
+// Reads in progress, by key. Only the asynchronous path can have one: a
+// synchronous read finishes before the next request is even parsed.
+const summaryInflight = new Map();
 // Keys seen before, so a miss can say whether this key has ever been cached.
 // Bounded: it answers a question about recent traffic, not a log of it.
 const summaryKeysSeen = new Map();
@@ -299,32 +306,64 @@ function setSummaryCache(key, body, ttlMs = SUMMARY_CACHE_MIN_TTL_MS) {
  * old. `null` is preserved because "up to now" already means the same thing on
  * every request.
  */
-function cachedRead(kind, keyParts, compute, { from = null, to = null } = {}) {
-  const key = JSON.stringify({ kind, ...keyParts });
+function takeCachedRead(key) {
   const cached = getSummaryCache(key);
-  if (cached) {
-    summaryCacheStats.hits += 1;
-    return { body: cached, cached: true };
-  }
+  if (!cached) return null;
+  summaryCacheStats.hits += 1;
+  return cached;
+}
+
+function noteReadMiss(key, from, to) {
   summaryCacheStats.misses += 1;
   // A key this process has served before and lost means the TTL ran out. A key
   // it has never seen means the key itself moved, and no TTL would have helped.
   summaryCacheStats[summaryKeysSeen.has(key) ? 'expired' : 'movingKey'] += 1;
   const label = summaryRangeLabel(from, to);
   summaryCacheStats.ranges[label] = (summaryCacheStats.ranges[label] || 0) + 1;
+}
 
-  const startedAt = Date.now();
-  const body = compute();
-  const computeMs = Date.now() - startedAt;
+function storeRead(key, body, computeMs, from, to) {
   const ttlMs = summaryCacheTtl(computeMs, summaryCacheQuantum(from, to));
   if (computeMs > summaryCacheStats.slowestMs) {
     summaryCacheStats.slowestMs = computeMs;
-    summaryCacheStats.slowestRange = label;
+    summaryCacheStats.slowestRange = summaryRangeLabel(from, to);
     summaryCacheStats.ttlGrantedMs = ttlMs;
   }
   setSummaryCache(key, body, ttlMs);
   noteSummaryKeySeen(key);
-  return { body, cached: false };
+}
+
+/**
+ * The shared read cache, for reads that answer later -- sent to the read thread.
+ *
+ * Opening the log sends its requests together, and once a read no longer
+ * holds this thread the second request for the same key arrives while the
+ * first is still running. Without the in-flight map it would start the same
+ * query again and queue behind it on the read thread; with it, it waits for
+ * the same answer.
+ */
+async function cachedReadAsync(kind, keyParts, compute, { from = null, to = null } = {}) {
+  const key = JSON.stringify({ kind, ...keyParts });
+  const cached = takeCachedRead(key);
+  if (cached) return { body: cached, cached: true };
+  const running = summaryInflight.get(key);
+  if (running) {
+    summaryCacheStats.joined += 1;
+    return { body: await running, cached: true };
+  }
+  noteReadMiss(key, from, to);
+  const startedAt = Date.now();
+  const pending = (async () => {
+    const body = await compute();
+    storeRead(key, body, Date.now() - startedAt, from, to);
+    return body;
+  })();
+  summaryInflight.set(key, pending);
+  try {
+    return { body: await pending, cached: false };
+  } finally {
+    if (summaryInflight.get(key) === pending) summaryInflight.delete(key);
+  }
 }
 
 function attachThreats(connections, threatIntel) {
@@ -434,6 +473,10 @@ function parsePaginationOpts(query) {
  */
 function connectionsRoutes(ctx) {
   const { requireAdmin, history, threatIntel, routerManager, agentIdentities, appState } = ctx;
+  // The heavy reads below go through this, so they run on the read thread when
+  // the server has one (P3-184). Without one -- tests, and any caller that
+  // builds the routes on their own -- they run here as before.
+  const reader = ctx.historyReader || createHistoryReader({ history });
   const router = Router();
   const readScope = (query, res) => requireKnownSourceScope(query, { routerManager, agentIdentities }, res);
 
@@ -443,7 +486,7 @@ function connectionsRoutes(ctx) {
     res.json({ ...history.getMemoryStats(), serverTime: Date.now() });
   });
 
-  router.get('/connections/summary', requireAdmin, (req, res) => {
+  router.get('/connections/summary', requireAdmin, async (req, res) => {
     const parsed = parseRequest(summaryQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const query = parsed.data;
@@ -483,7 +526,7 @@ function connectionsRoutes(ctx) {
     // operator can ask for the original last-seen chart back while the
     // observed record is still filling in (P3-155).
     const timelineSource = appState?.timelineSource === 'lastSeen' ? 'lastSeen' : 'observed';
-    const { body: summary, cached } = cachedRead('summary', {
+    const { body: summary, cached } = await cachedReadAsync('summary', {
       from: quantiseForCache(from, summaryQuantum),
       to: quantiseForCache(to, summaryQuantum),
       src,
@@ -492,7 +535,7 @@ function connectionsRoutes(ctx) {
       // Part of the cache key: the two settings answer the same question from
       // different records and must not be served each other's answer.
       timelineSource,
-    }, () => history.summarizeByTimeRange(from, to, {
+    }, () => reader.read('summarizeByTimeRange', from, to, {
       src,
       buckets,
       ...(sourceScope ? { sourceScope } : {}),
@@ -550,7 +593,7 @@ function connectionsRoutes(ctx) {
     res.json({ count: paged.length, threats: paged, serverTime: Date.now() });
   });
 
-  router.get('/connections/threat-counts', requireAdmin, (req, res) => {
+  router.get('/connections/threat-counts', requireAdmin, async (req, res) => {
     const parsed = parseRequest(threatCountsQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const query = parsed.data;
@@ -565,12 +608,12 @@ function connectionsRoutes(ctx) {
     // and the tab asks for both at once. Cache the grouping, not the verdicts:
     // the feeds can change between polls and re-matching them is cheap.
     const threatQuantum = summaryCacheQuantum(from, to);
-    const { body: groups } = cachedRead('threat-counts', {
+    const { body: groups } = await cachedReadAsync('threat-counts', {
       from: quantiseForCache(from, threatQuantum),
       to: quantiseForCache(to, threatQuantum),
       filters,
       sourceScope: scoped.scope,
-    }, () => history.groupDstByTimeRange(from, to, { filters, sourceScope: scoped.scope }),
+    }, () => reader.read('groupDstByTimeRange', from, to, { filters, sourceScope: scoped.scope }),
     { from, to });
     let safe = 0, warn = 0, danger = 0;
     for (const { dst, dstHost, cnt } of groups) {
@@ -614,7 +657,7 @@ function connectionsRoutes(ctx) {
     }
   });
 
-  router.get('/connections', requireAdmin, (req, res) => {
+  router.get('/connections', requireAdmin, async (req, res) => {
     const parsed = parseRequest(connectionsQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const query = parsed.data;
@@ -657,16 +700,19 @@ function connectionsRoutes(ctx) {
       // unchanged answer, so it is cached on the terms that decide it -- window,
       // filters, and scope -- and deliberately not on the page offset.
       const totalQuantum = summaryCacheQuantum(from, to);
-      const { body: total } = cachedRead('connections-total', {
-        from: quantiseForCache(from, totalQuantum),
-        to: quantiseForCache(to, totalQuantum),
-        filters: opts.filters,
-        sourceScope: opts.sourceScope,
-      }, () => history.countByTimeRange(from, to, {
-        filters: opts.filters, sourceScope: opts.sourceScope,
-      }), { from, to });
+      const [{ body: total }, page] = await Promise.all([
+        cachedReadAsync('connections-total', {
+          from: quantiseForCache(from, totalQuantum),
+          to: quantiseForCache(to, totalQuantum),
+          filters: opts.filters,
+          sourceScope: opts.sourceScope,
+        }, () => reader.read('countByTimeRange', from, to, {
+          filters: opts.filters, sourceScope: opts.sourceScope,
+        }), { from, to }),
+        reader.read('queryByTimeRangePaged', from, to, clampedLimit, offset, opts),
+      ]);
       const connections = attachNetworkNames(attachApplications(attachThreats(
-        history.queryByTimeRangePaged(from, to, clampedLimit, offset, opts), threatIntel
+        page, threatIntel
       ), history, opts.sourceScope, from, to));
       return res.json({ connections, total, limit: clampedLimit, offset, serverTime: Date.now() });
     }
@@ -706,9 +752,10 @@ module.exports.summaryCacheSnapshot = summaryCacheSnapshot;
 module.exports._resetReadCacheForTest = () => {
   summaryCache.clear();
   summaryKeysSeen.clear();
+  summaryInflight.clear();
   Object.assign(summaryCacheStats, {
     hits: 0, misses: 0, expired: 0, movingKey: 0,
-    ranges: {}, slowestMs: 0, slowestRange: null, ttlGrantedMs: 0,
+    ranges: {}, slowestMs: 0, slowestRange: null, ttlGrantedMs: 0, joined: 0,
   });
 };
 module.exports._sendLargeJson = sendLargeJson;

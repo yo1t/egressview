@@ -229,3 +229,74 @@ describe('データベーススレッド（実スレッド）', () => {
     }
   });
 });
+
+describe('読み取り用スレッド', () => {
+  const history = require('../../src/history');
+  const { createHistoryReader } = require('../../src/history-reader');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-db-read-'));
+  const dbPath = path.join(dir, 'hub.db');
+  after(() => {
+    history.closeDb();
+    history._initForTest();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('スレッドで読んだ結果は、このスレッドで読んだ結果と同じ', async () => {
+    history._initForTest(dbPath);
+    const now = Date.now();
+    for (let i = 0; i < 30; i += 1) {
+      history.appendHistoryLog({
+        src: `192.0.2.${10 + (i % 3)}`, dst: `198.51.100.${i % 7}`, dport: 443 + (i % 2), proto: 'TCP',
+        source: i % 2 ? 'yamaha' : 'cisco', firstSeen: now - i * 60_000, lastSeen: now - i * 60_000,
+      });
+    }
+    const host = new DbWorkerHost({ logger: quietLogger });
+    host.open(dbPath, { role: 'read', sourceRouterMap: {} });
+    const reader = createHistoryReader({ history, host, logger: quietLogger });
+    try {
+      const from = now - 20 * 60_000;
+      const opts = { sort: 'lastSeen', sortDir: 'desc', filters: {} };
+      assert.deepEqual(
+        await reader.read('queryByTimeRangePaged', from, null, 10, 2, opts),
+        history.queryByTimeRangePaged(from, null, 10, 2, opts),
+      );
+      assert.equal(await reader.read('countByTimeRange', from, null, { filters: {} }),
+        history.countByTimeRange(from, null, { filters: {} }));
+      assert.deepEqual(await reader.read('groupDstByTimeRange', from, null, {}),
+        history.groupDstByTimeRange(from, null, {}));
+      const onThread = await reader.read('summarizeByTimeRange', from, null, { buckets: 10 });
+      const here = history.summarizeByTimeRange(from, null, { buckets: 10 });
+      assert.deepEqual(onThread.byDst, here.byDst);
+      assert.deepEqual(onThread.byDevice, here.byDevice);
+      assert.equal(onThread.total, here.total);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('スレッドが閉じていれば、このスレッドで読む', async () => {
+    const host = new DbWorkerHost({ logger: quietLogger });
+    const reader = createHistoryReader({ history, host, logger: quietLogger });
+    assert.equal(await reader.read('countByTimeRange', null, null, { filters: {} }),
+      history.countByTimeRange(null, null, { filters: {} }));
+  });
+
+  it('スレッドでの失敗は、このスレッドで読み直さずに返す', async () => {
+    const failing = { run: () => Promise.reject(Object.assign(new Error('no such table'), { code: 'SQLITE_ERROR' })) };
+    let ranHere = false;
+    const reader = createHistoryReader({
+      history: { countByTimeRange: () => { ranHere = true; return 0; } },
+      host: failing,
+      logger: quietLogger,
+    });
+    await assert.rejects(reader.read('countByTimeRange', null, null, {}), /no such table/);
+    assert.equal(ranHere, false);
+  });
+
+  it('決めた読み取り以外は、スレッドが断る', async () => {
+    const worker = require('../../src/db-worker');
+    const reply = worker.handle({ id: 1, op: 'history.read', args: { fn: 'appendHistoryLog', args: [] } });
+    assert.equal(reply.ok, false);
+    assert.match(reply.error, /Not a history read: appendHistoryLog/);
+  });
+});

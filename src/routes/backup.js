@@ -38,15 +38,16 @@ const backupPruneJobSchema = z.object({ jobId: z.string().uuid() }).strict();
 module.exports = function backupRoutes(ctx) {
   const {
     requireAdmin, backup, history, runtime, devices, enrichment, beacons,
-    sessions, authAudit, apiIdentities, agentIdentities, agentIngest, io, dbWorker,
+    sessions, authAudit, apiIdentities, agentIdentities, agentIngest, io, dbWorker, dbReadWorker,
   } = ctx;
   const router = Router();
   let uploadInProgress = false;
 
-  // The database thread first: it may be partway through a delete, and its
-  // handle to the file must be gone before the file is replaced.
+  // The database threads first: one may be partway through a delete or a
+  // read, and their handles to the file must be gone before it is replaced.
+  // Reads asked for meanwhile run on this thread (history-reader.js).
   async function closeDbConnections() {
-    await dbWorker?.close();
+    await Promise.all([dbWorker?.close(), dbReadWorker?.close()]);
     history.closeDb();
     sessions?.closeDb();
     devices.closeDb();
@@ -71,6 +72,7 @@ module.exports = function backupRoutes(ctx) {
     agentIdentities?.reopen();
     agentIngest?.reopen();
     dbWorker?.resume();
+    dbReadWorker?.resume();
     if (io) io.disconnectSockets(true);
   }
 
