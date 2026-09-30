@@ -73,6 +73,55 @@ describe('observation consistency diagnostics', () => {
     db.close();
   });
 
+  describe('エージェントの保持期間を過ぎた接続', () => {
+    const day = 24 * 60 * 60 * 1000;
+    const checkedAt = Date.parse('2026-10-01T00:00:00Z');
+    function makeAgentDb() {
+      const db = new Database(':memory:');
+      db.exec(`
+        CREATE TABLE connections (
+          src TEXT, dst TEXT, dport INTEGER, proto TEXT, lastSeen INTEGER, agentHost TEXT,
+          PRIMARY KEY (src, dst, dport, proto)
+        );
+        CREATE TABLE routers (id TEXT PRIMARY KEY, kind TEXT);
+        CREATE TABLE connection_observations (
+          src TEXT, dst TEXT, dport INTEGER, proto TEXT, routerId TEXT,
+          firstObservedAt INTEGER, lastObservedAt INTEGER,
+          PRIMARY KEY (src, dst, dport, proto, routerId)
+        );
+        CREATE TABLE agent_observations (
+          agentId TEXT, localAddress TEXT, remoteAddress TEXT, remotePort INTEGER,
+          networkProtocol TEXT
+        );
+      `);
+      return db;
+    }
+
+    it('観測が保持期間で消えたエージェントの接続はmissingに数えない', () => {
+      const db = makeAgentDb();
+      db.prepare('INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?)')
+        .run('10.0.0.9', '203.0.113.5', 443, 'tcp', checkedAt - 8 * day, 'mac-1');
+      assert.equal(checkObservationConsistency(db, checkedAt).missingObservations, 0);
+      db.close();
+    });
+
+    it('保持期間内なのに観測が無いエージェントの接続は、依然としてmissingになる', () => {
+      const db = makeAgentDb();
+      db.prepare('INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?)')
+        .run('10.0.0.9', '203.0.113.5', 443, 'udp', checkedAt - 6 * day, 'mac-1');
+      assert.equal(checkObservationConsistency(db, checkedAt).missingObservations, 1);
+      db.close();
+    });
+
+    it('エージェントの接続でない古い行は、保持期間に関係なくmissingになる', () => {
+      const db = makeAgentDb();
+      db.prepare('INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?)')
+        .run('10.0.0.1', '1.1.1.1', 443, 'TCP', checkedAt - 30 * day, null);
+      assert.equal(checkObservationConsistency(db, checkedAt).missingObservations, 1);
+      db.close();
+    });
+  });
+
   it('detects two observations of the wrong router kinds', () => {
     const db = makeDb();
     db.exec(`
