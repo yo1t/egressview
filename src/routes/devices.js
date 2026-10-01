@@ -4,6 +4,7 @@
 const { Router } = require('express');
 const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
+const { createHistoryReader } = require('../history-reader');
 const { t } = require('../i18n-server');
 const logger = require('../logger');
 const {
@@ -36,11 +37,14 @@ const archiveSchema = z.object({ deviceId }).strict();
  */
 module.exports = function devicesRoutes(ctx) {
   const { requireAdmin, devices, notes, yamaha, history, routerManager, agentIdentities } = ctx;
+  // A scoped device list reads the source's devices from history; on the read
+  // thread when the server has one (P3-184).
+  const reader = ctx.historyReader || (history ? createHistoryReader({ history }) : null);
   const router = Router();
 
   // GET /api/devices[?includeArchived=1]
   // Returns devices with status (active/recent/stale/archived), IPv6, and notes.
-  router.get('/devices', requireAdmin, (req, res) => {
+  router.get('/devices', requireAdmin, async (req, res) => {
     const parsed = parseRequest(devicesQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const scoped = requireKnownSourceScope(parsed.data, { routerManager, agentIdentities }, res);
@@ -48,7 +52,7 @@ module.exports = function devicesRoutes(ctx) {
     const includeArchived = parsed.data.includeArchived === '1';
     let all = devices.getAll({ includeArchived });
     if (scoped.scope && typeof history?.listSourceDeviceKeys === 'function') {
-      const keys = history.listSourceDeviceKeys(scoped.scope);
+      const keys = await reader.read('listSourceDeviceKeys', scoped.scope);
       const ips = new Set(keys.map(row => row.src).filter(Boolean));
       const macs = new Set(keys.map(row => row.srcMac?.toLowerCase()).filter(Boolean));
       all = all.filter(device => ips.has(device.ip) || macs.has(device.mac?.toLowerCase()));

@@ -45,6 +45,8 @@ const HISTORY_READS = new Set([
   'countByTimeRange',
   'groupDstByTimeRange',
   'summarizeByTimeRange',
+  'countFactsByTimeRange',
+  'listSourceDeviceKeys',
 ]);
 
 let role = 'maintenance';
