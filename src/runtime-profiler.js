@@ -151,8 +151,16 @@ function createRuntimeProfiler(deps = {}) {
     lastCutAt = now();
     stallSampler.cut({ fromMs: gapStart, toMs: gapEnd })
       .then(summary => {
-        if (!summary?.frames?.length) return;
         const warn = typeof logger.warn === 'function' ? logger.warn : logger.info;
+        if (!summary?.frames?.length) {
+          // Not silent: a stall reported without stacks has to say why, or it
+          // reads as "sampling is off" when it is on and missed.
+          warn.call(logger, '[runtime-stall-stack]', {
+            atMs,
+            noStacks: summary ? `no samples in the stall (${summary.samples ?? 0})` : 'the sampler was not running or was busy',
+          });
+          return;
+        }
         warn.call(logger, '[runtime-stall-stack]', {
           atMs,
           sampledMs: summary.totalMs,
@@ -309,11 +317,22 @@ function createRuntimeProfiler(deps = {}) {
     }
     const sampleStalls = options.stallProfile ?? process.env.EGRESSVIEW_STALL_PROFILE === 'true';
     if (sampleStalls) {
-      const sampler = makeStallSampler({ now });
+      const warnOf = () => (typeof logger.warn === 'function' ? logger.warn : logger.info);
+      const sampler = makeStallSampler({
+        now,
+        onError: (stage, error) => warnOf().call(logger,
+          `[runtime-stall-stack] sampler ${stage} failed: ${error?.message || String(error)}`),
+      });
       sampler.start({
         samplingIntervalUs: options.stallSampleIntervalUs || DEFAULT_STALL_SAMPLE_INTERVAL_US,
       })
-        .then(ok => { stallSampler = ok ? sampler : null; })
+        .then(ok => {
+          stallSampler = ok ? sampler : null;
+          // Said either way: with sampling asked for and no stacks in the
+          // journal, the first question is whether it ever started.
+          if (ok) logger.info('[runtime-stall-stack] sampling stacks during stalls');
+          else warnOf().call(logger, '[runtime-stall-stack] sampling did not start; stalls will have no stacks');
+        })
         .catch(() => { stallSampler = null; });
     }
 

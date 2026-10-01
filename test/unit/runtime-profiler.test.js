@@ -256,6 +256,50 @@ describe('停止の見張り', () => {
     assert.equal(cuts[0].toMs, 2000);
   });
 
+  // Sampling was on in production on 2026-10-01 and an hour of stalls came
+  // with no stacks and no word about why. Both cases now say so.
+  it('スタックが取れなかった停止と、採取が始まらなかったことを、それぞれログに出す', async () => {
+    const run = async (sampler) => {
+      const logs = [];
+      let currentTime = 0;
+      const intervalCallbacks = [];
+      const profiler = createRuntimeProfiler({
+        now: () => currentTime,
+        cpuUsage: () => ({ user: 0, system: 0 }),
+        memoryUsage: () => ({ rss: 0, heapUsed: 0 }),
+        createHistogram: () => ({
+          max: 0, enable: () => {}, disable: () => {}, reset: () => {}, percentile: () => 0,
+        }),
+        scheduleInterval: callback => { intervalCallbacks.push(callback); return { unref: () => {} }; },
+        clearScheduledInterval: () => {},
+        createStallSampler: () => sampler,
+      });
+      profiler.start({
+        stallProfile: true,
+        observeGc: false,
+        logger: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args) },
+      });
+      await new Promise(resolve => setImmediate(resolve));
+      currentTime += 2000;
+      intervalCallbacks[1]();
+      await new Promise(resolve => setImmediate(resolve));
+      profiler.stop();
+      return logs;
+    };
+
+    const missed = await run({
+      start: async () => true, cut: async () => null, stop: () => {}, isRunning: () => true,
+    });
+    assert(missed.some(([line]) => line === '[runtime-stall-stack] sampling stacks during stalls'));
+    const [noStack] = missed.filter(([tag]) => tag === '[runtime-stall-stack]').map(([, body]) => body);
+    assert.match(noStack.noStacks, /not running or was busy/);
+
+    const off = await run({
+      start: async () => false, cut: async () => null, stop: () => {}, isRunning: () => false,
+    });
+    assert(off.some(([line]) => /sampling did not start/.test(line)));
+  });
+
   it('停止で切り出した直後は、窓の境目でもう一度切らない', async () => {
     const cuts = [];
     let currentTime = 0;
