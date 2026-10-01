@@ -711,9 +711,15 @@ function connectionsRoutes(ctx) {
         }), { from, to }),
         reader.read('queryByTimeRangePaged', from, to, clampedLimit, offset, opts),
       ]);
-      const connections = attachNetworkNames(attachApplications(attachThreats(
-        page, threatIntel
-      ), history, opts.sourceScope, from, to));
+      // The attribution reads the agent's observations for every row, and on
+      // later pages of a Mac-scoped week that took seconds; it goes to the read
+      // thread like the page itself (P3-184).
+      const attributed = typeof history.attachAgentAttributions === 'function'
+        ? await reader.read('attachAgentAttributions', attachThreats(page, threatIntel), {
+          sourceScope: opts.sourceScope, from, to,
+        })
+        : attachThreats(page, threatIntel);
+      const connections = attachNetworkNames(attributed);
       return res.json({ connections, total, limit: clampedLimit, offset, serverTime: Date.now() });
     }
 

@@ -269,11 +269,65 @@ describe('読み取り用スレッド', () => {
       assert.deepEqual(onThread.byDst, here.byDst);
       assert.deepEqual(onThread.byDevice, here.byDevice);
       assert.equal(onThread.total, here.total);
+      const page = history.queryByTimeRangePaged(from, null, 10, 0, opts);
+      assert.deepEqual(
+        await reader.read('attachAgentAttributions', page, { sourceScope: null, from, to: null }),
+        history.attachAgentAttributions(page, { sourceScope: null, from, to: null }),
+      );
       assert.deepEqual(await reader.read('countFactsByTimeRange', from, null, {}),
         history.countFactsByTimeRange(from, null, {}));
       const routerScope = { sourceKind: 'router', sourceId: 'yamaha1' };
       assert.deepEqual(await reader.read('listSourceDeviceKeys', routerScope),
         history.listSourceDeviceKeys(routerScope));
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('アプリの帰属も、スレッドで付けた結果はこのスレッドと同じ', async () => {
+    history._initForTest(dbPath);
+    const now = Date.now();
+    history.appendHistoryLog({
+      src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP',
+      source: 'yamaha', firstSeen: now, lastSeen: now,
+    });
+    history.appendHistoryLog({
+      src: '192.0.2.30', dst: '203.0.113.53', dport: 53, proto: 'UDP',
+      source: 'agent', observedBy: [], firstSeen: now, lastSeen: now,
+    });
+    const writer = new Database(dbPath);
+    try {
+      writer.prepare(`INSERT INTO agents (
+        agentId, platform, hostName, osVersion, agentVersion, tokenHash,
+        createdAt, updatedAt, lastSeenAt, revokedAt
+      ) VALUES ('agent-a', 'macos', 'macbook', '15', '1.0', 'h', ?, ?, ?, NULL)`).run(now, now, now);
+      const observe = writer.prepare(`INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol, localAddress, localPort,
+        remoteAddress, remotePort, processId, processName, bundleId,
+        firstObservedAt, lastObservedAt, bytesIn, bytesOut, collector, confidence, receivedAt
+      ) VALUES ('agent-a', ?, 'b1', ?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, '10', '20', 'network-extension', 'exact', ?)`);
+      observe.run('linked', 'tcp', '192.0.2.10', 51000, '198.51.100.10', 443, 'Safari', now, now, now);
+      observe.run('agent-only', 'udp', '192.0.2.30', 52000, '203.0.113.53', 53, 'mDNSResponder', now, now, now);
+      writer.prepare(`INSERT INTO connection_agent_observations (
+        src, dst, dport, proto, agentId, observationId, matchKind, matchedAt, timeDeltaMs
+      ) VALUES ('192.0.2.10', '198.51.100.10', 443, 'TCP', 'agent-a', 'linked', 'exact-5tuple', ?, 0)`).run(now);
+    } finally {
+      writer.close();
+    }
+    const host = new DbWorkerHost({ logger: quietLogger });
+    host.open(dbPath, { role: 'read', sourceRouterMap: {} });
+    const reader = createHistoryReader({ history, host, logger: quietLogger });
+    try {
+      const scope = { sourceKind: 'agent', sourceId: 'agent-a' };
+      const page = history.queryByTimeRangePaged(now - 60_000, null, 10, 0, {
+        sort: 'lastSeen', sortDir: 'desc', filters: {}, sourceScope: scope,
+      });
+      assert.equal(page.length, 2);
+      const options = { sourceScope: scope, from: now - 60_000, to: null };
+      const here = history.attachAgentAttributions(page, options);
+      assert.deepEqual(await reader.read('attachAgentAttributions', page, options), here);
+      assert.deepEqual(new Set(here.flatMap(row => row.applications.map(app => app.processName))),
+        new Set(['Safari', 'mDNSResponder']), 'the comparison covers both kinds of attribution');
     } finally {
       await host.close();
     }
