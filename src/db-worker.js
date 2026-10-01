@@ -18,6 +18,7 @@ const { parentPort, workerData } = require('node:worker_threads');
 const Database = require('better-sqlite3');
 const agentIngest = require('./agent-ingest-store');
 const { createHistoryQueries } = require('./history-queries');
+const { createAgentAttribution } = require('./agent-attribution');
 const { summarizeAppGroups } = require('./app-classifier');
 const { routerKindForId } = require('./router-id');
 const {
@@ -47,6 +48,7 @@ const HISTORY_READS = new Set([
   'summarizeByTimeRange',
   'countFactsByTimeRange',
   'listSourceDeviceKeys',
+  'attachAgentAttributions',
 ]);
 
 let role = 'maintenance';
@@ -71,10 +73,18 @@ function openReader(dbPath, sourceRouterMap = {}) {
     compatibilitySource: rows.compatibilitySource,
     summarizeAppGroups,
   });
+  // Which application each row of a log page belongs to. On a Mac-scoped
+  // seven-day log this took 3.4-4.4 s for the second and third pages of 200
+  // rows (2026-10-01), on the main thread.
+  const attribution = createAgentAttribution({ getDb: () => db });
+  const reads = {
+    ...queries,
+    attachAgentAttributions: (rows, options) => attribution.attach(rows, options),
+  };
   const refreshKinds = () => {
     kinds = new Map(db.prepare('SELECT id, kind FROM routers').all().map(row => [row.id, row.kind]));
   };
-  return { db, queries, refreshKinds };
+  return { db, queries: reads, refreshKinds };
 }
 
 function open(dbPath, options = {}) {
