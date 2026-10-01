@@ -366,9 +366,9 @@ const PRUNE_BATCH_MIN = 50;
 const PRUNE_BATCH_MAX = 5000;
 let adaptivePruneBatch = 500;
 
-function adaptPruneBatch(size, elapsedMs) {
-  if (elapsedMs > PRUNE_TARGET_MS) return Math.max(PRUNE_BATCH_MIN, Math.floor(size / 2));
-  if (elapsedMs < PRUNE_TARGET_MS / 4) return Math.min(PRUNE_BATCH_MAX, size * 2);
+function adaptPruneBatch(size, elapsedMs, { targetMs = PRUNE_TARGET_MS, maxBatch = PRUNE_BATCH_MAX } = {}) {
+  if (elapsedMs > targetMs) return Math.max(PRUNE_BATCH_MIN, Math.floor(size / 2));
+  if (elapsedMs < targetMs / 4) return Math.min(maxBatch, size * 2);
   return size;
 }
 
@@ -391,6 +391,7 @@ function adaptPruneBatch(size, elapsedMs) {
  */
 function pruneObservations({
   before, batchSize, budgetMs = PRUNE_BUDGET_MS, now = Date.now,
+  targetMs = PRUNE_TARGET_MS, maxBatch = PRUNE_BATCH_MAX,
 } = {}) {
   const database = requireDb();
   if (!Number.isFinite(before)) throw new TypeError('before must be finite');
@@ -419,7 +420,11 @@ function pruneObservations({
   // A caller that names a size gets exactly that size (tests do); otherwise
   // the size carries over between calls and follows the disk.
   const fixedSize = Number.isInteger(batchSize) && batchSize > 0;
-  let size = fixedSize ? batchSize : adaptivePruneBatch;
+  // A caller that holds the write lock against someone else's writes (the
+  // database thread, P3-184) asks for smaller transactions: there, how long
+  // one transaction keeps the lock matters more than how fast the whole run
+  // finishes.
+  let size = fixedSize ? batchSize : Math.min(adaptivePruneBatch, maxBatch);
   const observationBatch = database.transaction(() => {
     const rows = pickObservations.all(before, size);
     for (const row of rows) {
@@ -433,7 +438,7 @@ function pruneObservations({
     const deleted = timed('observationsMs', () => observationBatch.immediate());
     const full = deleted >= size;
     if (!fixedSize) {
-      size = adaptPruneBatch(size, now() - batchStartedAt);
+      size = adaptPruneBatch(size, now() - batchStartedAt, { targetMs, maxBatch });
       adaptivePruneBatch = size;
     }
     if (!full) break;
@@ -446,14 +451,28 @@ function pruneObservations({
   const nextHour = database.prepare(
     'SELECT MIN(hourStart) AS hour FROM agent_app_hourly WHERE hourStart > ?'
   );
-  const dropHour = database.prepare(
-    'DELETE FROM agent_app_hourly WHERE hourStart = ? AND lastObservedAt < ?'
-  );
+  // An hour in pieces of the batch size: one busy hour was 1.0-1.3 s in a
+  // single transaction on 2026-10-01, long enough to stall the main thread's
+  // writes waiting for the lock. The table has no rowid, so the pieces are
+  // picked by primary key.
+  const dropHourPiece = database.prepare(`
+    DELETE FROM agent_app_hourly
+    WHERE (hourStart, agentId, appIdentity, localAddress, remoteAddress, remotePort, networkProtocol) IN (
+      SELECT hourStart, agentId, appIdentity, localAddress, remoteAddress, remotePort, networkProtocol
+      FROM agent_app_hourly WHERE hourStart = ? AND lastObservedAt < ? LIMIT ?
+    )
+  `);
+  const hourPiece = fixedSize ? batchSize : Math.min(size, maxBatch);
   for (let cursor = -Infinity; ;) {
     const hour = nextHour.get(cursor)?.hour;
     if (hour == null || hour >= before) break;
-    result.hourly += timed('hourlyMs',
-      () => database.transaction(() => dropHour.run(hour, before).changes).immediate());
+    for (;;) {
+      const deleted = timed('hourlyMs',
+        () => database.transaction(() => dropHourPiece.run(hour, before, hourPiece).changes).immediate());
+      result.hourly += deleted;
+      if (deleted < hourPiece) break;
+      if (outOfTime()) { result.more = true; return result; }
+    }
     cursor = hour;
     if (outOfTime()) { result.more = true; return result; }
   }

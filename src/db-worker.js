@@ -33,6 +33,17 @@ const PASS_GAP_MS = 250;
 // after a day away, without holding the thread for hours if something is
 // wrong. The caller comes back later for the rest.
 const MAX_PASSES_PER_RUN = 2000;
+// One delete transaction here holds the write lock while the main thread's
+// uploads wait for it, synchronously. With the defaults a busy evening grew
+// batches to the thousands and single transactions to 1.0-1.5 s, and the
+// Hub stalled 2-4 s twice (2026-10-01 21:05 and 21:35). Smaller and slower
+// is the right trade on this thread.
+const PRUNE_MAX_BATCH = 500;
+const PRUNE_TARGET_MS = 50;
+// A write-back longer than this gets the same time again before the next
+// pass, up to the cap, so the main thread's next commit does not land on it.
+const SLOW_WRITE_BACK_MS = 100;
+const WRITE_BACK_PAUSE_CAP_MS = 2000;
 
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -110,7 +121,9 @@ function pruneAgentObservations({ before }) {
     checkpointMs: 0, slowestCheckpointMs: 0, logFramesAtEnd: null,
   };
   for (;;) {
-    const pass = agentIngest.pruneObservations({ before });
+    const pass = agentIngest.pruneObservations({
+      before, maxBatch: PRUNE_MAX_BATCH, targetMs: PRUNE_TARGET_MS,
+    });
     totals.passes += 1;
     for (const key of ['observations', 'correlations', 'hourly', 'batches']) totals[key] += pass[key];
     for (const key of ['observationsMs', 'hourlyMs', 'receiptsMs']) totals[key] += pass.timings[key];
@@ -124,7 +137,7 @@ function pruneAgentObservations({ before }) {
     totals.logFramesAtEnd = written.logFrames;
     if (!pass.more) break;
     if (totals.passes >= MAX_PASSES_PER_RUN) { totals.more = true; break; }
-    sleep(PASS_GAP_MS);
+    sleep(PASS_GAP_MS + (written.ms > SLOW_WRITE_BACK_MS ? Math.min(written.ms, WRITE_BACK_PAUSE_CAP_MS) : 0));
   }
   return totals;
 }
