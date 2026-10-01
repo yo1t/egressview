@@ -225,6 +225,29 @@ describe('AI configuration routes', () => {
     assert.deepEqual(ranges, [[1000, 2000], [0, 1000]]);
   });
 
+  // The panel always sends to = Date.now(), so an open-ended read keyed on an
+  // absent `to` never applied to it (P3-184).
+  it('今に近い終わりの時刻は、今の期間を終わりなしで読む。古い期間は区切ったまま', async () => {
+    const ranges = [];
+    const history = {
+      countFactsByTimeRange(from, to) { ranges.push([from, to]); return { connections: 1, devices: 1, destinations: 1 }; },
+      groupDstByTimeRange: () => [],
+    };
+    const routerManager = { list: () => [] };
+    const app = appFor(createAiProvider(), undefined, { history, threatIntel: null, routerManager });
+    const now = Date.now();
+    const from = now - 7 * 86_400_000;
+    const result = await request(app, 'GET', `/api/ai/facts?from=${from}&to=${now - 2000}`);
+    assert.equal(result.status, 200);
+    assert.deepEqual(ranges, [[from, null], [from - (now - 2000 - from), from]]);
+    assert.equal(result.body.range.to, now - 2000, 'the answer still names the range that was asked for');
+
+    assert.equal(aiRoutes._endsAboutNow(undefined, now), true);
+    assert.equal(aiRoutes._endsAboutNow(now - 5 * 60_000, now), true);
+    assert.equal(aiRoutes._endsAboutNow(now - 5 * 60_000 - 1, now), false);
+    assert.equal(aiRoutes._endsAboutNow(now + 60_000, now), true);
+  });
+
   it('uses the selected source for AI facts and rejects unavailable IDs', async () => {
     const scopes = [];
     const history = {
