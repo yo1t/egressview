@@ -110,6 +110,11 @@ function summariseStallSamples(profile, {
  */
 function createStallSampler(deps = {}) {
   const now = deps.now || (() => require('node:perf_hooks').performance.now());
+  // Told when starting or cutting fails. The sampler never throws -- it must
+  // not break the server -- so without this a failure was silent: on the
+  // production Hub on 2026-10-01 it produced no stacks for an hour and nothing
+  // said why.
+  const onError = typeof deps.onError === 'function' ? deps.onError : () => {};
   const createSession = deps.createSession || (() => {
     // Required lazily: a Hub that never turns this on should not pay for the
     // inspector module, and some builds do not ship it at all.
@@ -145,8 +150,9 @@ function createStallSampler(deps = {}) {
       await post('Profiler.setSamplingInterval', { interval: samplingIntervalUs });
       await beginProfile();
       return true;
-    } catch {
+    } catch (error) {
       // A diagnostic must never be the thing that breaks the server.
+      onError('start', error);
       try { session?.disconnect(); } catch { /* already gone */ }
       session = null;
       running = false;
@@ -164,7 +170,15 @@ function createStallSampler(deps = {}) {
    * or the next reader spends an afternoon chasing its own instrument.
    */
   async function cut({ fromMs, toMs, summarise = true } = {}) {
-    if (!session || !running || cutting) return null;
+    if (!session || cutting) return null;
+    if (!running) {
+      // An earlier cut stopped the profile and could not start it again.
+      // Before, that left the sampler stopped for good while every later cut
+      // returned nothing. Try again; the stall in hand has no samples, but
+      // the next one will.
+      try { await beginProfile(); } catch (error) { onError('restart', error); }
+      return null;
+    }
     cutting = true;
     const profileStartedAtMs = startedAtMs;
     const cutBeganAt = now();
@@ -177,7 +191,8 @@ function createStallSampler(deps = {}) {
       await beginProfile();
       if (!summary) return { cutMs: round(now() - cutBeganAt) };
       return { ...summary, cutMs: round(now() - cutBeganAt) };
-    } catch {
+    } catch (error) {
+      onError('cut', error);
       running = false;
       return null;
     } finally {

@@ -97,12 +97,51 @@ describe('停止サンプラ', () => {
     assert.ok(result.cutMs > 0);
   });
 
-  it('インスペクタが使えなければ黙って諦める', async () => {
+  it('インスペクタが使えなければ諦め、その理由を知らせる', async () => {
+    const errors = [];
     const sampler = createStallSampler({
       createSession: () => { throw new Error('no inspector in this build'); },
+      onError: (stage, error) => errors.push([stage, error.message]),
     });
     assert.equal(await sampler.start(), false);
     assert.equal(sampler.isRunning(), false);
     assert.equal(await sampler.cut({ fromMs: 0, toMs: 1 }), null);
+    assert.deepEqual(errors, [['start', 'no inspector in this build']]);
+  });
+
+  // On the production Hub on 2026-10-01 sampling was on and no stall had a
+  // stack for an hour. A failed cut used to leave the profile stopped for
+  // good, with every later cut returning nothing and nothing said.
+  it('切り出しに失敗したら知らせ、次の切り出しで記録を始め直す', async () => {
+    const errors = [];
+    let failNextStart = false;
+    const calls = [];
+    const sampler = createStallSampler({
+      now: () => 1000,
+      onError: (stage, error) => errors.push([stage, error.message]),
+      createSession: () => ({
+        connect: () => {},
+        disconnect: () => {},
+        post: (method, params, callback) => {
+          calls.push(method);
+          const cb = typeof params === 'function' ? params : callback;
+          if (method === 'Profiler.start' && failNextStart) {
+            failNextStart = false;
+            return cb(new Error('profiler busy'));
+          }
+          cb(null, method === 'Profiler.stop' ? { profile: buildProfile() } : {});
+        },
+      }),
+    });
+    assert.equal(await sampler.start(), true);
+    failNextStart = true;
+    assert.equal(await sampler.cut({ fromMs: 1180, toMs: 1420 }), null);
+    assert.deepEqual(errors, [['cut', 'profiler busy']]);
+    assert.equal(sampler.isRunning(), false);
+
+    assert.equal(await sampler.cut({ fromMs: 1180, toMs: 1420 }), null, 'この回は記録を始め直すだけ');
+    assert.equal(sampler.isRunning(), true);
+    const summary = await sampler.cut({ fromMs: 1180, toMs: 1420 });
+    assert.equal(summary.frames[0].stack[0], 'matchThreats threats.js:12');
   });
 });
