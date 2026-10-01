@@ -513,4 +513,39 @@ describe('削除の件数は、ディスクの速さに合わせて変わる', (
     assert.equal(adapt(60, 5000), 50);
     assert.equal(adapt(4000, 1), 5000);
   });
+  // The database thread holds the write lock against the main thread's
+  // uploads, so it asks for smaller transactions (P3-184).
+  it('上限と目標を指定されたら、それに合わせる', () => {
+    assert.equal(adapt(400, 5, { maxBatch: 500 }), 500);
+    assert.equal(adapt(400, 60, { targetMs: 50 }), 200);
+    assert.equal(adapt(400, 30, { targetMs: 50 }), 400);
+  });
+});
+
+describe('時間集計の削除は、1時間分を一度に消さない', () => {
+  beforeEach(() => store._initForTest());
+  it('指定した件数ずつ消し、時間の予算を使い切ったら続きを残す', () => {
+    const database = store._dbForTest();
+    const hourStart = Date.parse('2026-08-11T12:00:00Z');
+    const insert = database.prepare(`INSERT INTO agent_app_hourly (
+      hourStart, agentId, appIdentity, processName, localAddress, remoteAddress,
+      remotePort, networkProtocol, firstObservedAt, lastObservedAt
+    ) VALUES (?, 'agent-a', 'app', 'app', '192.0.2.1', ?, 443, 'tcp', ?, ?)`);
+    for (let i = 0; i < 25; i += 1) insert.run(hourStart, `198.51.100.${i}`, hourStart, hourStart + 1000);
+    const before = hourStart + 7_200_000;
+
+    const first = store.pruneObservations({ before, batchSize: 10, budgetMs: 0 });
+    assert.equal(first.hourly, 10, '1回の書き込みで消すのは10件まで');
+    assert.equal(first.more, true);
+    assert.ok(first.timings.slowestTransactionMs <= first.timings.hourlyMs);
+
+    let total = first.hourly;
+    for (let calls = 0; calls < 10; calls += 1) {
+      const pass = store.pruneObservations({ before, batchSize: 10, budgetMs: 0 });
+      total += pass.hourly;
+      if (!pass.more) break;
+    }
+    assert.equal(total, 25);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 0);
+  });
 });
