@@ -502,6 +502,30 @@ describe('期限切れの観測は、少しずつ消す', () => {
   });
 });
 
+describe('遅い受け取りの書き込みは、どこに時間がかかったかを言う', () => {
+  const logger = require('../../src/logger');
+  it('ロック待ち・書き込み・確定の時間を分けてログに出す。拒否された時は取り消す', async () => {
+    store._initForTest();
+    const warned = [];
+    const originalWarn = logger.warn;
+    logger.warn = (...args) => warned.push(args.join(' '));
+    store._setSlowWriteMsForTest(-1);
+    try {
+      await store.storeBatch(agentId, copy(), { receivedAt });
+    } finally {
+      logger.warn = originalWarn;
+      store._setSlowWriteMsForTest(1000);
+    }
+    const lines = warned.filter(line => line.startsWith('[agent-ingest] slow write '));
+    assert.deepEqual(lines.map(line => JSON.parse(line.slice('[agent-ingest] slow write '.length)).step),
+      ['chunk', 'finish']);
+    const parts = JSON.parse(lines[0].slice('[agent-ingest] slow write '.length));
+    for (const key of ['totalMs', 'lockWaitMs', 'writeMs', 'commitMs']) assert.equal(typeof parts[key], 'number', key);
+    assert.equal(store._dbForTest().inTransaction, false);
+    assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 1);
+  });
+});
+
 describe('削除の件数は、ディスクの速さに合わせて変わる', () => {
   const adapt = store._adaptPruneBatchForTest;
   it('目標の100msを超えたら半分にし、十分短ければ倍にする', () => {

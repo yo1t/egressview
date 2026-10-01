@@ -2,7 +2,9 @@
 
 const runtimeProfiler = require('./runtime-profiler');
 
+const fs = require('node:fs');
 const path = require('node:path');
+const logger = require('./logger');
 const Database = require('better-sqlite3');
 const { applyWalPragmas } = require('./sqlite-wal');
 const {
@@ -45,6 +47,59 @@ function closeDb() {
 function reopen(dbPath) {
   closeDb();
   initDb(dbPath || lastDbPath);
+}
+
+// An upload's write that takes this long is logged with where the time went.
+// A 4 s write on 2026-10-02 00:19 stalled the Hub with nothing else writing
+// (P3-184). Three parts tell the candidates apart:
+//   - lockWaitMs: waiting for another connection's write to finish;
+//   - writeMs: the statements themselves, which read cold index pages;
+//   - commitMs: the commit, where SQLite runs an automatic checkpoint once
+//     the log passes its threshold -- the write-back of everyone's writes.
+// The log's size before and after says whether a checkpoint ran.
+let slowWriteMs = 1000;
+
+function walBytes() {
+  try { return fs.statSync(`${lastDbPath}-wal`).size; } catch { return null; }
+}
+
+// Runs a better-sqlite3 transaction function inside an explicit BEGIN
+// IMMEDIATE, so the lock, the statements and the commit can be timed apart.
+// Called inside a transaction, the function runs as a savepoint, so the
+// whole call stays one atomic write as with `.immediate()`.
+function writeTimed(name, transactionFn, ...args) {
+  const database = requireDb();
+  const began = performance.now();
+  const walBefore = walBytes();
+  database.exec('BEGIN IMMEDIATE');
+  const locked = performance.now();
+  let result;
+  try {
+    result = transactionFn(...args);
+  } catch (error) {
+    if (database.inTransaction) database.exec('ROLLBACK');
+    throw error;
+  }
+  const written = performance.now();
+  try {
+    database.exec('COMMIT');
+  } catch (error) {
+    if (database.inTransaction) database.exec('ROLLBACK');
+    throw error;
+  }
+  const committed = performance.now();
+  if (committed - began > slowWriteMs) {
+    logger.warn(`[agent-ingest] slow write ${JSON.stringify({
+      step: name,
+      totalMs: Math.round(committed - began),
+      lockWaitMs: Math.round(locked - began),
+      writeMs: Math.round(written - locked),
+      commitMs: Math.round(committed - written),
+      walBytesBefore: walBefore,
+      walBytesAfter: walBytes(),
+    })}`);
+  }
+  return result;
 }
 
 function requireDb() {
@@ -291,7 +346,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
   for (let i = 0; i < observations.length; i += OBSERVATIONS_PER_CHUNK) {
     if (i > 0) await yieldToLoop();
     const chunk = observations.slice(i, i + OBSERVATIONS_PER_CHUNK);
-    runtimeProfiler.measureSync('agentIngest.chunk', () => writeChunk.immediate(chunk));
+    runtimeProfiler.measureSync('agentIngest.chunk', () => writeTimed('chunk', writeChunk, chunk));
   }
 
   const finish = database.transaction(() => {
@@ -329,7 +384,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
     );
   });
   if (observations.length > OBSERVATIONS_PER_CHUNK) await yieldToLoop();
-  runtimeProfiler.measureSync('agentIngest.finish', () => finish.immediate());
+  runtimeProfiler.measureSync('agentIngest.finish', () => writeTimed('finish', finish));
 
   // Correlation deliberately does not run here. It used to, once per ingest,
   // and because it passed no `since` it re-examined the newest 5,000
@@ -663,6 +718,7 @@ module.exports = {
   pruneObservations,
   checkpointLog,
   _adaptPruneBatchForTest: adaptPruneBatch,
+  _setSlowWriteMsForTest: value => { slowWriteMs = value; },
   queryCorrelationReadModel,
   queryUnifiedReadModel,
   reconcileCorrelations,
