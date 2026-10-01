@@ -4,7 +4,7 @@ const { Router } = require('express');
 const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
 const { buildAiFactsAsync } = require('../ai-facts');
-const { createHistoryReader } = require('../history-reader');
+const { createHistoryReader, createSharedReader } = require('../history-reader');
 const { buildAiContext } = require('../ai-context');
 const { randomUUID } = require('node:crypto');
 const { monthlyRanges, pricingCoverage, pricingMetadata, pricingStatus } = require('../ai-usage');
@@ -97,7 +97,12 @@ module.exports = function aiRoutes({
   // The facts' queries go through this, so they run on the read thread when
   // the server has one (P3-184); without one, here, as before.
   const reader = historyReader || (history ? createHistoryReader({ history }) : null);
-  const readFacts = (options) => buildAiFactsAsync({ read: reader.read, ...options });
+  // The panel asks for the same facts several times at once; they share one
+  // set of reads (createSharedReader). Only the reads are shared: router
+  // health and threat verdicts are worked out per request, because they can
+  // change within the minute and cost nothing.
+  const sharedReads = reader ? createSharedReader({ reader }) : null;
+  const readFacts = (options) => buildAiFactsAsync({ read: sharedReads.read, ...options });
   const router = Router();
   const collectionSources = sourceScope => {
     const routers = routerManager?.list?.() || [];
