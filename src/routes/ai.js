@@ -61,6 +61,19 @@ const factsQueryShape = {
 };
 const factsQuerySchema = z.object(factsQueryShape).strict().superRefine(validateSourceScopePair);
 const MAX_FACTS_RANGE_MS = 14 * 24 * 60 * 60 * 1000;
+// How close to now an upper bound may be and still be read as "up to now".
+//
+// The panel always sends `to = Date.now()` (ai-insights.js), so the open-ended
+// read added for an absent `to` in #738 never applied to it, and a Mac-scoped
+// week still built the agent's unmatched flows twice (P3-184). Reading such a
+// period without its bound adds only what arrived between the browser's clock
+// and this read -- seconds, the staleness the shared reads already allow.
+const OPEN_ENDED_WITHIN_MS = 5 * 60 * 1000;
+
+function endsAboutNow(to, now = Date.now()) {
+  if (to == null) return true;
+  return Number.isFinite(to) && Math.abs(now - to) <= OPEN_ENDED_WITHIN_MS;
+}
 const languageSchema = z.enum(['ja', 'en']);
 const analysisSchema = z.object({
   ...factsQueryShape,
@@ -102,6 +115,17 @@ module.exports = function aiRoutes({
   // health and threat verdicts are worked out per request, because they can
   // change within the minute and cost nothing.
   const sharedReads = reader ? createSharedReader({ reader }) : null;
+  // How often the sharing paid, every ten minutes while there is anything to
+  // say: the first deploy cut the facts' reads per minute far less than
+  // expected, and the numbers that explain why are these.
+  let lastSharedStats = '';
+  const sharedStatsTimer = sharedReads ? setInterval(() => {
+    const stats = JSON.stringify(sharedReads.stats());
+    if (stats === lastSharedStats) return;
+    lastSharedStats = stats;
+    logger.info(`[ai-facts] shared reads ${stats}`);
+  }, 10 * 60 * 1000) : null;
+  sharedStatsTimer?.unref?.();
   const readFacts = (options) => buildAiFactsAsync({ read: sharedReads.read, ...options });
   const router = Router();
   const collectionSources = sourceScope => {
@@ -317,7 +341,7 @@ module.exports = function aiRoutes({
         routers: collectionSources(scoped.scope),
         from,
         to,
-        openEnded: parsed.data.to == null,
+        openEnded: endsAboutNow(parsed.data.to),
         sourceScope: scoped.scope,
       }));
     } catch (error) {
@@ -384,7 +408,7 @@ module.exports = function aiRoutes({
       const sourceScope = scoped.scope;
       const routers = collectionSources(sourceScope);
       const facts = await readFacts({
-        threatIntel, routers, from, to, openEnded: parsed.data.to == null, sourceScope,
+        threatIntel, routers, from, to, openEnded: endsAboutNow(parsed.data.to), sourceScope,
       });
       const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus, sourceScope });
       const result = await aiProvider.generateInsight(context, {
@@ -495,7 +519,7 @@ module.exports = function aiRoutes({
     try {
       const routers = collectionSources(sourceScope);
       const facts = await readFacts({
-        threatIntel, routers, from, to, openEnded: parsed.data.to == null, sourceScope,
+        threatIntel, routers, from, to, openEnded: endsAboutNow(parsed.data.to), sourceScope,
       });
       const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus, sourceScope });
       const response = await aiProvider.generateInsight(context, {
@@ -541,3 +565,5 @@ module.exports = function aiRoutes({
 
   return router;
 };
+
+module.exports._endsAboutNow = endsAboutNow;
