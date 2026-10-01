@@ -305,3 +305,67 @@ describe('読み取り用スレッド', () => {
     assert.match(reply.error, /Not a history read: appendHistoryLog/);
   });
 });
+
+describe('共有の読み取り（createSharedReader）', () => {
+  const { createSharedReader } = require('../../src/history-reader');
+  function counting() {
+    const calls = [];
+    const pending = [];
+    return {
+      calls,
+      finishAll: value => pending.splice(0).forEach(resolve => resolve(value)),
+      reader: { read: (fn, ...args) => { calls.push([fn, ...args]); return new Promise(resolve => pending.push(resolve)); } },
+    };
+  }
+
+  it('同時に届いた同じ読み取りは、1回の読み取りを待ち合わせる', async () => {
+    const { calls, finishAll, reader } = counting();
+    const shared = createSharedReader({ reader, now: () => 1_000_000 });
+    const scope = { sourceScope: { sourceKind: 'agent', sourceId: 'a' } };
+    const both = Promise.all([
+      shared.read('countFactsByTimeRange', 1_000_000 - 7 * 86_400_000, null, scope),
+      shared.read('countFactsByTimeRange', 1_000_000 - 7 * 86_400_000 + 5, null, scope),
+    ]);
+    finishAll({ connections: 3 });
+    assert.deepEqual(await both, [{ connections: 3 }, { connections: 3 }]);
+    assert.equal(calls.length, 1);
+    assert.equal(shared.stats().joined, 1);
+  });
+
+  it('1分以内は同じ答えを返し、1分を過ぎたら読み直す', async () => {
+    let clock = 10_000_000;
+    const calls = [];
+    const shared = createSharedReader({
+      reader: { read: async (fn, from) => { calls.push(from); return { n: calls.length }; } },
+      now: () => clock,
+    });
+    const from = () => clock - 86_400_000;
+    assert.deepEqual(await shared.read('groupDstByTimeRange', from(), null, {}), { n: 1 });
+    clock += 30_000;
+    assert.deepEqual(await shared.read('groupDstByTimeRange', clock - 86_400_000 - 30_000, null, {}), { n: 1 });
+    clock += 31_000;
+    assert.deepEqual(await shared.read('groupDstByTimeRange', from(), null, {}), { n: 2 });
+  });
+
+  it('期間が短くても、今の期間と前の期間を同じ答えにしない', async () => {
+    const calls = [];
+    const shared = createSharedReader({
+      reader: { read: async (fn, from, to) => { calls.push([from, to]); return { from, to }; } },
+      now: () => 5_000,
+    });
+    assert.deepEqual(await shared.read('countFactsByTimeRange', 1000, 2000, {}), { from: 1000, to: 2000 });
+    assert.deepEqual(await shared.read('countFactsByTimeRange', 0, 1000, {}), { from: 0, to: 1000 });
+    assert.equal(calls.length, 2);
+  });
+
+  it('絞り込みが違えば別に読む', async () => {
+    const calls = [];
+    const shared = createSharedReader({
+      reader: { read: async (fn, from, to, options) => { calls.push(options); return calls.length; } },
+      now: () => 100_000_000,
+    });
+    await shared.read('countFactsByTimeRange', 1_000, null, { sourceScope: null });
+    await shared.read('countFactsByTimeRange', 1_000, null, { sourceScope: { sourceKind: 'agent', sourceId: 'a' } });
+    assert.equal(calls.length, 2);
+  });
+});
