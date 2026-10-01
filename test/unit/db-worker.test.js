@@ -269,6 +269,11 @@ describe('読み取り用スレッド', () => {
       assert.deepEqual(onThread.byDst, here.byDst);
       assert.deepEqual(onThread.byDevice, here.byDevice);
       assert.equal(onThread.total, here.total);
+      assert.deepEqual(await reader.read('countFactsByTimeRange', from, null, {}),
+        history.countFactsByTimeRange(from, null, {}));
+      const routerScope = { sourceKind: 'router', sourceId: 'yamaha1' };
+      assert.deepEqual(await reader.read('listSourceDeviceKeys', routerScope),
+        history.listSourceDeviceKeys(routerScope));
     } finally {
       await host.close();
     }

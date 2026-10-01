@@ -3,7 +3,8 @@
 const { Router } = require('express');
 const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
-const { buildAiFacts } = require('../ai-facts');
+const { buildAiFactsAsync } = require('../ai-facts');
+const { createHistoryReader } = require('../history-reader');
 const { buildAiContext } = require('../ai-context');
 const { randomUUID } = require('node:crypto');
 const { monthlyRanges, pricingCoverage, pricingMetadata, pricingStatus } = require('../ai-usage');
@@ -90,9 +91,13 @@ const pricingCheckSchema = z.object({
 
 module.exports = function aiRoutes({
   requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager, devices, asus, agentIdentities,
-  agentIngest = null, aiBudget,
+  agentIngest = null, aiBudget, historyReader = null,
 }) {
   if (!aiBudget?.begin || !aiBudget?.finish) throw new TypeError('AI budget enforcement is required');
+  // The facts' queries go through this, so they run on the read thread when
+  // the server has one (P3-184); without one, here, as before.
+  const reader = historyReader || (history ? createHistoryReader({ history }) : null);
+  const readFacts = (options) => buildAiFactsAsync({ read: reader.read, ...options });
   const router = Router();
   const collectionSources = sourceScope => {
     const routers = routerManager?.list?.() || [];
@@ -290,7 +295,7 @@ module.exports = function aiRoutes({
     }
   });
 
-  router.get('/ai/facts', requireAdmin, (req, res) => {
+  router.get('/ai/facts', requireAdmin, async (req, res) => {
     const parsed = parseRequest(factsQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const scoped = requireKnownSourceScope(parsed.data, { routerManager, agentIdentities }, res);
@@ -302,12 +307,12 @@ module.exports = function aiRoutes({
       return res.status(400).json({ error: 'AI facts range must not exceed 14 days' });
     }
     try {
-      res.json(buildAiFacts({
-        history,
+      res.json(await readFacts({
         threatIntel,
         routers: collectionSources(scoped.scope),
         from,
         to,
+        openEnded: parsed.data.to == null,
         sourceScope: scoped.scope,
       }));
     } catch (error) {
@@ -373,7 +378,9 @@ module.exports = function aiRoutes({
       reservation = aiBudget.begin({ principal: budgetPrincipal(req), provider, kind: 'analysis' });
       const sourceScope = scoped.scope;
       const routers = collectionSources(sourceScope);
-      const facts = buildAiFacts({ history, threatIntel, routers, from, to, sourceScope });
+      const facts = await readFacts({
+        threatIntel, routers, from, to, openEnded: parsed.data.to == null, sourceScope,
+      });
       const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus, sourceScope });
       const result = await aiProvider.generateInsight(context, {
         signal: controller.signal,
@@ -482,7 +489,9 @@ module.exports = function aiRoutes({
     req.once('aborted', () => controller.abort());
     try {
       const routers = collectionSources(sourceScope);
-      const facts = buildAiFacts({ history, threatIntel, routers, from, to, sourceScope });
+      const facts = await readFacts({
+        threatIntel, routers, from, to, openEnded: parsed.data.to == null, sourceScope,
+      });
       const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus, sourceScope });
       const response = await aiProvider.generateInsight(context, {
         signal: controller.signal,

@@ -1,16 +1,20 @@
 'use strict';
 
-function countThreats(history, threatIntel, from, to, sourceScope = null) {
+function tallyThreats(groups, threatIntel) {
   let safe = 0;
   let warn = 0;
   let danger = 0;
-  for (const { dst, dstHost, cnt } of history.groupDstByTimeRange(from, to, { sourceScope })) {
+  for (const { dst, dstHost, cnt } of groups) {
     const threat = threatIntel?.matchThreatIntel(dst, dstHost || dst);
     if (!threat) safe += cnt;
     else if (threat.confidence === 'low') warn += cnt;
     else danger += cnt;
   }
   return { safe, warn, danger };
+}
+
+function countThreats(history, threatIntel, from, to, sourceScope = null) {
+  return tallyThreats(history.groupDstByTimeRange(from, to, { sourceScope }), threatIntel);
 }
 
 function periodFacts(history, threatIntel, from, to, sourceScope = null) {
@@ -63,4 +67,44 @@ function buildAiFacts({ history, threatIntel, routers, from, to, sourceScope = n
   };
 }
 
-module.exports = { buildAiFacts, collectionFacts, countThreats, periodFacts };
+async function periodFactsAsync(read, threatIntel, from, to, sourceScope = null) {
+  const counts = await read('countFactsByTimeRange', from, to, { sourceScope });
+  const groups = await read('groupDstByTimeRange', from, to, { sourceScope });
+  return { ...counts, ...tallyThreats(groups, threatIntel) };
+}
+
+/**
+ * The same facts, read through `read(fn, ...args)` -- the history reader, so
+ * the queries run on the read thread when the server has one (P3-184).
+ *
+ * Measured on the production Hub on 2026-10-01, seven days scoped to one Mac:
+ * 6.3 s, nearly all of it building the agent's unmatched flows twice for the
+ * current period, on the thread that answers every request.
+ *
+ * `openEnded` is for a caller that was not given an upper bound and filled in
+ * "now". The current period is then read without one, which is the same rows
+ * (nothing is later than now) and lets the agent-scoped queries share one
+ * build (history-queries.js). The previous period always has a bound.
+ */
+async function buildAiFactsAsync({
+  read, threatIntel, routers, from, to, openEnded = false, sourceScope = null, serverTime = Date.now(),
+}) {
+  const durationMs = to - from;
+  const previousFrom = from - durationMs;
+  const previousTo = from;
+  const current = await periodFactsAsync(read, threatIntel, from, openEnded ? null : to, sourceScope);
+  const previous = await periodFactsAsync(read, threatIntel, previousFrom, previousTo, sourceScope);
+  return {
+    serverTime,
+    range: { from, to, durationMs },
+    previousRange: { from: previousFrom, to: previousTo, durationMs },
+    collection: collectionFacts(routers),
+    sourceScope,
+    current,
+    previous,
+  };
+}
+
+module.exports = {
+  buildAiFacts, buildAiFactsAsync, collectionFacts, countThreats, periodFacts, tallyThreats,
+};
