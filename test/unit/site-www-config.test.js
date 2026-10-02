@@ -64,8 +64,9 @@ describe('product site Jekyll configuration', () => {
   });
 
   it('索引しないページはsitemapから外す', () => {
-    // A redirect, an error page and a verification token are not content.
-    for (const page of ['index.ja.html', '404.html', 'google87ed3f363a004a20.html']) {
+    // An error page and a verification token are not content. (index.ja.html
+    // was a redirect and was listed here; it is now the Japanese page.)
+    for (const page of ['404.html', 'google87ed3f363a004a20.html']) {
       const file = path.join(root, 'site', page);
       if (!fs.existsSync(file)) continue;
       assert.match(fs.readFileSync(file, 'utf8').slice(0, 400), /^---[\s\S]*sitemap: false/,

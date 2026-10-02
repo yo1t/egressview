@@ -97,6 +97,14 @@ jobs:
           grep -q 'hreflang="ja" href="https://www.egressview.com/docs/architecture.ja.html"' \
             _site/docs/architecture.html || {
             echo 'hreflang does not point at the Japanese page on www' >&2; exit 1; }
+          # The top page and its Japanese page, which carries the Japanese in
+          # its markup so it can be indexed (scripts/build-site-japanese.js).
+          for page in index.html index.ja.html; do
+            grep -q 'hreflang="ja" href="https://www.egressview.com/index.ja.html"' "_site/$page" || {
+              echo "$page does not name the Japanese top page" >&2; exit 1; }
+          done
+          grep -q '<html lang="ja">' _site/index.ja.html || {
+            echo 'index.ja.html is not a Japanese page' >&2; exit 1; }
 
       - name: Check the sitemap lists this site, and only this site
         # It was hand-written and listed two URLs while the site served over
@@ -110,13 +118,14 @@ jobs:
           [ "$count" -ge 20 ] || {
             echo "sitemap lists only $count URLs; the docs are missing" >&2; exit 1; }
           for required in 'https://www.egressview.com/' \
+                          'https://www.egressview.com/index.ja.html' \
                           'https://www.egressview.com/products.html' \
                           'https://www.egressview.com/docs/agent-privacy.html' \
                           'https://www.egressview.com/docs/agent-privacy.ja.html'                           'https://www.egressview.com/docs/agent-privacy-windows.html'                           'https://www.egressview.com/docs/agent-privacy-windows.ja.html'; do
             grep -q "<loc>$required</loc>" _site/sitemap.xml || {
               echo "sitemap is missing $required" >&2; exit 1; }
           done
-          for forbidden in 'dl.egressview.com' 'yo1t.github.io' '/404.html' '/index.ja.html'; do
+          for forbidden in 'dl.egressview.com' 'yo1t.github.io' '/404.html'; do
             if grep -q "$forbidden" _site/sitemap.xml; then
               echo "sitemap should not list $forbidden" >&2; exit 1
             fi
