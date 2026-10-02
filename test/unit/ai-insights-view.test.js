@@ -370,8 +370,10 @@ describe('AI洞察カードの更新間隔', () => {
     assert.equal(context.liveIntervalMs(), 2_000, '1時間: 68 ms なので2秒でよい');
     withSpan(context, DAY);
     assert.equal(context.liveIntervalMs(), 5_000, '24時間: 328 ms');
+    withSpan(context, 3 * DAY);
+    assert.equal(context.liveIntervalMs(), 60_000, '3日: 1分ごと');
     withSpan(context, 14 * DAY);
-    assert.equal(context.liveIntervalMs(), 15_000, '2週間: 885 ms、これ以上は詰められない');
+    assert.equal(context.liveIntervalMs(), 120_000, '2週間: 2分ごと。Macで絞った1週間は1回3.5秒かかる');
   });
 
   it('期間がわずかに長く測れても、同じ間隔のままでいる', () => {
@@ -390,7 +392,7 @@ describe('AI洞察カードの更新間隔', () => {
     withSpan(context, 3 * HOUR);
     assert.equal(context.liveIntervalMs(), 5_000, '3時間は1時間の枠には入らない');
     withSpan(context, 7 * DAY);
-    assert.equal(context.liveIntervalMs(), 15_000, '1週間は24時間の枠には入らない');
+    assert.equal(context.liveIntervalMs(), 120_000, '1週間は3日の枠には入らない');
   });
 
   it('2週間表示でも、APIが受け付ける幅を超えない', () => {
@@ -418,7 +420,7 @@ describe('AI洞察カードの更新間隔', () => {
   it('期間の下限が無い場合も、最も遅い間隔に落ちる', () => {
     const { context } = harness();
     context.getTimeRange = () => ({ from: null, to: null });
-    assert.equal(context.liveIntervalMs(), 15_000);
+    assert.equal(context.liveIntervalMs(), 120_000);
   });
 
   it('タブを開いていなければ、通信が来ても何もしない', () => {
@@ -428,6 +430,38 @@ describe('AI洞察カードの更新間隔', () => {
     withSpan(context, HOUR);
     context.aiInsightsLiveTick();
     assert.equal(scheduled, 0, '閉じているタブのために集計は走らせない');
+  });
+
+  // The heartbeat refreshed a long view every 15 s whatever the period
+  // allowed: 1,312 refreshes over three seconds on 2026-10-02 (P3-184).
+  it('通信が無い時の定期の再計算も、期間の間隔より早くは走らない', async () => {
+    let factsRequests = 0;
+    const { context } = harness({
+      apiFetch: async (url) => {
+        if (String(url).includes('/api/ai/facts')) factsRequests += 1;
+        return { ok: false, status: 503, json: async () => ({}) };
+      },
+    });
+    let heartbeat = null;
+    context.setInterval = fn => { heartbeat = fn; return 1; };
+    context.setTimeout = () => 1;
+    withSpan(context, 7 * DAY);
+    context.startAiInsights();
+    assert.equal(factsRequests, 1, '開いた時に1回');
+    heartbeat();
+    assert.equal(factsRequests, 1, '直後の定期実行では再計算しない');
+
+    // The panel's clock is Date.now(); move it past the one-hour interval.
+    const realNow = Date.now;
+    const later = realNow() + 3_000;
+    context.Date.now = () => later;
+    try {
+      withSpan(context, HOUR);
+      heartbeat();
+    } finally {
+      context.Date.now = realNow;
+    }
+    assert.equal(factsRequests, 2, '短い期間なら、間隔が過ぎた定期実行で再計算する');
   });
 
   it('間隔より早くは再計算しない', () => {

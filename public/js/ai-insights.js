@@ -34,16 +34,19 @@ import {
 } from './ai-notification-settings.js?v=__ASSET_VERSION__';
 
 // One card refresh runs two aggregates over the selected window and two more
-// over the window before it, synchronously on the loop that also serves the
-// device list and the connection log. Measured on one Hub 2026-09-19 against
-// 473,806 connections: 68 ms for an hour, 328 ms for a day, 667 ms for a week,
-// 885 ms for two. Refreshing a two-week view every two seconds would spend
-// nearly half the loop on these five cards, so the pace follows the period --
-// short ranges keep up with the traffic, long ones cannot and do not pretend to.
+// over the window before it. Measured on one Hub 2026-09-19 against 473,806
+// connections: 68 ms for an hour, 328 ms for a day, 667 ms for a week, 885 ms
+// for two. Scoped to one Mac over a week it is about 3.5 s (2026-10-01), and
+// on 2026-10-02 a panel left open on that view was refreshed every 15 s all
+// day: 1,312 refreshes over three seconds, keeping the Hub's read thread busy
+// and its write-ahead log from ever resetting (P3-184). The pace follows the
+// period -- short ranges keep up with the traffic; a long range changes little
+// in a minute, and refreshing it faster only costs.
 const LIVE_INTERVAL_BY_SPAN = [
-  [3600_000,   2_000],   // up to an hour
-  [86400_000,  5_000],   // up to a day
-  [Infinity,  15_000],   // longer: the query is too expensive to go faster
+  [3600_000,       2_000],   // up to an hour
+  [86400_000,      5_000],   // up to a day
+  [3 * 86400_000, 60_000],   // up to three days
+  [Infinity,     120_000],   // longer: a week or two moves slowly
 ];
 // Runs even when nothing arrives: collection health changes on its own, and the
 // period boundary keeps moving whether or not there is traffic.
@@ -143,6 +146,12 @@ function liveIntervalMs() {
     if (span - SPAN_SLACK_MS <= limit) return interval;
   }
   return FALLBACK_REFRESH_MS;
+}
+
+/** The heartbeat's refresh: only once the period's interval has passed. */
+function fallbackRefresh() {
+  if (Date.now() - lastRefreshAt < liveIntervalMs()) return;
+  refreshAiInsights({ live: true });
 }
 
 /**
@@ -440,7 +449,9 @@ function startAiInsights() {
   updateProviderLabel();
   loadConversations().catch(() => {});
   loadNotificationSettings().catch(() => {});
-  if (!refreshTimer) refreshTimer = setInterval(() => refreshAiInsights({ live: true }), FALLBACK_REFRESH_MS);
+  // Still a heartbeat for a quiet network, but not one faster than the period
+  // allows: before, it refreshed a two-week view every 15 s regardless.
+  if (!refreshTimer) refreshTimer = setInterval(fallbackRefresh, FALLBACK_REFRESH_MS);
 }
 
 function stopAiInsights() {
