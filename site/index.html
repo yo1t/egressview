@@ -7,12 +7,19 @@
 <meta name="description" content="EgressView Hub watches devices through Yamaha or Cisco routers. Mac and Windows Agents show which app made each outbound connection. Use either alone or together.">
 <meta name="color-scheme" content="dark light">
 <link rel="canonical" href="https://www.egressview.com/">
+<!-- The same page in Japanese, as its own URL with the Japanese in the markup
+     (scripts/build-site-japanese.js). Without it the Japanese text lived only
+     in data-ja attributes, which a search engine does not read as content. -->
+<link rel="alternate" hreflang="en" href="https://www.egressview.com/">
+<link rel="alternate" hreflang="ja" href="https://www.egressview.com/index.ja.html">
+<link rel="alternate" hreflang="x-default" href="https://www.egressview.com/">
 <!-- Open Graph and the card tags. These decide what a link to this page looks
      like when someone posts it somewhere -- which is the channel that actually
      brings people here, search having produced one query in total and that one
      about listing Bedrock models. -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="EgressView">
+<meta property="og:locale" content="en_US">
 <meta property="og:url" content="https://www.egressview.com/">
 <meta property="og:title" content="EgressView — see where your network goes">
 <meta property="og:description" content="Hub for your network. Agents for Mac and Windows. See outbound destinations and the apps behind them, without collecting packet contents.">
@@ -236,7 +243,7 @@
     </div>
 
     <h1 data-ja="通信先も、<br>送信したアプリも見える。">See where your network goes.<br>See which app sent it.</h1>
-    <p class="lede" data-ja="&lt;strong&gt;Hubはルーター配下の機器を&lt;/strong&gt;、&lt;strong&gt;Mac・Windows Agentは各PCのアプリ別通信を&lt;/strong&gt;可視化します。単独でも、組み合わせても使えます。記録するのは接続メタデータのみ。通信内容は収集しません。">The <strong>Hub sees devices through your router</strong>. The <strong>Mac and Windows Agents name the app</strong> behind connections on their own computers. Use either alone or together. Connection metadata only, never packet contents.</p>
+    <p class="lede" data-ja="ネットワークから外へ出ていく通信（アウトバウンド通信）を、&lt;strong&gt;Hubはルーター配下の機器ごとに&lt;/strong&gt;、&lt;strong&gt;Mac・Windows Agentは各PCのアプリごとに&lt;/strong&gt;見える化します。単独でも、組み合わせても使えます。記録するのは接続メタデータのみ。通信内容は収集しません。">The <strong>Hub sees devices through your router</strong>. The <strong>Mac and Windows Agents name the app</strong> behind connections on their own computers. Use either alone or together. Connection metadata only, never packet contents.</p>
 
     <div class="cta">
       <a class="btn" href="https://dl.egressview.com/"><span data-ja="Mac・Windows Agentを入手">Get an Agent for Mac or Windows</span></a>
@@ -261,7 +268,7 @@
     </div>
     <div class="fact">
       <b data-ja="外向きは、いちばん見られていない">Outbound is the least-watched direction</b>
-      <p data-ja="ファイアウォールもWAFも、多くは「入ってくるもの」を見ています。出ていくものは、静かに通り抜けます。">Firewalls and WAFs mostly face inward. What goes the other way tends to pass quietly.</p>
+      <p data-ja="ファイアウォールもWAFも、多くは「入ってくるもの」を見ています。出ていくもの、つまりアウトバウンド通信は、静かに通り抜けます。">Firewalls and WAFs mostly face inward. What goes the other way tends to pass quietly.</p>
     </div>
   </div>
 </section>
@@ -485,7 +492,10 @@
 // reads with scripting off.
 (function () {
   const nodes = Array.from(document.querySelectorAll('[data-ja]:not(img)'));
-  nodes.forEach(n => n.dataset.en = n.innerHTML);
+  // The Japanese page (index.ja.html) arrives with its English already kept in
+  // data-en; only the English page takes it from the markup.
+  nodes.forEach(n => { if (n.dataset.en === undefined) n.dataset.en = n.innerHTML; });
+  const pageLang = document.documentElement.lang === 'ja' ? 'ja' : 'en';
   const buttons = Array.from(document.querySelectorAll('.lang button'));
   function apply(lang) {
     nodes.forEach(n => n.innerHTML = lang === 'ja' ? n.dataset.ja : n.dataset.en);
@@ -496,15 +506,21 @@
     buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
     document.documentElement.lang = lang;
     document.title = lang === 'ja'
-      ? 'EgressView — 通信先と送信したアプリを可視化'
+      ? 'EgressView — アウトバウンド通信を、通信先とアプリごとに見える化'
       : 'EgressView — see where your network goes';
     try { localStorage.setItem('egressview.lang', lang); } catch (e) {}
   }
   buttons.forEach(b => b.addEventListener('click', () => apply(b.dataset.lang)));
   let initial = null;
   try { initial = localStorage.getItem('egressview.lang'); } catch (e) {}
-  if (!initial) initial = (navigator.language || '').toLowerCase().startsWith('ja') ? 'ja' : 'en';
-  if (initial === 'ja') apply('ja');
+  // A page in a language stays in it unless the reader chose the other one:
+  // the Japanese page must not turn English for a crawler with an English
+  // browser, which is the reader it exists for.
+  if (!initial) {
+    initial = pageLang === 'ja' || (navigator.language || '').toLowerCase().startsWith('ja') ? 'ja' : 'en';
+  }
+  if (initial !== pageLang) apply(initial);
+  else buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === pageLang)));
 })();
 </script>
 </body>
