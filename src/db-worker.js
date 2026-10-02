@@ -155,6 +155,10 @@ function pruneAgentObservations({ before }) {
 const operations = {
   close: () => { close(); return { closed: true }; },
   'agentIngest.prune': pruneAgentObservations,
+  // The write-back the main thread's connections no longer do themselves
+  // (sqlite-wal.js, checkpoint-owner.js). PASSIVE: it never waits for a
+  // reader or a writer, and copies what it can.
+  'wal.checkpoint': () => agentIngest.checkpointLog(),
   'history.read': readHistory,
 };
 

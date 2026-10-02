@@ -219,6 +219,18 @@ describe('データベーススレッド（実スレッド）', () => {
     assert.deepEqual(openHandlesTo(dbPath), []);
   });
 
+  it('書き戻しの依頼に答える', async () => {
+    const host = new DbWorkerHost({ logger: quietLogger });
+    host.open(dbPath, { role: 'maintenance' });
+    try {
+      const result = await host.run('wal.checkpoint');
+      assert.equal(typeof result.ms, 'number');
+      assert.ok('logFrames' in result && 'checkpointedFrames' in result);
+    } finally {
+      await host.close();
+    }
+  });
+
   it('知らない操作は失敗として返す', async () => {
     const host = new DbWorkerHost({ logger: quietLogger });
     host.open(dbPath);
