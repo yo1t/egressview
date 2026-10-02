@@ -561,7 +561,11 @@ describe('時間集計の削除は、1時間分を一度に消さない', () => 
     const first = store.pruneObservations({ before, batchSize: 10, budgetMs: 0 });
     assert.equal(first.hourly, 10, '1回の書き込みで消すのは10件まで');
     assert.equal(first.more, true);
-    assert.ok(first.timings.slowestTransactionMs <= first.timings.hourlyMs);
+    // Not `slowestTransactionMs <= hourlyMs`: the empty observation batch that
+    // runs first is a transaction too, and on a busy runner it can take longer
+    // than the hourly piece. That assertion failed CI on Node 22 once.
+    assert.ok(first.timings.slowestTransactionMs
+      <= first.timings.observationsMs + first.timings.hourlyMs + first.timings.receiptsMs);
 
     let total = first.hourly;
     for (let calls = 0; calls < 10; calls += 1) {
