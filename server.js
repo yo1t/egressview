@@ -62,6 +62,8 @@ const agentCorrelationRunner = require('./src/agent-correlation-runner');
 const { AGENT_INGEST_DEFAULT_RETENTION_MS } = require('./src/agent-ingest-schema');
 const { DbWorkerHost } = require('./src/db-worker-host');
 const { createHistoryReader } = require('./src/history-reader');
+const { createCheckpointOwner } = require('./src/checkpoint-owner');
+const { setAutoCheckpoint } = require('./src/sqlite-wal');
 // Heavy database jobs run here, on their own thread and connection, so they
 // never hold the thread that answers requests (db-worker-host.js).
 const dbWorker = new DbWorkerHost({ logger });
@@ -70,6 +72,11 @@ const dbWorker = new DbWorkerHost({ logger });
 // behind it (P3-184).
 const dbReadWorker = new DbWorkerHost({ logger, requestTimeoutMs: 2 * 60 * 1000 });
 const historyReader = createHistoryReader({ history, host: dbReadWorker, logger, profiler: runtimeProfiler });
+// The log's write-back, done a little at a time on the maintenance thread
+// instead of inside whichever commit crosses the threshold (P3-184).
+const checkpointOwner = createCheckpointOwner({
+  host: dbWorker, setAutoCheckpoint, logger, profiler: runtimeProfiler,
+});
 const authCookies    = require('./src/auth-cookies');
 const oidcModule = require('./src/oidc-google');
 const { createGoogleOidc } = oidcModule;
@@ -743,6 +750,7 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
   }
   dbWorker.open(runtimeDbPath, { role: 'maintenance' });
   dbReadWorker.open(runtimeDbPath, { role: 'read', sourceRouterMap });
+  checkpointOwner.start();
   // Expired agent observations are deleted on the database thread, a little at
   // a time: see pruneObservations for what a whole day in one transaction did
   // to the Hub every night, and P3-182 for the one-to-two-second stalls that
@@ -1019,6 +1027,7 @@ function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   healthState.markNotReady();
+  checkpointOwner.stop('shutting down');
   // The database threads hold handles to the file too; they have to be gone
   // before the clean stop is recorded below. close() gives up waiting after a
   // few seconds and terminates the thread, which closes the handle anyway.
