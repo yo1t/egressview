@@ -8,6 +8,7 @@ const {
   _attachApplications, _attachNetworkNames, _attachThreats, _parseTimestampParam, _parsePaginationOpts,
   _resetReadCacheForTest, MAX_LIMIT, SERVER_FILTER_COLS,
 } = require('../../src/routes/connections');
+const { createHistoryReader } = require('../../src/history-reader');
 
 describe('connections route: attachThreats', () => {
   it('adds threat intel to SQLite/API rows that do not persist threat', () => {
@@ -61,11 +62,11 @@ describe('connections route: attachThreats', () => {
 });
 
 describe('connections route: Agent application attribution', () => {
-  it('passes the selected source scope to one bounded history lookup', () => {
+  it('passes the selected source scope to one bounded history lookup', async () => {
     const rows = [{ src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP' }];
     const scope = { sourceKind: 'agent', sourceId: 'agent-a' };
     let calls = 0;
-    const result = _attachApplications(rows, {
+    const history = {
       attachAgentAttributions(received, options) {
         calls++;
         assert.strictEqual(received, rows);
@@ -74,7 +75,8 @@ describe('connections route: Agent application attribution', () => {
         assert.equal(options.to, 2000);
         return received.map(row => ({ ...row, applications: [{ processName: 'Safari' }] }));
       },
-    }, scope, 1000, 2000);
+    };
+    const result = await _attachApplications(rows, history, createHistoryReader({ history }), scope, 1000, 2000);
 
     assert.equal(calls, 1);
     assert.equal(result[0].applications[0].processName, 'Safari');
@@ -266,6 +268,56 @@ describe('connections route: GET /connections pagination', () => {
     assert.equal(res._body.connections.length, 1);
     assert.equal(res._body.connections[0].dst, 'warn-2.example');
     assert.equal(res._body.connections[0].threat.confidence, 'low');
+  });
+
+  // On 2026-10-03 09:47 JST the threat-filtered log ran its scan and the
+  // attribution on the request thread and held the Hub for 49.7 s. Every read
+  // it makes has to go to the read thread, like the unfiltered page.
+  it('脅威で絞った一覧は、読み取りをすべて読み取り用スレッドへ送る', async () => {
+    const rows = [
+      { src: '192.168.1.1', dst: 'safe-1.example', dport: 443, proto: 'TCP' },
+      { src: '192.168.1.1', dst: 'danger-1.example', dport: 443, proto: 'TCP' },
+    ];
+    const asked = [];
+    const historyReader = {
+      read: async (fn, ...args) => {
+        asked.push(fn);
+        if (fn === 'queryByTimeRangePaged') {
+          const [, , limit, offset] = args;
+          return rows.slice(offset, offset + limit);
+        }
+        if (fn === 'attachAgentAttributions') return args[0].map(row => ({ ...row, applications: [] }));
+        throw new Error(`unexpected read ${fn}`);
+      },
+    };
+    const onThisThread = () => { throw new Error('read on the request thread'); };
+    const router = connectionsRoutes({
+      requireAdmin: (_req, _res, next) => next(),
+      history: { queryByTimeRangePaged: onThisThread, attachAgentAttributions: onThisThread },
+      historyReader,
+      threatIntel: { matchThreatIntel: dst => (dst === 'danger-1.example' ? { confidence: 'high' } : null) },
+    });
+    const layer = router.stack.find(l => l.route?.path === '/connections' && l.route?.methods?.get);
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+
+    const paged = makeRes();
+    await handler(makeReq({ limit: '10', fThreat: 'danger' }), paged);
+    assert.equal(paged._status, 200);
+    assert.deepEqual(paged._body.connections.map(row => row.dst), ['danger-1.example']);
+    assert.deepEqual(paged._body.connections[0].applications, []);
+    assert.deepEqual(asked, ['queryByTimeRangePaged', 'attachAgentAttributions']);
+
+    asked.length = 0;
+    const full = makeRes();
+    await handler(makeReq({ fThreat: 'safe' }), full);
+    assert.deepEqual(full._body.connections.map(row => row.dst), ['safe-1.example']);
+    assert.deepEqual(asked, ['queryByTimeRangePaged']);
+
+    asked.length = 0;
+    const unfiltered = makeRes();
+    await handler(makeReq({}), unfiltered);
+    assert.equal(unfiltered._body.connections.length, 2);
+    assert.deepEqual(asked, ['queryByTimeRangePaged']);
   });
 
   it('rejects unknown, array, and oversized query values before querying history', async () => {
@@ -513,7 +565,7 @@ describe('connections route: GET /connections/threat-connections', () => {
     return { matchThreatIntel: (dst, host) => map[dst] ?? map[host] ?? null };
   }
 
-  function callThreatRoute(groups, threatMap, query = {}) {
+  async function callThreatRoute(groups, threatMap, query = {}) {
     const history = {
       queryByTimeRangePaged:  () => [],
       queryByTimeRange:       () => [],
@@ -531,11 +583,11 @@ describe('connections route: GET /connections/threat-connections', () => {
     const res = { _status: 200, _body: null };
     res.status = (code) => { res._status = code; return res; };
     res.json   = (body) => { res._body  = body; return res; };
-    handler({ query }, res);
+    await handler({ query }, res);
     return res;
   }
 
-  it('returns threats sorted by sessions descending', () => {
+  it('returns threats sorted by sessions descending', async () => {
     const groups = [
       { dst: '1.1.1.1', dstHost: null, cnt: 3 },
       { dst: '2.2.2.2', dstHost: null, cnt: 10 },
@@ -546,16 +598,16 @@ describe('connections route: GET /connections/threat-connections', () => {
       '2.2.2.2': { confidence: 'high', feed: 'test', category: null },
       '3.3.3.3': { confidence: 'low', feed: 'test', category: null },
     };
-    const res = callThreatRoute(groups, threatMap, {});
+    const res = await callThreatRoute(groups, threatMap, {});
     assert.equal(res._body.threats[0].dst, '2.2.2.2', 'highest session count should come first');
     assert.equal(res._body.threats[0].sessions, 10);
     assert.equal(res._body.threats[1].sessions, 3);
     assert.equal(res._body.threats[2].sessions, 1);
   });
 
-  it('exposes source/tag fields and keeps legacy aliases populated', () => {
+  it('exposes source/tag fields and keeps legacy aliases populated', async () => {
     const groups = [{ dst: '1.1.1.1', dstHost: 'one.example', cnt: 2 }];
-    const res = callThreatRoute(groups, {
+    const res = await callThreatRoute(groups, {
       '1.1.1.1': {
         confidence: 'low',
         source: 'urlhaus',
@@ -575,19 +627,19 @@ describe('connections route: GET /connections/threat-connections', () => {
     assert.equal(res._body.threats[0].url, 'https://urlhaus.example/1');
   });
 
-  it('does not cut off high-session threats due to early break (sort-after-limit)', () => {
+  it('does not cut off high-session threats due to early break (sort-after-limit)', async () => {
     // 60 low-session threats followed by one high-session threat
     const groups = Array.from({ length: 60 }, (_, i) => ({ dst: `10.0.0.${i + 1}`, dstHost: null, cnt: 1 }));
     groups.push({ dst: '99.99.99.99', dstHost: null, cnt: 9999 });
     const threatMap = {};
     for (const g of groups) threatMap[g.dst] = { confidence: 'low', feed: 'test', category: null };
 
-    const res = callThreatRoute(groups, threatMap, { limit: '50' });
+    const res = await callThreatRoute(groups, threatMap, { limit: '50' });
     assert.equal(res._body.threats[0].dst, '99.99.99.99', 'highest-session threat must appear first');
     assert.equal(res._body.count, 50);
   });
 
-  it('filters by confidence=low (warn only)', () => {
+  it('filters by confidence=low (warn only)', async () => {
     const groups = [
       { dst: '1.1.1.1', dstHost: null, cnt: 5 },
       { dst: '2.2.2.2', dstHost: null, cnt: 5 },
@@ -596,12 +648,12 @@ describe('connections route: GET /connections/threat-connections', () => {
       '1.1.1.1': { confidence: 'low',  feed: 'a', category: null },
       '2.2.2.2': { confidence: 'high', feed: 'b', category: null },
     };
-    const res = callThreatRoute(groups, threatMap, { confidence: 'low' });
+    const res = await callThreatRoute(groups, threatMap, { confidence: 'low' });
     assert.equal(res._body.count, 1);
     assert.equal(res._body.threats[0].dst, '1.1.1.1');
   });
 
-  it('filters by confidence=high (danger only)', () => {
+  it('filters by confidence=high (danger only)', async () => {
     const groups = [
       { dst: '1.1.1.1', dstHost: null, cnt: 5 },
       { dst: '2.2.2.2', dstHost: null, cnt: 5 },
@@ -610,29 +662,29 @@ describe('connections route: GET /connections/threat-connections', () => {
       '1.1.1.1': { confidence: 'low',  feed: 'a', category: null },
       '2.2.2.2': { confidence: 'high', feed: 'b', category: null },
     };
-    const res = callThreatRoute(groups, threatMap, { confidence: 'high' });
+    const res = await callThreatRoute(groups, threatMap, { confidence: 'high' });
     assert.equal(res._body.count, 1);
     assert.equal(res._body.threats[0].dst, '2.2.2.2');
   });
 
-  it('clamps limit to 200', () => {
+  it('clamps limit to 200', async () => {
     const groups = Array.from({ length: 300 }, (_, i) => ({ dst: `10.0.1.${i}`, dstHost: null, cnt: 1 }));
     const threatMap = {};
     for (const g of groups) threatMap[g.dst] = { confidence: 'low', feed: 'x', category: null };
 
-    const res = callThreatRoute(groups, threatMap, { limit: '999' });
+    const res = await callThreatRoute(groups, threatMap, { limit: '999' });
     assert.ok(res._body.count <= 200, `count ${res._body.count} should be ≤ 200`);
   });
 
-  it('returns empty array when no destinations match threat intel', () => {
+  it('returns empty array when no destinations match threat intel', async () => {
     const groups = [{ dst: '8.8.8.8', dstHost: 'dns.google', cnt: 100 }];
-    const res = callThreatRoute(groups, {}, {});
+    const res = await callThreatRoute(groups, {}, {});
     assert.equal(res._body.count, 0);
     assert.deepEqual(res._body.threats, []);
   });
 
-  it('returns 400 for invalid from timestamp', () => {
-    const res = callThreatRoute([], {}, { from: 'bad' });
+  it('returns 400 for invalid from timestamp', async () => {
+    const res = await callThreatRoute([], {}, { from: 'bad' });
     assert.equal(res._status, 400);
   });
 });

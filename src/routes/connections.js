@@ -386,9 +386,9 @@ function attachNetworkNames(connections) {
   });
 }
 
-function attachApplications(connections, history, sourceScope, from, to) {
+async function attachApplications(connections, history, reader, sourceScope, from, to) {
   if (typeof history.attachAgentAttributions !== 'function') return connections;
-  return history.attachAgentAttributions(connections, { sourceScope, from, to });
+  return reader.read('attachAgentAttributions', connections, { sourceScope, from, to });
 }
 
 function matchesThreatFilter(row, fThreat) {
@@ -399,7 +399,12 @@ function matchesThreatFilter(row, fThreat) {
   return true;
 }
 
-function queryThreatFilteredPage(history, threatIntel, from, to, limit, offset, opts, fThreat) {
+// Scans the window a chunk at a time, keeping the rows the threat filter
+// wants. Each chunk is read through `reader`, so on the server it runs on the
+// read thread and the request thread only matches verdicts between chunks.
+// Run here, the scan and the attribution after it held the Hub for 49.7 s on
+// 2026-10-03 09:47 JST, while the threat counts and every log request waited.
+async function queryThreatFilteredPage(reader, threatIntel, from, to, limit, offset, opts, fThreat) {
   const requestedLimit = limit == null ? null : Math.max(0, limit);
   const requestedOffset = Math.max(0, offset || 0);
   const out = [];
@@ -409,7 +414,7 @@ function queryThreatFilteredPage(history, threatIntel, from, to, limit, offset, 
 
   while (true) {
     const rows = attachThreats(
-      history.queryByTimeRangePaged(from, to, THREAT_FILTER_SCAN_CHUNK, scanned, opts),
+      await reader.read('queryByTimeRangePaged', from, to, THREAT_FILTER_SCAN_CHUNK, scanned, opts),
       threatIntel
     );
     if (!rows.length) break;
@@ -555,7 +560,7 @@ function connectionsRoutes(ctx) {
     res.json({ ...history.queryNewNodes(from, to), serverTime: Date.now() });
   });
 
-  router.get('/connections/threat-connections', requireAdmin, (req, res) => {
+  router.get('/connections/threat-connections', requireAdmin, async (req, res) => {
     const parsed = parseRequest(threatConnectionsQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const query = parsed.data;
@@ -567,7 +572,7 @@ function connectionsRoutes(ctx) {
     if (e2) return;
     const confidence = ['low', 'high', 'all'].includes(query.confidence) ? query.confidence : 'all';
     const limit = Math.min(parseInt(query.limit, 10) || 50, 200);
-    const groups = history.groupDstByTimeRange(from, to, { sourceScope: scoped.scope });
+    const groups = await reader.read('groupDstByTimeRange', from, to, { sourceScope: scoped.scope });
     const hits = [];
     for (const { dst, dstHost, cnt } of groups) {
       const t = threatIntel?.matchThreatIntel(dst, dstHost || dst);
@@ -686,9 +691,10 @@ function connectionsRoutes(ctx) {
       const opts = { ...parsePaginationOpts(query), sourceScope: scoped.scope };
       const fThreat = query.fThreat;
       if (['safe', 'warn', 'danger'].includes(fThreat)) {
-        const result = queryThreatFilteredPage(history, threatIntel, from, to, clampedLimit, offset, opts, fThreat);
+        const result = await queryThreatFilteredPage(reader, threatIntel, from, to, clampedLimit, offset, opts, fThreat);
+        const attributed = await attachApplications(result.connections, history, reader, opts.sourceScope, from, to);
         return res.json({
-          connections: attachNetworkNames(attachApplications(result.connections, history, opts.sourceScope, from, to)),
+          connections: attachNetworkNames(attributed),
           total: result.total,
           limit: clampedLimit,
           offset,
@@ -729,11 +735,11 @@ function connectionsRoutes(ctx) {
     const opts = { ...parsePaginationOpts(query), sourceScope: scoped.scope };
     const fThreat = query.fThreat;
     if (['safe', 'warn', 'danger'].includes(fThreat)) {
-      const result = queryThreatFilteredPage(history, threatIntel, from, to, MAX_FULL_FETCH, 0, opts, fThreat);
+      const result = await queryThreatFilteredPage(reader, threatIntel, from, to, MAX_FULL_FETCH, 0, opts, fThreat);
       return sendLargeJson(req, res, { connections: attachNetworkNames(result.connections), truncated: result.truncated, serverTime: Date.now() });
     }
     const connections = attachNetworkNames(attachThreats(
-      history.queryByTimeRangePaged(from, to, MAX_FULL_FETCH, 0, opts), threatIntel
+      await reader.read('queryByTimeRangePaged', from, to, MAX_FULL_FETCH, 0, opts), threatIntel
     ));
     const truncated = connections.length >= MAX_FULL_FETCH;
     sendLargeJson(req, res, { connections, truncated, serverTime: Date.now() });
