@@ -26,7 +26,9 @@ extension.
   explicit controls below.
 - **Payloads are never read.** The system extension is a content filter that
   passes every flow through unmodified; it records who connected to what, not
-  what was said.
+  what was said. Where macOS reports a connection's size as zero, the agent
+  counts it from packet **headers** instead — see
+  [Counting bytes from packet headers](#counting-bytes-from-packet-headers).
 - **If you enrol with a Hub, observations go to that Hub — which is yours.**
   You run it. The developer has no access to it.
 
@@ -99,6 +101,42 @@ credential is sent as a Bearer token to that Hub.
 
 This is the same list the agent shows before enrolling. Enrolment cannot start
 until you confirm you have read it.
+
+## Counting bytes from packet headers
+
+macOS reports how many bytes each connection carried when it closes, but for
+connections made through Network.framework — which includes URLSession and so
+many apps, and the QUIC (HTTP/3) connections they make — that report
+is zero in both directions even when megabytes moved. To record those
+connections' real size, the system extension also runs a **packet filter**.
+
+What it does, and what it does not:
+
+- **It reads headers, not contents.** For each packet it reads the IP header
+  and the TCP or UDP header: protocol, source and destination address and
+  port, and lengths. From those it computes how many payload bytes the packet
+  carried. The bytes after the headers are not read, copied or stored.
+  Encrypted traffic stays encrypted; nothing is decrypted.
+- **It keeps numbers, in memory, briefly.** Per connection (protocol,
+  addresses and ports, as seen from this Mac) it keeps four numbers — bytes
+  and packets in each direction — in the system extension's memory. When the
+  connection closes, the count is taken and removed. Entries no packet has
+  touched for ten minutes are dropped, and at most 65,536 are kept.
+- **It is used only where macOS has no number.** The count replaces the
+  report only when macOS says zero both ways. A connection macOS counts keeps
+  macOS's number.
+- **Nothing new leaves the Mac.** The result is the same `bytesIn` /
+  `bytesOut` fields the agent already records and, if you enrol, sends to your
+  Hub. No packet, header or address list is written to disk, logged or sent.
+- **Every packet passes.** The filter never blocks, delays or changes a
+  packet; it allows each one after reading its headers.
+
+The count is of payload bytes, so it is close to, but not the same as, the
+size of what an app downloaded: for a 78,450,688-byte file over QUIC it
+recorded 79,840,999 bytes, the difference being QUIC's own framing and
+encryption overhead. Over TCP, on connections macOS also counts, it matched
+macOS's figure exactly in most cases (79 of 107 in a 30-minute sample) and
+within 0.1 % in total.
 
 ## Reading the destination name, and the one thing that is decrypted
 
