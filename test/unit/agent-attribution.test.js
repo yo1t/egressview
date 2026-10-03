@@ -164,6 +164,53 @@ describe('Agent-only 行の枝', () => {
   });
 });
 
+// Scoped to one agent, an indexable equality on o.agentId sent SQLite into
+// agent_observations by (agentId, lastObservedAt): every observation that
+// agent had in the window, 1.27M rows for one Mac on the Hub on 2026-10-03,
+// 17-31 s per page of a threat-filtered log. Kept out of index selection, the
+// same 16,953 attributions came back in 153 ms. As with the hint above, a
+// fixture this small plans well either way, so this pins the statement and
+// checks the scope still decides the answer.
+describe('Agent の絞り込みを、索引の入口にしない', () => {
+  it('両方の枝で、絞り込みを索引に使えない形で書き、他のエージェントは返さない', () => {
+    const { db, observation, link } = fixture();
+    db.prepare("INSERT INTO agents VALUES ('agent-b', 'other')").run();
+    observation.run('safari-1', 10, 'Safari', 'com.apple.Safari', '1', '2');
+    link.run('safari-1');
+    db.prepare(`INSERT INTO agent_observations VALUES ('agent-b', 'chrome-1', 12, 'Chrome', 'com.google.Chrome',
+      1000, 2000, '5', '6', '192.0.2.10', '198.51.100.10', 443, 'tcp')`).run();
+    db.prepare(`INSERT INTO connection_agent_observations VALUES ('192.0.2.10', '198.51.100.10', 443, 'TCP',
+      'agent-b', 'chrome-1', 'exact-5tuple')`).run();
+    db.prepare(`INSERT INTO agent_observations VALUES ('agent-b', 'mail-1', 13, 'Mail', 'com.apple.mail',
+      1000, 2000, '7', '8', '192.0.2.10', '198.51.100.20', 443, 'tcp')`).run();
+    db.prepare(`INSERT INTO agent_observations VALUES ('agent-a', 'notes-1', 14, 'Notes', 'com.apple.Notes',
+      1000, 2000, '9', '10', '192.0.2.10', '198.51.100.20', 443, 'tcp')`).run();
+
+    const prepared = [];
+    const realPrepare = db.prepare.bind(db);
+    const attribution = createAgentAttribution({
+      getDb: () => ({ prepare: (sql) => { prepared.push(sql); return realPrepare(sql); } }),
+    });
+    const page = [
+      { src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP',
+        firstSeen: 1000, lastSeen: 2000, observedBy: ['router-a'] },
+      { src: '192.0.2.10', dst: '198.51.100.20', dport: 443, proto: 'TCP',
+        firstSeen: 1000, lastSeen: 2000, observedBy: [] },
+    ];
+    const scoped = attribution.attach(page, { sourceScope: { sourceKind: 'agent', sourceId: 'agent-a' } });
+
+    assert.equal((prepared[0].match(/AND \+o\.agentId = \?/g) || []).length, 2, prepared[0]);
+    assert.doesNotMatch(prepared[0], /AND o\.agentId = \?/);
+    assert.deepEqual(scoped[0].applications.map(app => app.processName), ['Safari']);
+    assert.deepEqual(scoped[1].applications.map(app => app.processName), ['Notes']);
+
+    const everyone = attribution.attach(page);
+    assert.deepEqual(everyone[0].applications.map(app => app.processName).sort(), ['Chrome', 'Safari']);
+    assert.deepEqual(everyone[1].applications.map(app => app.processName).sort(), ['Mail', 'Notes']);
+    db.close();
+  });
+});
+
 describe('Agent application byte attribution', () => {
   it('adds decimal uint64 values without Number precision loss or replay duplication', () => {
     const { db, observation, link } = fixture();

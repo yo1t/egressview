@@ -58,7 +58,14 @@ function createAgentAttribution({ getDb, maxApplications = DEFAULT_MAX_APPLICATI
       }
     });
 
-    const agentFilter = sourceScope?.sourceKind === 'agent' ? 'AND o.agentId = ?' : '';
+    // The unary plus keeps the scope out of index selection. Given a usable
+    // equality on o.agentId, SQLite entered agent_observations through
+    // (agentId, lastObservedAt) and walked every observation that agent had
+    // in the window -- 1.27M rows for one Mac on the Hub on 2026-10-03, 17-31 s
+    // per page of a threat-filtered log. The page's own rows are the way in:
+    // each flow looked up by its tuple, then checked against the agent. Same
+    // 16,953 attributions from the same snapshot in 153 ms.
+    const agentFilter = sourceScope?.sourceKind === 'agent' ? 'AND +o.agentId = ?' : '';
     const agentParams = sourceScope?.sourceKind === 'agent' ? [sourceScope.sourceId] : [];
 
     // The agent-only rows used to ride along in the same CTE, selected by an
