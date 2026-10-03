@@ -291,6 +291,13 @@ describe('読み取り用スレッド', () => {
       const routerScope = { sourceKind: 'router', sourceId: 'yamaha1' };
       assert.deepEqual(await reader.read('listSourceDeviceKeys', routerScope),
         history.listSourceDeviceKeys(routerScope));
+      history.logNotification({ src: '192.0.2.10', dst: '198.51.100.0', dport: 443, proto: 'TCP' }, 'threat', false);
+      history.logNotification({ src: '192.0.2.99', dst: '198.51.100.1', dport: 443, proto: 'TCP' }, 'new-node', false);
+      const unscoped = history.queryNotificationLog(from, null);
+      assert.equal(unscoped.length, 2);
+      assert.deepEqual(await reader.read('queryNotificationLog', from, null, {}), unscoped);
+      assert.deepEqual(await reader.read('queryNotificationLog', from, null, { sourceScope: routerScope }),
+        history.queryNotificationLog(from, null, { sourceScope: routerScope }));
     } finally {
       await host.close();
     }

@@ -126,3 +126,28 @@ describe('notification-log route: GET /api/notification-log', () => {
     assert.equal((await request(app, 'GET', `/api/notification-log?from=${'1'.repeat(21)}`)).status, 400);
   });
 });
+
+// Scoped to a router or an agent, this read took 24.9 s on 2026-10-03 and
+// held the thread that answers every request. With a read thread it goes
+// there, and nothing reads the database here.
+describe('notification-log route: read thread', () => {
+  it('読み取り用スレッドがあれば、通知履歴はそこで読む', async () => {
+    const asked = [];
+    const historyReader = {
+      read: async (fn, ...args) => {
+        asked.push([fn, ...args]);
+        return SAMPLE_LOGS;
+      },
+    };
+    const app = express();
+    app.use('/api', notificationLogRoutes({
+      requireAdmin,
+      history: { queryNotificationLog: () => { throw new Error('read on the request thread'); } },
+      historyReader,
+    }));
+    const { status, body } = await request(app, 'GET', '/api/notification-log?from=1000&to=2000');
+    assert.equal(status, 200);
+    assert.deepEqual(body.logs, SAMPLE_LOGS);
+    assert.deepEqual(asked, [['queryNotificationLog', 1000, 2000, { sourceScope: null }]]);
+  });
+});
