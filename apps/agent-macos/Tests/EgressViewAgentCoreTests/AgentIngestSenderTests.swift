@@ -31,6 +31,11 @@ private actor SenderTransport: AgentIngestTransport {
     /// Ingest only. The sender also asks the Hub once what it accepts (P3-7),
     /// and these cases are about delivery, not about that question.
     func ingestCount() -> Int { requests.filter { $0.url?.path.hasSuffix("ingest") ?? false }.count }
+    func ingestSizes() -> [Int] {
+        requests.filter { $0.url?.path.hasSuffix("ingest") ?? false }.compactMap { request in
+            request.httpBody.flatMap { try? JSONDecoder.iso8601.decode(AgentIngestEnvelope.self, from: $0) }?.observations.count
+        }
+    }
 }
 
 private actor FlakySenderTransport: AgentIngestTransport {
@@ -262,6 +267,75 @@ final class AgentIngestSenderTests: XCTestCase {
         XCTAssertEqual(requestCount, 1)
     }
 
+    /// P3-186: since 0.5.98 observations arrive every second, and each one
+    /// reaching an empty queue went at once -- a batch every two seconds, at
+    /// the Hub's thirty a minute, refused with 429 over a thousand times a
+    /// day. An arrival soon after a batch now waits out the spacing and goes
+    /// with whatever else arrived.
+    func testArrivalsSoonAfterABatchWaitAndGoTogether() async throws {
+        let transport = Self.acknowledgingTransport()
+        let (sender, _, queue) = try makeSender(transport: transport, minimumSendSpacing: 0.6)
+        await sender.setEnabled(true)
+        await sender.setConnectivityAvailable(true)
+        await sender.enqueue([observation()])
+        try await waitUntil { queue.status().pendingCount == 0 }
+        var sent = await transport.ingestCount()
+        XCTAssertEqual(sent, 1, "the first batch is not held back")
+
+        // Distinct flows: the queue keeps one entry per flow.
+        await sender.enqueue([observation(remotePort: 444)])
+        try await Task.sleep(for: .milliseconds(150))
+        await sender.enqueue([observation(remotePort: 445)])
+        try await Task.sleep(for: .milliseconds(100))
+        sent = await transport.ingestCount()
+        XCTAssertEqual(sent, 1, "an arrival right after a batch waits for the spacing")
+
+        try await waitUntil { queue.status().pendingCount == 0 }
+        sent = await transport.ingestCount()
+        XCTAssertEqual(sent, 2, "both arrivals went as one batch")
+        let sizes = await transport.ingestSizes()
+        XCTAssertEqual(sizes, [1, 2])
+    }
+
+    func testSendNowAndAFullBatchDoNotWaitForTheSpacing() async throws {
+        let transport = Self.acknowledgingTransport()
+        let (sender, _, queue) = try makeSender(transport: transport, minimumSendSpacing: 30)
+        await sender.setEnabled(true)
+        await sender.setConnectivityAvailable(true)
+        await sender.enqueue([observation()])
+        try await waitUntil { queue.status().pendingCount == 0 }
+
+        // Asked for by the person.
+        await sender.enqueue([observation()])
+        await sender.sendNow()
+        try await waitUntil { queue.status().pendingCount == 0 }
+        var sent = await transport.ingestCount()
+        XCTAssertEqual(sent, 2)
+
+        // A full batch is not made larger by waiting.
+        await sender.enqueue((0 ..< AgentIngestSender.agentBatchLimit).map { observation(remotePort: UInt16(1_000 + $0)) })
+        try await waitUntil { queue.status().pendingCount == 0 }
+        sent = await transport.ingestCount()
+        XCTAssertEqual(sent, 3)
+    }
+
+    private static func acknowledgingTransport() -> SenderTransport {
+        SenderTransport { request in
+            guard request.url?.path.hasSuffix("ingest") ?? false else {
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+            }
+            let envelope = try JSONDecoder.iso8601.decode(AgentIngestEnvelope.self, from: XCTUnwrap(request.httpBody))
+            let data = try JSONEncoder().encode(AgentIngestAcknowledgementFixture(
+                batchId: envelope.batchId,
+                accepted: envelope.observations.count,
+                duplicate: 0,
+                rejected: 0,
+                replayed: false
+            ))
+            return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
     func testRetryPolicyIsBoundedFullJitter() {
         let policy = AgentRetryPolicy()
         XCTAssertEqual(policy.delay(failureCount: 1, randomUnit: 1), 5)
@@ -271,6 +345,7 @@ final class AgentIngestSenderTests: XCTestCase {
 
     private func makeSender(
         transport: SenderTransport? = nil,
+        minimumSendSpacing: TimeInterval = 0,
         statusHandler: @escaping AgentIngestSender.StatusHandler = { _, _ in }
     ) throws -> (AgentIngestSender, SenderTransport, AgentDeliveryQueue) {
         let selectedTransport = transport ?? SenderTransport { request in
@@ -296,6 +371,7 @@ final class AgentIngestSenderTests: XCTestCase {
                     osVersion: "26.5.2",
                     agentVersion: "0.1.14"
                 ),
+                minimumSendSpacing: minimumSendSpacing,
                 statusHandler: statusHandler
             ),
             selectedTransport,
@@ -303,13 +379,13 @@ final class AgentIngestSenderTests: XCTestCase {
         )
     }
 
-    private func observation() -> ConnectionObservation {
+    private func observation(remotePort: UInt16 = 443) -> ConnectionObservation {
         ConnectionObservation(
             networkProtocol: .tcp,
             localAddress: "192.0.2.10",
             localPort: 49_152,
             remoteAddress: "203.0.113.10",
-            remotePort: 443,
+            remotePort: remotePort,
             processID: 42,
             processName: "TestApp",
             firstObservedAt: Date(),
