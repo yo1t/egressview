@@ -756,6 +756,9 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
     private var activationCompletion: ((Result<Void, Error>) -> Void)?
     private var deactivationCompletion: ((Result<Bool, Error>) -> Void)?
     private var pendingOperation: PendingOperation?
+#if P3_183_PACKET_PROBE
+    private var packetProbeReady = false
+#endif
 
     init(identifier: String, statusHandler: @escaping (AgentMonitoringStatus) -> Void) {
         self.identifier = identifier
@@ -896,9 +899,21 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
         switch result {
         case .completed:
             cancelApprovalRecovery()
+#if P3_183_PACKET_PROBE
+            // The packet filter now lives in the flow filter's own extension,
+            // so the two share one process and one ledger. The separate
+            // packet probe extension is retired: while its process was alive,
+            // macOS started the packet filter there instead (build 190).
+            PacketProbeRetirement.shared.retire()
+            packetProbeReady = true
             enableFilter { [weak self] result in
                 self?.finishActivation(result)
             }
+#else
+            enableFilter { [weak self] result in
+                self?.finishActivation(result)
+            }
+#endif
         case .willCompleteAfterReboot:
             activationCompletion = nil
             statusHandler(.rebootRequired)
@@ -934,6 +949,12 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
             configuration.filterSockets = true
             configuration.filterPackets = false
             configuration.filterDataProviderBundleIdentifier = self?.identifier
+#if P3_183_PACKET_PROBE
+            if self?.packetProbeReady == true {
+                configuration.filterPackets = true
+                configuration.filterPacketProviderBundleIdentifier = self?.identifier
+            }
+#endif
             manager.providerConfiguration = configuration
             manager.localizedDescription = L("EgressView outbound connection metadata")
             manager.isEnabled = true
@@ -996,6 +1017,88 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
         completion?(result)
     }
 }
+
+#if P3_183_PACKET_PROBE
+/// Deactivates the separate packet probe extension from builds 188-189.
+/// Errors are logged and otherwise ignored: an extension that is already gone
+/// is the outcome wanted.
+private final class PacketProbeRetirement: NSObject, OSSystemExtensionRequestDelegate {
+    static let shared = PacketProbeRetirement()
+
+    func retire() {
+        let request = OSSystemExtensionRequest.deactivationRequest(
+            forExtensionWithIdentifier: "com.egressview.agent.packetprobe", queue: .main
+        )
+        request.delegate = self
+        OSSystemExtensionManager.shared.submitRequest(request)
+    }
+
+    func request(
+        _ request: OSSystemExtensionRequest,
+        actionForReplacingExtension existing: OSSystemExtensionProperties,
+        withExtension ext: OSSystemExtensionProperties
+    ) -> OSSystemExtensionRequest.ReplacementAction { .cancel }
+
+    func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
+        NSLog("P3-183 packet probe retirement needs user approval")
+    }
+
+    func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
+        NSLog("P3-183 packet probe retired: %ld", result.rawValue)
+    }
+
+    func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
+        NSLog("P3-183 packet probe retirement failed: %@", error.localizedDescription)
+    }
+}
+
+private final class PacketProbeActivation: NSObject, OSSystemExtensionRequestDelegate {
+    private let statusHandler: (AgentMonitoringStatus) -> Void
+    private var completion: ((Result<Void, Error>) -> Void)?
+
+    init(statusHandler: @escaping (AgentMonitoringStatus) -> Void) {
+        self.statusHandler = statusHandler
+    }
+
+    func activate(completion: @escaping (Result<Void, Error>) -> Void) {
+        self.completion = completion
+        let request = OSSystemExtensionRequest.activationRequest(
+            forExtensionWithIdentifier: "com.egressview.agent.packetprobe", queue: .main
+        )
+        request.delegate = self
+        OSSystemExtensionManager.shared.submitRequest(request)
+    }
+
+    func request(
+        _ request: OSSystemExtensionRequest,
+        actionForReplacingExtension existing: OSSystemExtensionProperties,
+        withExtension ext: OSSystemExtensionProperties
+    ) -> OSSystemExtensionRequest.ReplacementAction {
+        ext.bundleVersion.compare(existing.bundleVersion, options: .numeric) == .orderedDescending
+            ? .replace : .cancel
+    }
+
+    func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
+        statusHandler(.approvalRequired)
+    }
+
+    func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
+        let callback = completion
+        completion = nil
+        switch result {
+        case .completed: callback?(.success(()))
+        case .willCompleteAfterReboot: callback?(.failure(SystemExtensionActivationError.unknownResult))
+        @unknown default: callback?(.failure(SystemExtensionActivationError.unknownResult))
+        }
+    }
+
+    func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
+        let callback = completion
+        completion = nil
+        callback?(.failure(error))
+    }
+}
+#endif
 
 private enum SystemExtensionActivationError: LocalizedError {
     case unknownResult

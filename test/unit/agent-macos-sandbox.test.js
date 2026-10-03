@@ -14,6 +14,7 @@ const entitlementFiles = {
 };
 const hostInfo = 'apps/agent-macos/Xcode/Host/Info.plist';
 const extensionInfo = 'apps/agent-macos/Xcode/SystemExtension/Info.plist';
+const packetInfo = 'apps/agent-macos/Xcode/PacketProbe/Info.plist';
 
 function entitlement(file, key) {
   const plist = fs.readFileSync(path.join(root, file), 'utf8');
@@ -30,10 +31,12 @@ describe('macOS Agent App Sandbox boundary', () => {
     const extensionVersion = entitlement(extensionInfo, 'CFBundleShortVersionString');
     const hostBuild = entitlement(hostInfo, 'CFBundleVersion');
     const extensionBuild = entitlement(extensionInfo, 'CFBundleVersion');
+    const packetBuild = entitlement(packetInfo, 'CFBundleVersion');
 
     assert.match(hostVersion, /^\d+\.\d+\.\d+$/);
     assert.equal(extensionVersion, hostVersion);
     assert.equal(extensionBuild, hostBuild);
+    assert.equal(packetBuild, hostBuild);
   });
 
   it('versions the Mach service with the Extension build', () => {
@@ -45,7 +48,8 @@ describe('macOS Agent App Sandbox boundary', () => {
     );
 
     assert.equal(service, `group.com.egressview.agent.xpc.${build}`);
-    assert.match(xpcSource, new RegExp(`machServiceName = "${service.replaceAll('.', '\\.')}"`));
+    assert.match(xpcSource, /Bundle\.main\.object\(forInfoDictionaryKey: "CFBundleVersion"\)/);
+    assert.ok(xpcSource.includes('group.com.egressview.agent.xpc.\\(build)'));
   });
 
   it('sandboxes every shipped process in Debug and Developer ID builds', () => {
@@ -89,12 +93,12 @@ describe('macOS Agent App Sandbox boundary', () => {
     assert.match(script, /Round-trip host contains forbidden sandbox entitlement/);
   });
 
-  it('enables the Xcode sandbox capability for both targets and configurations', () => {
+  it('enables the Xcode sandbox capability for all targets and configurations', () => {
     const project = fs.readFileSync(
       path.join(root, 'apps/agent-macos/EgressViewAgent.xcodeproj/project.pbxproj'),
       'utf8'
     );
-    assert.equal((project.match(/ENABLE_APP_SANDBOX = YES/g) || []).length, 4);
+    assert.equal((project.match(/ENABLE_APP_SANDBOX = YES/g) || []).length, 6);
   });
 
   it('checks Lightweight availability before disabling network monitoring', () => {
@@ -205,4 +209,3 @@ describe('実機確認で利用者向けバージョンを消費しない (P3-32
     assert.match(readme, /does not look at `CFBundleShortVersionString`/);
   });
 });
-

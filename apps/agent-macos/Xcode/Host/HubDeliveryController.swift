@@ -1460,6 +1460,7 @@ private struct AgentSettingsView: View {
                     Text(L("Unregistered closes: recovered %lld · unresolved %lld",
                            extensionCounts.unregisteredClosesRecovered,
                            extensionCounts.unregisteredClosesUnresolved))
+                    Text(L("Duplicate close reports set aside: %lld", extensionCounts.duplicateCloses))
                     Text(L("Unresolved closes by reason: inbound %lld · source not known %lld · destination not known %lld",
                            extensionCounts.unresolvedClosesInbound,
                            extensionCounts.unresolvedClosesMissingLocalEndpoint,

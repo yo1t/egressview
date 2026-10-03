@@ -3,11 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>EgressView Agent</string>
+	<string>EgressView Packet Probe</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIconName</key>
-	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -15,18 +13,20 @@
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
-	<string>APPL</string>
+	<string>SYSX</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.5.116</string>
 	<key>CFBundleVersion</key>
 	<string>195</string>
-	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.utilities</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
-	<key>LSUIElement</key>
-	<true/>
 	<key>NSSystemExtensionUsageDescription</key>
-	<string>This development build monitors outbound connection metadata and temporarily reads nscurl test traffic to measure byte counts. It does not store packet contents or block traffic.</string>
+	<string>Development-only aggregate packet-count test. It does not read or retain packet contents.</string>
+	<key>NetworkExtension</key>
+	<dict>
+		<key>NEProviderClasses</key>
+		<dict>
+			<key>com.apple.networkextension.filter-packet</key>
+			<string>$(PRODUCT_MODULE_NAME).EgressViewPacketProbeProvider</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

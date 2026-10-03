@@ -163,6 +163,7 @@
 "Other skipped flows: non-socket %lld · inbound %lld · unsupported protocol %lld" = "Other skipped flows: non-socket %lld · inbound %lld · unsupported protocol %lld";
 "Extension delivery: outbound callbacks %lld · closed reports %lld · emitted %lld · queued %lld · dropped %lld · drained %lld · encode failures %lld" = "Extension delivery: outbound callbacks %lld · closed reports %lld · emitted %lld · queued %lld · dropped %lld · drained %lld · encode failures %lld";
 "Unregistered closes: recovered %lld · unresolved %lld" = "Unregistered closes: recovered %lld · unresolved %lld";
+"Duplicate close reports set aside: %lld" = "Duplicate close reports set aside: %lld";
 "Host since %@: received %lld · saved %lld · failed batches %lld · zero-byte closes %lld" = "Host since %@: received %lld · saved %lld · failed batches %lld · zero-byte closes %lld";
 "Host XPC: drain timeouts %lld · failures %lld" = "Host XPC: drain timeouts %lld · failures %lld";
 "Press Refresh to compare the Extension and local database stages." = "Press Refresh to compare the Extension and local database stages.";
