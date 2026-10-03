@@ -99,6 +99,17 @@ public actor AgentIngestSender {
     private static let capabilitiesRefreshInterval: TimeInterval = 60 * 60
     /// Failed asks in a row since the last answer.
     private var capabilityFailures = 0
+    /// The shortest gap between two batches when the queue is not full.
+    ///
+    /// Since 0.5.98 the app takes the extension's observations every second,
+    /// and each arrival at an empty queue was sent at once: about a batch every
+    /// two seconds of four rows each, at the Hub's limit of thirty a minute per
+    /// agent. From 2026-09-28 the Hub refused 1,042-1,372 batches a day from
+    /// one Mac with 429 (P3-186). Nothing was lost -- a refused batch is sent
+    /// again -- but every Mac cost the Hub thirty requests a minute. Waiting
+    /// this long after the last batch lets a few seconds of arrivals go as one.
+    private let minimumSendSpacing: TimeInterval
+    private var lastBatchSentAt: Date?
 
     /// How long to wait before asking again after `failures` failed asks.
     ///
@@ -124,6 +135,7 @@ public actor AgentIngestSender {
         retryPolicy: AgentRetryPolicy = AgentRetryPolicy(),
         randomUnit: @escaping @Sendable () -> Double = { Double.random(in: 0 ... 1) },
         now: @escaping @Sendable () -> Date = { Date() },
+        minimumSendSpacing: TimeInterval = 5,
         statusHandler: @escaping StatusHandler = { _, _ in }
     ) {
         self.queue = queue
@@ -133,6 +145,7 @@ public actor AgentIngestSender {
         self.retryPolicy = retryPolicy
         self.randomUnit = randomUnit
         self.now = now
+        self.minimumSendSpacing = minimumSendSpacing
         self.statusHandler = statusHandler
     }
 
@@ -192,7 +205,9 @@ public actor AgentIngestSender {
         failureCount = 0
         sendTask?.cancel()
         sendTask = nil
-        triggerSend()
+        // Asked for by the person, so it goes now rather than with the next
+        // few seconds of arrivals.
+        triggerSend(immediately: true)
     }
 
     public func currentQueueStatus() -> AgentDeliveryQueueStatus {
@@ -208,11 +223,25 @@ public actor AgentIngestSender {
         }
     }
 
-    private func triggerSend() {
+    private func triggerSend(immediately: Bool = false) {
         guard enabled, connected, !authorizationBlocked, sendTask == nil else { return }
+        let wait = immediately ? 0 : coalescingDelay()
         sendTask = Task { [weak self] in
+            if wait > 0 {
+                try? await Task.sleep(for: .seconds(wait))
+                guard !Task.isCancelled else { return }
+            }
             await self?.sendNextBatch()
         }
+    }
+
+    /// How long a batch waits for more arrivals before it goes. None for the
+    /// first batch, and none once a full batch is waiting: that one is not
+    /// made any larger by waiting.
+    private func coalescingDelay() -> TimeInterval {
+        guard let lastBatchSentAt, minimumSendSpacing > 0 else { return 0 }
+        if queue.status().pendingCount >= Self.agentBatchLimit { return 0 }
+        return max(0, minimumSendSpacing - now().timeIntervalSince(lastBatchSentAt))
     }
 
     private func sendNextBatch() async {
@@ -263,6 +292,7 @@ public actor AgentIngestSender {
                 return
             }
             publish(.sending)
+            lastBatchSentAt = now()
             let request = try makeRequest(credential: credential, envelope: envelope)
             let (data, response) = try await transport.send(request)
             guard !Task.isCancelled else {

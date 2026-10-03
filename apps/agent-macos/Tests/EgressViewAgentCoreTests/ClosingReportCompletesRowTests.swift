@@ -258,7 +258,10 @@ extension ClosingReportCompletesRowTests {
         let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
         let sender = AgentIngestSender(
             queue: queue, credentialStore: CompletingHubStore(), transport: hub,
-            metadata: metadata(), retryPolicy: AgentRetryPolicy(initialDelay: 0.01, maximumDelay: 0.05)
+            metadata: metadata(), retryPolicy: AgentRetryPolicy(initialDelay: 0.01, maximumDelay: 0.05),
+            // Two reports one after the other; how far apart batches go is
+            // AgentIngestSenderTests' question, not this one's (P3-186).
+            minimumSendSpacing: 0
         )
         await sender.setConnectivityAvailable(true)
         await sender.setEnabled(true)
