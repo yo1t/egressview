@@ -18,6 +18,7 @@ const { parentPort, workerData } = require('node:worker_threads');
 const Database = require('better-sqlite3');
 const agentIngest = require('./agent-ingest-store');
 const { createHistoryQueries } = require('./history-queries');
+const { createNotificationLogQuery } = require('./notification-log-query');
 const { createAgentAttribution } = require('./agent-attribution');
 const { summarizeAppGroups } = require('./app-classifier');
 const { routerKindForId } = require('./router-id');
@@ -60,6 +61,7 @@ const HISTORY_READS = new Set([
   'countFactsByTimeRange',
   'listSourceDeviceKeys',
   'attachAgentAttributions',
+  'queryNotificationLog',
 ]);
 
 let role = 'maintenance';
@@ -91,6 +93,7 @@ function openReader(dbPath, sourceRouterMap = {}) {
   const reads = {
     ...queries,
     attachAgentAttributions: (rows, options) => attribution.attach(rows, options),
+    queryNotificationLog: createNotificationLogQuery({ getDb: () => db }),
   };
   const refreshKinds = () => {
     kinds = new Map(db.prepare('SELECT id, kind FROM routers').all().map(row => [row.id, row.kind]));
