@@ -314,6 +314,7 @@ describe('Agent HTTP ingest', () => {
     assert.deepEqual(moves, [{
       fromSrc: '0.0.0.0', toSrc: '192.0.2.10', toSport: 49152,
       dst: observation.remoteAddress, dport: observation.remotePort, proto: observation.networkProtocol,
+      agentHost: closing.agent.hostName,
     }]);
   });
 

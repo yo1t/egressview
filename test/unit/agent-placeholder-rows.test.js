@@ -46,7 +46,7 @@ describe('agent placeholder rows (P3-185)', () => {
     db.prepare('INSERT INTO connection_agent_observations VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run('0.0.0.0', '192.0.2.36', 5353, 'UDP', 'agent-a', 'obs-1', 'exact');
 
-    const outcome = rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.34', toSport: 5353, dst: '192.0.2.36', dport: 5353, proto: 'udp' });
+    const outcome = rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.34', toSport: 5353, dst: '192.0.2.36', dport: 5353, proto: 'udp', agentHost: 'mac-1' });
 
     assert.deepEqual(outcome, { firstSeen: 1000, lastSeen: 2500, merged: false, placeholderRemoved: true });
     assert.equal(row('0.0.0.0', '192.0.2.36', 5353, 'udp'), undefined);
@@ -64,7 +64,7 @@ describe('agent placeholder rows (P3-185)', () => {
     addRow('::', 'fe80::1', 5353, 'udp', 500, 900);
     addRow('fe80::9', 'fe80::1', 5353, 'udp', 800, 3000);
 
-    const outcome = rows.relocate({ fromSrc: '::', toSrc: 'fe80::9', dst: 'fe80::1', dport: 5353, proto: 'udp' });
+    const outcome = rows.relocate({ fromSrc: '::', toSrc: 'fe80::9', dst: 'fe80::1', dport: 5353, proto: 'udp', agentHost: 'mac-1' });
 
     assert.equal(outcome.merged, true);
     assert.equal(row('fe80::9', 'fe80::1', 5353, 'udp').firstSeen, 500);
@@ -79,7 +79,7 @@ describe('agent placeholder rows (P3-185)', () => {
     db.prepare('INSERT INTO agent_observations VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run('agent-a', 'obs-2', '0.0.0.0', 5353, '224.0.0.251', 5353, 'udp', 2000);
 
-    const outcome = rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.34', dst: '224.0.0.251', dport: 5353, proto: 'udp' });
+    const outcome = rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.34', dst: '224.0.0.251', dport: 5353, proto: 'udp', agentHost: 'mac-1' });
 
     assert.equal(outcome.placeholderRemoved, false);
     assert.ok(row('0.0.0.0', '224.0.0.251', 5353, 'udp'));
@@ -87,14 +87,25 @@ describe('agent placeholder rows (P3-185)', () => {
     assert.ok(cache.has('0.0.0.0|224.0.0.251|5353|udp'));
   });
 
+  // P2-102: any enrolled agent can report any address, but only the agent
+  // whose flow it is may move the row.
+  it('ほかのAgentの行は動かさない', () => {
+    const { rows, addRow, row } = fixture();
+    addRow('0.0.0.0', '192.0.2.36', 5353, 'udp', 1000, 2000);
+    assert.equal(rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.99', dst: '192.0.2.36', dport: 5353, proto: 'udp', agentHost: 'other-mac' }), null);
+    assert.equal(rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.99', dst: '192.0.2.36', dport: 5353, proto: 'udp' }), null);
+    assert.ok(row('0.0.0.0', '192.0.2.36', 5353, 'udp'));
+    assert.equal(row('192.0.2.99', '192.0.2.36', 5353, 'udp'), undefined);
+  });
+
   it('ルーターが見た行や、送信元が分からないままの付け替えには手を付けない', () => {
     const { db, rows, addRow, row } = fixture();
     addRow('0.0.0.0', '198.51.100.1', 443, 'udp', 1, 2);
     db.prepare('INSERT INTO connection_observations VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run('0.0.0.0', '198.51.100.1', 443, 'udp', 'yamaha1', 1, 2);
-    assert.equal(rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.34', dst: '198.51.100.1', dport: 443, proto: 'udp' }), null);
+    assert.equal(rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.34', dst: '198.51.100.1', dport: 443, proto: 'udp', agentHost: 'mac-1' }), null);
     assert.ok(row('0.0.0.0', '198.51.100.1', 443, 'udp'));
-    assert.equal(rows.relocate({ fromSrc: '192.0.2.34', toSrc: '192.0.2.35', dst: '198.51.100.1', dport: 443, proto: 'udp' }), null);
-    assert.equal(rows.relocate({ fromSrc: '0.0.0.0', toSrc: '::', dst: '198.51.100.1', dport: 443, proto: 'udp' }), null);
+    assert.equal(rows.relocate({ fromSrc: '192.0.2.34', toSrc: '192.0.2.35', dst: '198.51.100.1', dport: 443, proto: 'udp', agentHost: 'mac-1' }), null);
+    assert.equal(rows.relocate({ fromSrc: '0.0.0.0', toSrc: '::', dst: '198.51.100.1', dport: 443, proto: 'udp', agentHost: 'mac-1' }), null);
   });
 });
