@@ -149,6 +149,31 @@ final class PacketByteLedgerTests: XCTestCase {
         XCTAssertGreaterThan(ledger.snapshot().evicted, 0)
     }
 
+    /// P2-102: trimming only the excess left the ledger full, so every new
+    /// tuple after that paid for a sort of every entry -- 6.4 ms a packet on
+    /// the path every packet waits on. Over capacity, it now trims to nine
+    /// tenths, so the next sorts are a tenth of the capacity apart.
+    func testOverCapacityItTrimsATenthSoTheNextTuplesDoNotEachSort() {
+        var clock: TimeInterval = 0
+        let ledger = PacketByteLedger(capacity: 100, idleSeconds: 600, now: { clock })
+        func add(_ port: UInt16) {
+            record(ledger, ipv4UDP(source: mac, sourcePort: port, destination: server, destinationPort: 443, payload: 10), outbound: true)
+            clock += 1
+        }
+        for port in UInt16(40_000)..<40_101 { add(port) }
+        XCTAssertEqual(ledger.snapshot().entries, 90)
+        XCTAssertEqual(ledger.snapshot().capacityTrims, 1)
+        XCTAssertNil(ledger.take(flow(localPort: 40_010)), "the least recently seen went")
+        XCTAssertNotNil(ledger.take(flow(localPort: 40_011)))
+        // Ten more new tuples fit without another trim.
+        for port in UInt16(41_000)..<41_011 { add(port) }
+        XCTAssertEqual(ledger.snapshot().capacityTrims, 1)
+        XCTAssertEqual(ledger.snapshot().entries, 100)
+        add(42_000)
+        XCTAssertEqual(ledger.snapshot().capacityTrims, 2)
+        XCTAssertEqual(ledger.snapshot().entries, 90)
+    }
+
     /// The packet filter delivers Ethernet frames on en0: 14 bytes of link
     /// layer before the IP header. Build 190 read none of 360,347 of them.
     private func ethernet(_ ip: [UInt8], etherType: UInt16, vlan: Bool = false) -> [UInt8] {

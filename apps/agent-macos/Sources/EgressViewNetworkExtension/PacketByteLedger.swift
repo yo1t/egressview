@@ -49,6 +49,8 @@ public final class PacketByteLedger: @unchecked Sendable {
         public var claimed: UInt64 = 0
         public var claimedEmpty: UInt64 = 0
         public var evicted: UInt64 = 0
+        /// Times the ledger was over capacity after dropping idle entries.
+        public var capacityTrims: UInt64 = 0
         public var entries: Int = 0
         /// The shape of the first few unreadable packets: length, first byte,
         /// the two bytes where an EtherType would be, and the byte after them.
@@ -149,18 +151,32 @@ public final class PacketByteLedger: @unchecked Sendable {
     }
 
     /// Drops entries no packet has touched for `idleSeconds`, then, if still
-    /// over capacity, the least recently seen. Called with the lock held.
+    /// over capacity, the least recently seen down to nine tenths of it.
+    /// Called with the lock held.
+    ///
+    /// Down to nine tenths, not to the capacity itself. Trimming only the
+    /// excess left the ledger full, so the next new tuple was over again and
+    /// paid for another sort of every entry: measured 2026-10-07, 6.4 ms a
+    /// packet once full against 0.43 µs before -- on the path every packet
+    /// waits on, and reachable by anyone who can show this Mac 65,536 tuples
+    /// in ten minutes (P2-102). Room for a tenth means one sort per 6,553 new
+    /// tuples.
     private func sweep(at time: TimeInterval) {
         insertsSinceSweep = 0
         let before = entries.count
         entries = entries.filter { time - $0.value.lastSeen < idleSeconds }
         if entries.count > capacity {
-            let excess = entries.count - capacity
+            let excess = entries.count - Self.trimmedCount(capacity: capacity)
             for key in entries.sorted(by: { $0.value.lastSeen < $1.value.lastSeen }).prefix(excess).map(\.key) {
                 entries.removeValue(forKey: key)
             }
+            stats.capacityTrims &+= 1
         }
         stats.evicted &+= UInt64(before - entries.count)
+    }
+
+    static func trimmedCount(capacity: Int) -> Int {
+        max(0, capacity - max(1, capacity / 10))
     }
 
     static func shape(_ bytes: UnsafeRawBufferPointer, _ packetLength: Int) -> String {

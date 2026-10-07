@@ -114,11 +114,15 @@ public enum QUICInitial {
         let datagram: Data
     }
 
-    static func parseLongHeader(_ datagram: Data) -> LongHeaderPacket? {
+    static func parseLongHeader(_ input: Data) -> LongHeaderPacket? {
         // Padding to 1200 bytes is required of a client Initial. A shorter
         // datagram is something else, and refusing it here keeps the key
         // derivation off arbitrary UDP.
-        guard datagram.count >= minimumInitialDatagram else { return nil }
+        guard input.count >= minimumInitialDatagram else { return nil }
+        // Rebased to start at index 0: `decrypt` addresses the datagram by the
+        // offsets read here, and a slice of a larger buffer would put every
+        // one of them in the wrong place (P2-102).
+        let datagram = input.startIndex == 0 ? input : Data(input)
         var reader = Reader(datagram)
 
         guard let first = reader.byte() else { return nil }

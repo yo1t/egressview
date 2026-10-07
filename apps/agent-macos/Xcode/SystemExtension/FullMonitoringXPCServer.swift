@@ -122,60 +122,27 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
         _ listener: NSXPCListener,
         shouldAcceptNewConnection newConnection: NSXPCConnection
     ) -> Bool {
-        guard isTrustedHost(newConnection) else {
-            logger.error("Rejected an untrusted Full monitoring XPC client")
-            return false
-        }
+        guard let requirement = hostRequirement() else { return false }
+        // Checked by the system against the connecting process itself, through
+        // its audit token, for every message. The check this replaces looked the
+        // client up by process ID and validated the file on disk: a process can
+        // connect and then exec the signed app under the same ID, and pass a
+        // check made against what it became (P2-102).
+        newConnection.setCodeSigningRequirement(requirement)
         newConnection.exportedInterface = NSXPCInterface(with: FullMonitoringXPCProtocol.self)
         newConnection.exportedObject = self
         newConnection.resume()
         return true
     }
 
-    private func isTrustedHost(_ connection: NSXPCConnection) -> Bool {
-        let attributes = [
-            kSecGuestAttributePid as String: NSNumber(value: connection.processIdentifier),
-        ] as CFDictionary
-        var guestCode: SecCode?
-        let guestStatus = SecCodeCopyGuestWithAttributes(nil, attributes, [], &guestCode)
-        guard guestStatus == errSecSuccess, let guestCode else {
-            logger.error("Could not resolve XPC client code: OSStatus (guestStatus, privacy: .public)")
-            return false
-        }
-        var guestStaticCode: SecStaticCode?
-        let staticStatus = SecCodeCopyStaticCode(guestCode, [], &guestStaticCode)
-        guard staticStatus == errSecSuccess, let guestStaticCode else {
-            logger.error("Could not resolve XPC client static code: OSStatus (staticStatus, privacy: .public)")
-            return false
-        }
-
+    /// The app this extension serves: this bundle identifier, signed by the
+    /// same team as the extension.
+    private func hostRequirement() -> String? {
         guard let teamIdentifier = signingTeamIdentifier() else {
             logger.error("Could not determine the System Extension signing team")
-            return false
+            return nil
         }
-        let requirementText = "anchor apple generic and identifier \"\(FullMonitoringXPC.hostBundleIdentifier)\" and certificate leaf[subject.OU] = \"\(teamIdentifier)\""
-        var requirement: SecRequirement?
-        let requirementStatus = SecRequirementCreateWithString(requirementText as CFString, [], &requirement)
-        guard requirementStatus == errSecSuccess, let requirement else {
-            logger.error("Could not create the XPC client requirement: OSStatus \(requirementStatus, privacy: .public)")
-            return false
-        }
-        var validationError: Unmanaged<CFError>?
-        let validationFlags = SecCSFlags(
-            rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures
-        )
-        let validationStatus = SecStaticCodeCheckValidityWithErrors(
-            guestStaticCode,
-            validationFlags,
-            requirement,
-            &validationError
-        )
-        guard validationStatus == errSecSuccess else {
-            let detail = validationError?.takeRetainedValue().localizedDescription ?? "unknown"
-            logger.error("XPC client signature validation failed: OSStatus \(validationStatus, privacy: .public), \(detail, privacy: .public)")
-            return false
-        }
-        return true
+        return "anchor apple generic and identifier \"\(FullMonitoringXPC.hostBundleIdentifier)\" and certificate leaf[subject.OU] = \"\(teamIdentifier)\""
     }
 
     private func signingTeamIdentifier() -> String? {

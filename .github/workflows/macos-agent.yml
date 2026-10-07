@@ -52,4 +52,5 @@ jobs:
           ! plutil -extract com.apple.security.xpc.mach-service.name raw Xcode/SystemExtension/EgressViewFilter.DeveloperID.entitlements >/dev/null 2>&1
           grep -Fq 'NEProvider.startSystemExtensionMode()' Xcode/SystemExtension/main.swift
           grep -Fq 'dispatchMain()' Xcode/SystemExtension/main.swift
-          grep -Fq 'SecStaticCodeCheckValidityWithErrors' Xcode/SystemExtension/FullMonitoringXPCServer.swift
+          grep -Fq 'newConnection.setCodeSigningRequirement(requirement)' Xcode/SystemExtension/FullMonitoringXPCServer.swift
+          ! grep -Fq 'kSecGuestAttributePid' Xcode/SystemExtension/FullMonitoringXPCServer.swift

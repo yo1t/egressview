@@ -124,6 +124,16 @@ final class QUICInitialTests: XCTestCase {
         )
     }
 
+    /// P2-102: the decryption addressed the datagram by offsets that assume
+    /// it starts at index 0. A slice of a larger buffer reads the same.
+    func testReadsTheNameFromASliceOfALargerBuffer() {
+        let packet = bytes(Self.protectedClientInitial)
+        let larger = Data([0xAA, 0xBB, 0xCC]) + packet
+        let slice = larger.dropFirst(3)
+        XCTAssertNotEqual(slice.startIndex, 0)
+        XCTAssertEqual(QUICInitial.serverName(inDatagram: slice), "example.com")
+    }
+
     func testRefusesAnythingThatIsNotAV1Initial() {
         let datagram = bytes(Self.protectedClientInitial)
 
