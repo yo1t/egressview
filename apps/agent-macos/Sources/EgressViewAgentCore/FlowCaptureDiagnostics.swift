@@ -14,6 +14,9 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
     public private(set) var closedReports: UInt64 = 0
     public private(set) var unregisteredClosesRecovered: UInt64 = 0
     public private(set) var unregisteredClosesUnresolved: UInt64 = 0
+    /// Close reports the system sent a second time for a flow that had just
+    /// closed. Set aside, and not counted as unregistered closes.
+    public private(set) var duplicateCloses: UInt64 = 0
     /// Why an unresolved close could not be recorded. Inbound flows are not
     /// recorded by design; the endpoint cases are outbound traffic that went
     /// unrecorded, which is what P3-181 needs to count separately.
@@ -38,7 +41,7 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
     public enum Stage: Sendable {
         case newFlow, nonSocket, nonOutbound, unsupportedProtocol
         case missingLocalEndpoint, missingRemoteEndpoint, registeredFlow
-        case outboundCallback, closedReport, unregisteredCloseRecovered, unregisteredCloseUnresolved
+        case outboundCallback, closedReport, unregisteredCloseRecovered, unregisteredCloseUnresolved, duplicateClose
         case unresolvedCloseInbound, unresolvedCloseMissingLocalEndpoint, unresolvedCloseMissingRemoteEndpoint
         case closedWithBytes, closedWithoutBytes, zeroCloseRecordedAsUnmeasured
         case emittedObservation, enqueuedObservation
@@ -58,6 +61,7 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
         case .closedReport: closedReports = Self.increment(closedReports)
         case .unregisteredCloseRecovered: unregisteredClosesRecovered = Self.increment(unregisteredClosesRecovered)
         case .unregisteredCloseUnresolved: unregisteredClosesUnresolved = Self.increment(unregisteredClosesUnresolved)
+        case .duplicateClose: duplicateCloses = Self.increment(duplicateCloses)
         case .unresolvedCloseInbound: unresolvedClosesInbound = Self.increment(unresolvedClosesInbound)
         case .unresolvedCloseMissingLocalEndpoint:
             unresolvedClosesMissingLocalEndpoint = Self.increment(unresolvedClosesMissingLocalEndpoint)

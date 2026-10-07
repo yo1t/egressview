@@ -53,6 +53,10 @@ public struct OpenFlowRegistry: Sendable {
 
     public func contains(flowID: UUID) -> Bool { entries[flowID] != nil }
 
+    /// What the registry knows about an open flow, including a local endpoint
+    /// learned after it opened. The close report does not always carry one.
+    public func metadata(flowID: UUID) -> SocketFlowMetadata? { entries[flowID]?.metadata }
+
     public mutating func register(
         flowID: UUID,
         metadata: SocketFlowMetadata,

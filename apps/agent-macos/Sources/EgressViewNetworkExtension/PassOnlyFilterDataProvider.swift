@@ -67,6 +67,7 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     /// datagrams, and the store drops the flow as soon as a name is found or
     /// the flow is allowed through.
     private var quicAssemblers = QUICInitialAssemblerStore()
+    private var recentlyClosed = RecentlyClosedFlows()
     private let lock = NSLock()
 
     public override init() {
@@ -238,17 +239,46 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     open override func handle(_ report: NEFilterReport) {
         guard let socketFlow = report.flow as? NEFilterSocketFlow else { return }
         let kind = FlowReportKind(report.event)
-        if kind == .flowClosed { didRecordFlowCapture(.closedReport) }
+        if kind == .flowClosed {
+            didRecordFlowCapture(.closedReport)
+            let first = lock.withLock {
+                recentlyClosed.recordClose(socketFlow.identifier, at: MonotonicSeconds.now())
+            }
+            guard first else {
+                // The same close again: recording it would overwrite the
+                // first with whatever this one lacks.
+                didRecordFlowCapture(.duplicateClose)
+                return
+            }
+        }
         let described = adapter.metadataResult(from: socketFlow)
         var metadata: SocketFlowMetadata?
         if case let .success(value) = described { metadata = value }
+        let reportedIn = UInt64(max(0, report.bytesInboundCount))
+        let reportedOut = UInt64(max(0, report.bytesOutboundCount))
+        let reportedZero = reportedIn == 0 && reportedOut == 0
+        // Every closing flow settles its packet counts, used or not, so a later
+        // flow on the same tuple starts from nothing. The registry's metadata
+        // fills in a local endpoint the close report lacks.
+        var packetCounts: (inbound: UInt64, outbound: UInt64)?
+        if kind == .flowClosed {
+            let known = metadata?.hasLocalEndpoint == true
+                ? metadata
+                : lock.withLock { openFlows.metadata(flowID: socketFlow.identifier) }
+            if let known {
+                packetCounts = packetByteCounts(
+                    closing: known, reportedIn: reportedIn, reportedOut: reportedOut
+                )
+            }
+        }
+        let substitute = reportedZero ? packetCounts : nil
         let (wasRegistered, observation) = lock.withLock {
             let wasRegistered = openFlows.contains(flowID: socketFlow.identifier)
             let observation = openFlows.complete(
                 flowID: socketFlow.identifier,
                 kind: kind,
-                bytesIn: UInt64(max(0, report.bytesInboundCount)),
-                bytesOut: UInt64(max(0, report.bytesOutboundCount)),
+                bytesIn: substitute?.inbound ?? reportedIn,
+                bytesOut: substitute?.outbound ?? reportedOut,
                 metadata: metadata,
                 reportedAt: Date()
             )
@@ -275,6 +305,15 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         if let observation {
             emit(observation)
         }
+    }
+
+    /// Counts kept from packet headers for a closing flow (P3-183). Called on
+    /// every close so the counts are settled either way; used only when the
+    /// system's own report is zero both ways. The normal provider keeps none.
+    open func packetByteCounts(
+        closing metadata: SocketFlowMetadata, reportedIn: UInt64, reportedOut: UInt64
+    ) -> (inbound: UInt64, outbound: UInt64)? {
+        nil
     }
 
     private func emit(_ observation: ConnectionObservation) {

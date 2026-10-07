@@ -63,6 +63,13 @@ xcodebuild -quiet \
 [[ -d "$APP_PATH" ]] || { printf 'Host app missing from archive\n' >&2; exit 1; }
 [[ -d "$EXTENSION_PATH" ]] || { printf 'System Extension missing from archive\n' >&2; exit 1; }
 EXTENSION_BUILD=$(plutil -extract CFBundleVersion raw "$EXTENSION_PATH/Contents/Info.plist")
+HOST_BUILD=$(plutil -extract CFBundleVersion raw "$APP_PATH/Contents/Info.plist")
+# Each side derives the XPC service name from its own build number, so a
+# host and extension from different builds cannot talk (P3-183, build 188).
+[[ "$HOST_BUILD" == "$EXTENSION_BUILD" ]] || {
+  printf 'Host and System Extension build numbers differ\n' >&2
+  exit 1
+}
 EXPECTED_MACH_SERVICE_NAME="group.com.egressview.agent.xpc.$EXTENSION_BUILD"
 [[ "$(plutil -extract NetworkExtension.NEMachServiceName raw "$EXTENSION_PATH/Contents/Info.plist")" == "$EXPECTED_MACH_SERVICE_NAME" ]] || {
   printf 'System Extension XPC service name is invalid\n' >&2

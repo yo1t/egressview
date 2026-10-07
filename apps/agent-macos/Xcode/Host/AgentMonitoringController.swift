@@ -355,6 +355,15 @@ final class AgentMonitoringController {
         fullMonitoringCollector?.setReadsServerName(enabled)
     }
 
+    /// The setting is already stored; this puts it into the running filter.
+    func applyPacketCounting() {
+        extensionController.applyPacketCounting { result in
+            if case let .failure(error) = result {
+                NSLog("EgressView: packet counting setting not applied: %@", error.localizedDescription)
+            }
+        }
+    }
+
     /// Writes down when monitoring was really running, so the charts can say
     /// which parts of a period they know nothing about.
     ///
@@ -930,11 +939,7 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
                 completion(.failure(error))
                 return
             }
-            let configuration = NEFilterProviderConfiguration()
-            configuration.filterSockets = true
-            configuration.filterPackets = false
-            configuration.filterDataProviderBundleIdentifier = self?.identifier
-            manager.providerConfiguration = configuration
+            manager.providerConfiguration = self?.filterConfiguration()
             manager.localizedDescription = L("EgressView outbound connection metadata")
             manager.isEnabled = true
             manager.saveToPreferences { error in
@@ -944,6 +949,42 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
                     self?.statusHandler(.fullActivationRequested)
                     completion(.success(()))
                 }
+            }
+        }
+    }
+
+    /// The configuration the filter runs with. The packet filter is named
+    /// only while the user has turned the counting on; otherwise macOS never
+    /// starts it and no packet reaches the extension (P3-183).
+    private func filterConfiguration() -> NEFilterProviderConfiguration {
+        let configuration = NEFilterProviderConfiguration()
+        configuration.filterSockets = true
+        configuration.filterDataProviderBundleIdentifier = identifier
+        let countsPackets = PacketCountingPreferences().isEnabled
+        configuration.filterPackets = countsPackets
+        if countsPackets {
+            configuration.filterPacketProviderBundleIdentifier = identifier
+        }
+        return configuration
+    }
+
+    /// Rewrites the running filter's configuration after the setting changed.
+    /// A filter that is not on is left alone: it takes the setting when it is
+    /// next turned on.
+    func applyPacketCounting(completion: @escaping (Result<Void, Error>) -> Void) {
+        let manager = NEFilterManager.shared()
+        manager.loadFromPreferences { [weak self] error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+            guard let self, manager.isEnabled else {
+                completion(.success(()))
+                return
+            }
+            manager.providerConfiguration = self.filterConfiguration()
+            manager.saveToPreferences { error in
+                completion(error.map { .failure($0) } ?? .success(()))
             }
         }
     }
@@ -996,6 +1037,7 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
         completion?(result)
     }
 }
+
 
 private enum SystemExtensionActivationError: LocalizedError {
     case unknownResult
