@@ -37,7 +37,6 @@
 "Refresh" = "更新";
 "Your network, right now" = "ネットワークの現在地";
 "A local summary for %@. Packet payloads are never collected." = "%@のローカル集計です。パケットの内容は収集しません。";
-"Connections" = "接続";
 "Applications" = "アプリ";
 "Destinations" = "宛先";
 "Collection" = "収集状態";
@@ -46,9 +45,7 @@
 "A connection that macOS opens again under the same identity is a new row each time." = "macOSが同じ識別子で開き直した接続は、開き直すたびに別の行になります。";
 "%lld shown" = "%lld件表示";
 "Application" = "アプリ";
-"Destination" = "宛先";
 "Protocol" = "プロトコル";
-"Source" = "収集方式";
 "Full" = "フル";
 "Lightweight" = "軽量";
 "Paused" = "一時停止";
@@ -197,7 +194,6 @@
 "Update checks send only the Agent version and macOS version. They do not send a device or installation identifier." = "更新確認ではAgentとmacOSのバージョンだけを送信します。端末やインストールを識別するIDは送信しません。";
 "Updates are checked once per day." = "アップデートを1日1回確認します。";
 "Checking for updates..." = "アップデートを確認しています...";
-"Checking..." = "確認中...";
 "Check now" = "今すぐ確認";
 "Open verified installer" = "検証済みインストーラを開く";
 "Installing temporarily stops monitoring and macOS may ask you to approve the System Extension again." = "インストール中は監視が一時停止し、macOSからSystem Extensionの再承認を求められる場合があります。";
@@ -216,7 +212,6 @@
 "Update %@ ready..." = "アップデート%@を利用できます...";
 "EgressView Agent %@ is ready" = "EgressView Agent %@を利用できます";
 "The installer passed the signed manifest, checksum, developer identity and Gatekeeper checks. You choose when to open it because installation temporarily stops monitoring." = "インストーラは署名済みmanifest、checksum、開発者ID、Gatekeeperの検証に合格しています。インストール中は監視が一時停止するため、開く時点は利用者が選べます。";
-"Open installer" = "インストーラを開く";
 "Later" = "あとで";
 "Re-verifying the installer before opening..." = "インストーラを開く前に再検証しています...";
 "Installer verification failed: %@" = "インストーラの検証に失敗しました：%@";
@@ -241,7 +236,6 @@
 "Delivery is off" = "送信は無効です";
 "Delivery is paused" = "送信は一時停止中です";
 "Waiting for a network path to the configured Hub" = "設定したHubへ接続できるネットワークを待っています";
-"Ready" = "送信可能";
 "Sending a bounded batch..." = "上限付きバッチを送信しています...";
 "Hub unavailable; next low-frequency retry %@" = "Hubへ接続できません。次回の低頻度再試行：%@";
 "Hub authorization expired or was revoked" = "Hubの認証が期限切れまたは失効しました";
@@ -319,7 +313,6 @@
 
 /* P3-15 / P3-18 charts */
 "Measure" = "指標";
-"Data volume" = "データ量";
 "When traffic happened" = "いつ通信があったか";
 "Stacked by application, %@" = "アプリ別の積み上げ・%@";
 "Which application went where" = "どのアプリがどこへ";
@@ -361,7 +354,6 @@
 "Slow" = "遅い";
 "Normal" = "標準";
 "Fast" = "速い";
-"Stop" = "停止";
 "Rotate" = "回転";
 "Speed" = "速度";
 "Stop the globe where it is" = "地球儀をその位置で止めます";
