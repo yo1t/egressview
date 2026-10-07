@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "path": "Vulnerable.csproj",
+      "frameworks": [
+        {
+          "framework": "net10.0-windows7.0",
+          "transitivePackages": [
+            {
+              "id": "Example.Transitive.Package",
+              "resolvedVersion": "1.0.0",
+              "vulnerabilities": [
+                {
+                  "severity": "High",
+                  "advisoryUrl": "https://example.invalid/advisory"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
