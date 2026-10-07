@@ -14,6 +14,21 @@ describe('trusted reverse proxy boundary', () => {
     assert.equal(trust('10.42.9.3'), false);
     assert.throws(() => createTrustProxy('not-an-ip'), /Invalid/);
   });
+
+  it('rejects IPv6 CIDRs and confines mapped IPv4 peers to the configured subnet', () => {
+    assert.throws(
+      () => createTrustProxy('::ffff:10.0.0.0/8'),
+      /IPv6 proxy CIDR is not supported/
+    );
+    assert.throws(
+      () => createTrustProxy('::/1'),
+      /IPv6 proxy CIDR is not supported/
+    );
+
+    const trust = createTrustProxy('10.0.0.0/8');
+    assert.equal(trust('::ffff:10.41.0.1'), true);
+    assert.equal(trust('::ffff:192.0.2.1'), false);
+  });
 });
 
 describe('global API rate limit', () => {
