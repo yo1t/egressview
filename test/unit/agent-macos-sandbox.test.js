@@ -45,7 +45,9 @@ describe('macOS Agent App Sandbox boundary', () => {
     );
 
     assert.equal(service, `group.com.egressview.agent.xpc.${build}`);
-    assert.match(xpcSource, new RegExp(`machServiceName = "${service.replaceAll('.', '\\.')}"`));
+    // Each side derives the name from its own build number (P3-183, build 188).
+    assert.match(xpcSource, /Bundle\.main\.object\(forInfoDictionaryKey: "CFBundleVersion"\)/);
+    assert.ok(xpcSource.includes('group.com.egressview.agent.xpc.\\(build)'));
   });
 
   it('sandboxes every shipped process in Debug and Developer ID builds', () => {

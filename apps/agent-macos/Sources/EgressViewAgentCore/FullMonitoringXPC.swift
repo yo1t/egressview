@@ -36,7 +36,17 @@ public enum FullMonitoringXPC {
     // provider's endpoint while a System Extension update is being completed,
     // so reusing one fixed name can leave the new provider unable to register
     // until macOS restarts.
-    public static let machServiceName = "group.com.egressview.agent.xpc.194"
+    public static let machServiceName: String = {
+        guard let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+              !build.isEmpty, build.allSatisfy(\.isNumber) else {
+            preconditionFailure("The Agent bundle needs a numeric CFBundleVersion for XPC")
+        }
+        return machServiceName(forBuild: build)
+    }()
+
+    public static func machServiceName(forBuild build: String) -> String {
+        "group.com.egressview.agent.xpc.\(build)"
+    }
     public static let hostBundleIdentifier = "com.egressview.agent.macos"
 
     public static func encoder() -> JSONEncoder {

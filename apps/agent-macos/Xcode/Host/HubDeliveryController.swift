@@ -347,6 +347,12 @@ private final class AgentSettingsViewModel: ObservableObject {
             onServerNameChanged(readsServerName)
         }
     }
+    @Published var countsZeroReportFlows = PacketCountingPreferences().isEnabled {
+        didSet {
+            PacketCountingPreferences().isEnabled = countsZeroReportFlows
+            onPacketCountingChanged()
+        }
+    }
     @Published private(set) var quicDiagnostics: QUICFeasibilityDiagnostics?
     @Published private(set) var flowDiagnostics: FlowCaptureDiagnostics?
     @Published private(set) var flowPersistenceDiagnostics: FlowPersistenceDiagnostics?
@@ -365,6 +371,7 @@ private final class AgentSettingsViewModel: ObservableObject {
     private let onRefreshFlowDiagnostics: () -> Void
     private let onSaveDiagnostics: () -> Void
     private let onServerNameChanged: (Bool) -> Void
+    private let onPacketCountingChanged: () -> Void
     private let maintenanceQueue = DispatchQueue(label: "com.egressview.agent.settings-maintenance")
 
     init(
@@ -374,6 +381,7 @@ private final class AgentSettingsViewModel: ObservableObject {
         onRetentionChanged: @escaping (Int) -> Void,
         onLanguageChanged: @escaping () -> Void,
         onServerNameChanged: @escaping (Bool) -> Void,
+        onPacketCountingChanged: @escaping () -> Void = {},
         onRefreshQUICDiagnostics: @escaping () -> Void,
         onRefreshFlowDiagnostics: @escaping () -> Void,
         onSaveDiagnostics: @escaping () -> Void
@@ -384,6 +392,7 @@ private final class AgentSettingsViewModel: ObservableObject {
         self.onRetentionChanged = onRetentionChanged
         self.onLanguageChanged = onLanguageChanged
         self.onServerNameChanged = onServerNameChanged
+        self.onPacketCountingChanged = onPacketCountingChanged
         self.onRefreshQUICDiagnostics = onRefreshQUICDiagnostics
         self.onRefreshFlowDiagnostics = onRefreshFlowDiagnostics
         self.onSaveDiagnostics = onSaveDiagnostics
@@ -997,6 +1006,7 @@ private struct AgentSettingsView: View {
             // launch-at-login, where it was the only setting about the data
             // rather than about the app.
             serverNameSection
+            packetCountingSection
             geoSection
             threatSection
         }
@@ -1364,6 +1374,24 @@ private struct AgentSettingsView: View {
         }
     }
 
+    private var packetCountingSection: some View {
+        settingsGroup(L("Data volume")) {
+            Text(L("macOS reports zero bytes for every connection made through its own networking — URLSession and Network.framework, and the QUIC connections they make — however much they carried. Those connections are recorded as not measured."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Toggle(isOn: $model.countsZeroReportFlows) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Count them from packet headers"))
+                    // The cost is stated with the number it was measured at,
+                    // because that is what the person is deciding about.
+                    Text(L("Reads the IP and TCP/UDP header of each packet — protocol, addresses, ports and lengths — and counts the bytes of connections macOS reports as zero. Contents are not read, nothing new leaves this Mac, and every packet passes unchanged. Uses more CPU: on a test Mac the monitor went from about 0.1% to about 1.2% of one core, and more on heavy traffic. Off unless you turn it on. Applies to connections started after the change."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var serverNameSection: some View {
         settingsGroup(L("Destination names")) {
             Text(L("macOS supplies the name for applications that use its own networking. About half of connections come from applications that do not, including every browser measured — those show as addresses."))
@@ -1460,6 +1488,7 @@ private struct AgentSettingsView: View {
                     Text(L("Unregistered closes: recovered %lld · unresolved %lld",
                            extensionCounts.unregisteredClosesRecovered,
                            extensionCounts.unregisteredClosesUnresolved))
+                    Text(L("Duplicate close reports set aside: %lld", extensionCounts.duplicateCloses))
                     Text(L("Unresolved closes by reason: inbound %lld · source not known %lld · destination not known %lld",
                            extensionCounts.unresolvedClosesInbound,
                            extensionCounts.unresolvedClosesMissingLocalEndpoint,
@@ -1796,6 +1825,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         onRetentionChanged: @escaping (Int) -> Void,
         onLanguageChanged: @escaping () -> Void,
         onServerNameChanged: @escaping (Bool) -> Void,
+        onPacketCountingChanged: @escaping () -> Void = {},
         onRefreshQUICDiagnostics: @escaping () -> Void,
         onRefreshFlowDiagnostics: @escaping () -> Void,
         onSaveDiagnostics: @escaping () -> Void,
@@ -1815,6 +1845,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             onRetentionChanged: onRetentionChanged,
             onLanguageChanged: onLanguageChanged,
             onServerNameChanged: onServerNameChanged,
+            onPacketCountingChanged: onPacketCountingChanged,
             onRefreshQUICDiagnostics: onRefreshQUICDiagnostics,
             onRefreshFlowDiagnostics: onRefreshFlowDiagnostics,
             onSaveDiagnostics: onSaveDiagnostics

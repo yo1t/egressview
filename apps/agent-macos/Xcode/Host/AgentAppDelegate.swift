@@ -396,6 +396,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
             onServerNameChanged: { [weak self] enabled in
                 self?.controller.setReadsServerName(enabled)
             },
+            onPacketCountingChanged: { [weak self] in self?.controller.applyPacketCounting() },
             onRefreshQUICDiagnostics: { [weak self] in self?.controller.requestQUICDiagnostics() },
             onRefreshFlowDiagnostics: { [weak self] in self?.controller.requestFlowCaptureDiagnostics() },
             onSaveDiagnostics: { [weak self] in self?.diagnosticsExporter.export() },

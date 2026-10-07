@@ -35,12 +35,10 @@ final class FullMonitoringXPCTests: XCTestCase {
     /// extension holding the name while the new one got `Operation not
     /// permitted` on update (P3-20 Phase 2, 2026-08-28).
     ///
-    /// The number itself is checked against Info.plist by
-    /// `test/unit/agent-macos-sandbox.test.js` and by `build-release.sh`,
-    /// which read the plists. Repeating the literal here checked nothing those
-    /// do not, and had to be edited on every build.
+    /// The build comes from each process's own Info.plist. The release gate
+    /// checks that host, filter, and packet probe bundle versions agree.
     func testMachServiceUsesTheAppGroupPrefixAndABuildSuffix() {
-        let name = FullMonitoringXPC.machServiceName
+        let name = FullMonitoringXPC.machServiceName(forBuild: "189")
         XCTAssertTrue(
             name.hasPrefix("group.com.egressview.agent.xpc."),
             "\(name) is not inside the App Group macOS validates against"
@@ -51,5 +49,6 @@ final class FullMonitoringXPCTests: XCTestCase {
             suffix.allSatisfy(\.isNumber),
             "\(suffix) is not a build number, so two builds could share the name"
         )
+        XCTAssertEqual(name, "group.com.egressview.agent.xpc.189")
     }
 }

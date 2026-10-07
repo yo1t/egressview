@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.5.115</string>
+	<string>0.5.118</string>
 	<key>CFBundleVersion</key>
-	<string>194</string>
+	<string>197</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
@@ -27,6 +27,6 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSSystemExtensionUsageDescription</key>
-	<string>EgressView monitors outbound connection metadata without reading application content or blocking traffic.</string>
+	<string>This development build monitors outbound connection metadata and temporarily reads nscurl test traffic to measure byte counts. It does not store packet contents or block traffic.</string>
 </dict>
 </plist>
