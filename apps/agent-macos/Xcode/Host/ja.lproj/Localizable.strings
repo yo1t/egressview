@@ -852,3 +852,7 @@
 "Open the Threats tab" = "「脅威」タブを開く";
 "Unresolved closes by reason: inbound %lld · source not known %lld · destination not known %lld" = "記録不能の内訳：着信 %lld・送信元未確定 %lld・宛先未確定 %lld";
 "Closed reports: with bytes %lld · zero bytes %lld · zero after sending, recorded as not measured %lld" = "終了報告の通信量：あり %lld・0 %lld・送信を見たのに0のため未計測として記録 %lld";
+"Data volume" = "データ量";
+"macOS reports zero bytes for every connection made through its own networking — URLSession and Network.framework, and the QUIC connections they make — however much they carried. Those connections are recorded as not measured." = "macOSは、自身の通信の仕組み（URLSessionとNetwork.framework、およびそれらのQUIC接続）を使う接続の送受信量を、実際にどれだけ流れても0と報告します。こうした接続は「未計測」として記録されます。";
+"Count them from packet headers" = "パケットのヘッダーから数える";
+"Reads the IP and TCP/UDP header of each packet — protocol, addresses, ports and lengths — and counts the bytes of connections macOS reports as zero. Contents are not read, nothing new leaves this Mac, and every packet passes unchanged. Uses more CPU: on a test Mac the monitor went from about 0.1% to about 1.2% of one core, and more on heavy traffic. Off unless you turn it on. Applies to connections started after the change." = "各パケットのIPとTCP/UDPのヘッダー（プロトコル、アドレス、ポート、長さ）を読み、macOSが0と報告する接続の量を数えます。中身は読まず、新しくこのMacの外へ出るものはなく、すべてのパケットはそのまま通ります。CPUの使用が増えます。試験したMacでは、監視のCPUが1コアの約0.1%から約1.2%になり、通信量が多いとさらに増えます。オンにするまでオフです。変更後に始まった接続から適用されます。";

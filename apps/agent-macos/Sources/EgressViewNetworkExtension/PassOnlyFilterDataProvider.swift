@@ -271,10 +271,7 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
                 )
             }
         }
-        let probeCounts = kind == .flowClosed && reportedZero
-            ? measuredByteCounts(for: socketFlow.identifier)
-            : nil
-        let substitute = reportedZero ? (probeCounts ?? packetCounts) : nil
+        let substitute = reportedZero ? packetCounts : nil
         let (wasRegistered, observation) = lock.withLock {
             let wasRegistered = openFlows.contains(flowID: socketFlow.identifier)
             let observation = openFlows.complete(
@@ -308,12 +305,6 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         if let observation {
             emit(observation)
         }
-    }
-
-    /// Development-only filters may supply counts when the OS close report is
-    /// zero both ways. The normal provider never substitutes a measurement.
-    open func measuredByteCounts(for flowID: UUID) -> (inbound: UInt64, outbound: UInt64)? {
-        nil
     }
 
     /// Counts kept from packet headers for a closing flow (P3-183). Called on

@@ -26,8 +26,8 @@ extension.
   explicit controls below.
 - **Payloads are never read.** The system extension is a content filter that
   passes every flow through unmodified; it records who connected to what, not
-  what was said. Where macOS reports a connection's size as zero, the agent
-  counts it from packet **headers** instead — see
+  what was said. If you turn on **Settings → Data volume**, the agent counts
+  the size of connections macOS reports as zero from packet **headers** — see
   [Counting bytes from packet headers](#counting-bytes-from-packet-headers).
 - **If you enrol with a Hub, observations go to that Hub — which is yours.**
   You run it. The developer has no access to it.
@@ -108,7 +108,14 @@ macOS reports how many bytes each connection carried when it closes, but for
 connections made through Network.framework — which includes URLSession and so
 many apps, and the QUIC (HTTP/3) connections they make — that report
 is zero in both directions even when megabytes moved. To record those
-connections' real size, the system extension also runs a **packet filter**.
+connections' real size, the system extension can also run a **packet
+filter**.
+
+**Off unless you turn it on**, in Settings → Data volume. While it is off the
+app does not name the packet filter in the filter configuration, macOS does
+not start it, and no packet reaches the extension. It costs CPU: macOS hands
+the filter every packet one at a time, and on a test Mac the monitor went from
+about 0.1 % to about 1.2 % of one core on average — more on heavy traffic.
 
 What it does, and what it does not:
 

@@ -2,6 +2,30 @@ import Darwin
 import EgressViewAgentCore
 import Foundation
 
+/// Protocol, addresses and ports from an IP packet's headers. Nothing else
+/// from the packet is kept.
+public struct PacketTuple: Hashable, Sendable {
+    public let networkProtocol: InternetProtocol
+    public let sourceAddress: String
+    public let sourcePort: UInt16
+    public let destinationAddress: String
+    public let destinationPort: UInt16
+
+    public init(
+        networkProtocol: InternetProtocol,
+        sourceAddress: String,
+        sourcePort: UInt16,
+        destinationAddress: String,
+        destinationPort: UInt16
+    ) {
+        self.networkProtocol = networkProtocol
+        self.sourceAddress = sourceAddress
+        self.sourcePort = sourcePort
+        self.destinationAddress = destinationAddress
+        self.destinationPort = destinationPort
+    }
+}
+
 /// What a packet's headers say: whose it is, and how much of it is payload.
 public struct PacketHeader: Equatable, Sendable {
     public let tuple: PacketTuple
