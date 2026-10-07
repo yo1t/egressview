@@ -113,6 +113,22 @@ describe('observation consistency diagnostics', () => {
       db.close();
     });
 
+    // P3-185: lastSeen is when the Hub received the row, and observations are
+    // pruned by when the agent saw them. Sixteen rows first seen 09-29 and
+    // received 10-03 had lost their observations by 10-06.
+    it('遅れて届いた古い観測の行は、エージェントの開始時刻で保持期間を判定する', () => {
+      const db = makeAgentDb();
+      db.exec('ALTER TABLE connections ADD COLUMN firstSeen INTEGER');
+      db.prepare('INSERT INTO connections (src, dst, dport, proto, lastSeen, agentHost, firstSeen) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('10.0.0.9', '203.0.113.5', 443, 'udp', checkedAt - 4 * day, 'win-1', checkedAt - 9 * day);
+      assert.equal(checkObservationConsistency(db, checkedAt).missingObservations, 0);
+      // Started inside the window and still nothing behind it: still missing.
+      db.prepare('INSERT INTO connections (src, dst, dport, proto, lastSeen, agentHost, firstSeen) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('10.0.0.9', '203.0.113.6', 443, 'udp', checkedAt - 4 * day, 'win-1', checkedAt - 5 * day);
+      assert.equal(checkObservationConsistency(db, checkedAt).missingObservations, 1);
+      db.close();
+    });
+
     it('エージェントの接続でない古い行は、保持期間に関係なくmissingになる', () => {
       const db = makeAgentDb();
       db.prepare('INSERT INTO connections VALUES (?, ?, ?, ?, ?, ?)')

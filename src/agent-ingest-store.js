@@ -107,7 +107,7 @@ function requireDb() {
   return db;
 }
 
-function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0) {
+function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0, relocated = []) {
   const ack = {
     batchId: row.batchId,
     accepted: row.acceptedCount,
@@ -126,6 +126,10 @@ function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0
   // `duplicate` for the agent, whose check is accepted + duplicate = sent, and
   // kept out of the JSON the agent reads.
   Object.defineProperty(ack, 'completed', { value: completedCount, enumerable: false });
+  // Flows whose closing report named the local address the opening report did
+  // not (P3-185). The connection row built from the opening report is keyed on
+  // 0.0.0.0 or ::, and the route moves it to the real address.
+  Object.defineProperty(ack, 'relocated', { value: Object.freeze([...relocated]), enumerable: false });
   return Object.freeze(ack);
 }
 
@@ -257,6 +261,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
   let acceptedCount = 0;
   let duplicateCount = 0;
   let completedCount = 0;
+  const relocated = [];
   let rejectedCount = 0;
   const acceptedObservationIds = [];
 
@@ -271,6 +276,16 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
           // is kept; address and port move together.
           const endpoint = !hasLocalEndpoint(stored) && hasLocalEndpoint(observation)
             ? observation : stored;
+          if (endpoint === observation && UNSPECIFIED_ADDRESSES.has(stored.localAddress)) {
+            relocated.push({
+              fromSrc: stored.localAddress,
+              toSrc: observation.localAddress,
+              toSport: observation.localPort || null,
+              dst: stored.remoteAddress,
+              dport: stored.remotePort,
+              proto: stored.networkProtocol,
+            });
+          }
           completeObservation.run({
             agentId,
             observationId: observation.observationId,
@@ -401,7 +416,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
     duplicateCount,
     rejectedCount,
     receivedAt,
-  }, false, acceptedObservationIds, completedCount);
+  }, false, acceptedObservationIds, completedCount, relocated);
 }
 
 // How much one call deletes: rows per transaction, and how long it may keep
