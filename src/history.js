@@ -63,6 +63,8 @@ let routerKinds = new Map();
 // Keep one stable Map instance because Socket.IO and runtime consumers retain it.
 const hotCache = createHistoryCache(process.env.EGRESSVIEW_HISTORY_HOT_MAX);
 const connectionHistory = hotCache.map;
+const { createAgentPlaceholderRows } = require('./agent-placeholder-rows');
+const agentPlaceholderRows = createAgentPlaceholderRows({ getDb: () => db, cache: connectionHistory });
 
 // The source tag for a flow an endpoint agent reported. Kept apart from the
 // router source values because an agent observation carries a process name and
@@ -575,6 +577,10 @@ function pruneHistory() {
 
 function getConnectionHistory() { return connectionHistory; }
 
+function relocateAgentPlaceholder(move) {
+  return agentPlaceholderRows.relocate(move);
+}
+
 function cacheConnection(key, entry) {
   return hotCache.set(key, entry);
 }
@@ -815,6 +821,7 @@ module.exports = {
   compactHistoryLog,
   pruneHistory,
   getConnectionHistory,
+  relocateAgentPlaceholder,
   cacheConnection,
   getConnection,
   setHotMaxEntries,

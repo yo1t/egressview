@@ -37,6 +37,7 @@ function makeApp({
   agentIngest = agentIngestStore,
   allowPlaintext = false,
   recordConnections = null,
+  relocateAgentConnection = null,
   queueConnectionEnrichment = null,
   threatIntel = null,
   ingestAuditSummary = null,
@@ -66,6 +67,7 @@ function makeApp({
     agentIdentities,
     agentIngest,
     recordConnections,
+    relocateAgentConnection,
     queueConnectionEnrichment,
     threatIntel,
     isPlaintextAllowed: () => allowPlaintext,
@@ -287,6 +289,34 @@ describe('Agent HTTP credential lifecycle', () => {
 });
 
 describe('Agent HTTP ingest', () => {
+  // P3-185: the opening report did not know the local address and the
+  // connection row was keyed on 0.0.0.0; the closing report names it.
+  it('終了時の報告で送信元が分かったら、接続の行の付け替えを頼む', async () => {
+    const moves = [];
+    const { app } = makeApp({
+      recordConnections: () => {},
+      relocateAgentConnection: move => moves.push(move),
+    });
+    const { enrolled } = await enrolledAgent(app);
+    const headers = { Authorization: `Bearer ${enrolled.body.token}` };
+    const opening = ingestEnvelope();
+    Object.assign(opening.observations[0], { localAddress: '0.0.0.0', localPort: 0, bytesIn: null, bytesOut: null });
+    opening.observations = [opening.observations[0]];
+    assert.equal((await request(app, 'POST', '/api/agent/ingest', { body: opening, headers })).status, 200);
+    assert.deepEqual(moves, []);
+
+    const closing = structuredClone(opening);
+    closing.batchId = '00000000-0000-4000-8000-0000000000aa';
+    Object.assign(closing.observations[0], { localAddress: '192.0.2.10', localPort: 49152, bytesIn: '700', bytesOut: '148' });
+    assert.equal((await request(app, 'POST', '/api/agent/ingest', { body: closing, headers })).status, 200);
+
+    const observation = closing.observations[0];
+    assert.deepEqual(moves, [{
+      fromSrc: '0.0.0.0', toSrc: '192.0.2.10', toSport: 49152,
+      dst: observation.remoteAddress, dport: observation.remotePort, proto: observation.networkProtocol,
+    }]);
+  });
+
   it('queues only public Agent destinations for enrichment once', async () => {
     const recorded = [];
     const queued = [];

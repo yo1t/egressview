@@ -38,8 +38,17 @@ function checkObservationConsistency(db, checkedAt = Date.now()) {
     // reported, and an expected ERROR that size would hide a real one.
     const agentRowsKnown = hasAgentObservations
       && connectionColumns.has('agentHost') && connectionColumns.has('lastSeen');
+    // The row's lastSeen is when the Hub received the observation, while the
+    // observation is pruned by when the agent saw it. A backlog that arrives
+    // late leaves rows newer than the observations they came from: on
+    // 2026-10-07, sixteen rows first seen 09-29 and received 10-03 had lost
+    // their observations by 10-06. The agent's own first-seen time is the one
+    // retention can be judged by. It also retires rows an opening report keyed
+    // on 0.0.0.0 or :: before the Hub learned to move them (P3-185).
+    const firstSeenKnown = connectionColumns.has('firstSeen');
     const pastAgentRetention = agentRowsKnown
-      ? ' AND NOT (c.agentHost IS NOT NULL AND c.lastSeen < @agentRetentionStart)'
+      ? ` AND NOT (c.agentHost IS NOT NULL AND (c.lastSeen < @agentRetentionStart${
+        firstSeenKnown ? ' OR c.firstSeen < @agentRetentionStart' : ''}))`
       : '';
     const missingObservations = db.prepare(`
       SELECT COUNT(*) AS n FROM connections c

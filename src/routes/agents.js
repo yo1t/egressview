@@ -97,6 +97,7 @@ module.exports = function agentRoutes({
   // Injected so the route does not reach into the runtime directly; absent in
   // the unit tests, which exercise storage rather than the collection pipeline.
   recordConnections = null,
+  relocateAgentConnection = null,
   queueConnectionEnrichment = null,
   // Injected so the route does not reach into the runtime directly. Absent when
   // the Hub runs without threat feeds, in which case the endpoint says so
@@ -722,6 +723,17 @@ module.exports = function agentRoutes({
               acceptedIds.has(observation.observationId)
             )),
           }));
+        }
+        // A closing report that named the local address the opening one did
+        // not: the connection row is still keyed on the wildcard (P3-185).
+        if (ack.relocated?.length && typeof relocateAgentConnection === 'function') {
+          for (const move of ack.relocated) {
+            try {
+              relocateAgentConnection(move);
+            } catch (error) {
+              logger.error('[agents] Moving a flow off a wildcard source failed:', error.message);
+            }
+          }
         }
       }
       if (ack.rejected === 0 && ingestAuditSummary) {

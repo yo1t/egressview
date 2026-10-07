@@ -334,6 +334,8 @@ describe('終了時の報告で、開始時の行を完成させる', () => {
     assert.equal(ack.accepted, 0);
     assert.equal(ack.duplicate, 1);
     assert.equal(ack.completed, 1);
+    // The opening report knew its address; only the port was missing. Nothing to move.
+    assert.deepEqual([...ack.relocated], []);
     assert.deepEqual(rows(), [{
       localPort: 49152, bytesIn: '5000', bytesOut: '700',
       lastObservedAt: Date.parse('2026-08-11T13:00:05Z'), remoteHostname: 'api.example',
@@ -393,6 +395,14 @@ describe('終了時の報告で、開始時の行を完成させる', () => {
     assert.equal(ack.completed, 1);
     const [row] = store._dbForTest().prepare('SELECT localAddress, localPort FROM agent_observations').all();
     assert.deepEqual({ ...row }, { localAddress: '192.0.2.10', localPort: 49152 });
+    // P3-185: the connection row built from the opening report is keyed on
+    // 0.0.0.0, and the route needs to know where it belongs.
+    const stored = copy().observations[0];
+    assert.deepEqual(ack.relocated.map(move => ({ ...move })), [{
+      fromSrc: '0.0.0.0', toSrc: '192.0.2.10', toSport: 49152,
+      dst: stored.remoteAddress, dport: stored.remotePort, proto: stored.networkProtocol,
+    }]);
+    assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(ack)), 'relocated'), false);
     // The hour the flow ended in is counted under the address it left from.
     const hourly = store._dbForTest().prepare(`SELECT localAddress FROM agent_app_hourly
       WHERE hourStart = ?`).get(Date.parse('2026-08-11T13:00:00Z'));
