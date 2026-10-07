@@ -46,9 +46,7 @@
 "A connection that macOS opens again under the same identity is a new row each time." = "A connection that macOS opens again under the same identity is a new row each time.";
 "%lld shown" = "%lld shown";
 "Application" = "Application";
-"Destination" = "Destination";
 "Protocol" = "Protocol";
-"Source" = "Source";
 "Full" = "Full";
 "Lightweight" = "Lightweight";
 "Paused" = "Paused";
@@ -197,7 +195,6 @@
 "Update checks send only the Agent version and macOS version. They do not send a device or installation identifier." = "Update checks send only the Agent version and macOS version. They do not send a device or installation identifier.";
 "Updates are checked once per day." = "Updates are checked once per day.";
 "Checking for updates..." = "Checking for updates...";
-"Checking..." = "Checking...";
 "Check now" = "Check now";
 "Open verified installer" = "Open verified installer";
 "Installing temporarily stops monitoring and macOS may ask you to approve the System Extension again." = "Installing temporarily stops monitoring and macOS may ask you to approve the System Extension again.";
@@ -241,7 +238,6 @@
 "Delivery is off" = "Delivery is off";
 "Delivery is paused" = "Delivery is paused";
 "Waiting for a network path to the configured Hub" = "Waiting for a network path to the configured Hub";
-"Ready" = "Ready";
 "Sending a bounded batch..." = "Sending a bounded batch...";
 "Hub unavailable; next low-frequency retry %@" = "Hub unavailable; next low-frequency retry %@";
 "Hub authorization expired or was revoked" = "Hub authorization expired or was revoked";
@@ -319,7 +315,6 @@
 
 /* P3-15 / P3-18 charts */
 "Measure" = "Measure";
-"Data volume" = "Data volume";
 "When traffic happened" = "When traffic happened";
 "Stacked by application, %@" = "Stacked by application, %@";
 "Which application went where" = "Which application went where";
@@ -361,7 +356,6 @@
 "Slow" = "Slow";
 "Normal" = "Normal";
 "Fast" = "Fast";
-"Stop" = "Stop";
 "Rotate" = "Rotate";
 "Speed" = "Speed";
 "Stop the globe where it is" = "Stop the globe where it is";
