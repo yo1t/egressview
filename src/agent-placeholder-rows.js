@@ -47,9 +47,12 @@ function createAgentPlaceholderRows({ getDb, cache }) {
    * Moves the row for `fromSrc` to `toSrc`. Returns what happened, or null when
    * there was nothing to do.
    */
-  function relocate({ fromSrc, toSrc, toSport = null, dst, dport, proto }) {
+  function relocate({ fromSrc, toSrc, toSport = null, dst, dport, proto, agentHost }) {
     const db = getDb();
     if (!db || !UNSPECIFIED.has(fromSrc) || UNSPECIFIED.has(toSrc) || !toSrc) return null;
+    // Only the agent that reported the flow moves its row. Any enrolled agent
+    // can report any address, but not move another agent's row (P2-102).
+    if (!agentHost) return null;
     const fromKey = keyOf(fromSrc, dst, dport, proto);
     const toKey = keyOf(toSrc, dst, dport, proto);
     const cachedFrom = cache.get(fromKey);
@@ -59,6 +62,8 @@ function createAgentPlaceholderRows({ getDb, cache }) {
         `SELECT ${COLUMNS.join(', ')} FROM connections WHERE src = ? AND dst = ? AND dport = ? AND proto = ?`
       ).get(fromSrc, dst, dport, proto);
       if (!stored && !cachedFrom) return null;
+      const owner = cachedFrom?.agentHost ?? stored?.agentHost ?? null;
+      if (owner !== agentHost) return null;
       const routerSaw = db.prepare(
         'SELECT 1 FROM connection_observations WHERE src = ? AND dst = ? AND dport = ? AND proto = ? LIMIT 1'
       ).get(fromSrc, dst, dport, proto);

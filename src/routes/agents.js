@@ -727,9 +727,10 @@ module.exports = function agentRoutes({
         // A closing report that named the local address the opening one did
         // not: the connection row is still keyed on the wildcard (P3-185).
         if (ack.relocated?.length && typeof relocateAgentConnection === 'function') {
+          const agentHost = parsed.data.agent?.hostName || null;
           for (const move of ack.relocated) {
             try {
-              relocateAgentConnection(move);
+              relocateAgentConnection({ ...move, agentHost });
             } catch (error) {
               logger.error('[agents] Moving a flow off a wildcard source failed:', error.message);
             }
