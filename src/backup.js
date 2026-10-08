@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { Worker } = require('worker_threads');
 const backupInventory = require('./backup-inventory');
 const { BackupPruneRunner, DEFAULT_TIMEOUT_MS } = require('./backup-prune-runner');
+const { prepareRestoredCopy } = require('./restore-credentials');
 
 const DEFAULT_DB_PATH    = path.join(__dirname, '..', '.egressview.db');
 const DEFAULT_BACKUP_DIR = path.join(__dirname, '..', '.egressview-backups');
@@ -116,7 +117,7 @@ function removeSidecars(dbPath) {
   }
 }
 
-async function replaceDbAtomically(sourcePath) {
+async function replaceDbAtomically(sourcePath, { prepareCopy = null } = {}) {
   const id = crypto.randomBytes(6).toString('hex');
   const tempPath = `${DB_PATH}.restore-${id}.tmp`;
   // The replaced database's -wal and -shm leave *before* the swap. Removed
@@ -130,6 +131,7 @@ async function replaceDbAtomically(sourcePath) {
     // as long as the disk takes.
     await fs.promises.copyFile(sourcePath, tempPath);
     fs.chmodSync(tempPath, 0o600);
+    if (prepareCopy) prepareCopy(tempPath);
     await verifyDbFile(tempPath);
     for (const suffix of ['-wal', '-shm']) {
       if (!fs.existsSync(DB_PATH + suffix)) continue;
@@ -363,7 +365,11 @@ async function restoreFromFileOnce(sourcePath, {
       await beforeReplace();
     }
     replacementStarted = true;
-    await replaceDb(sourcePath);
+    // Credentials come from the Hub being replaced, not from the file
+    // (restore-credentials.js).
+    await replaceDb(sourcePath, {
+      prepareCopy: copyPath => prepareRestoredCopy(copyPath, { credentialSource: safetyPath }),
+    });
     if (afterReplace) await afterReplace();
   } catch (restoreErr) {
     try {

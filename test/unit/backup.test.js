@@ -852,3 +852,54 @@ describe('次のバックアップの時刻', () => {
     });
   });
 });
+
+// ─── P2-102 H2: credentials are not restored from the file ─────────────────
+
+describe('restore keeps the Hub\'s own credentials', () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  function addCredentialTables(p, { token, session }) {
+    const d = new Database(p);
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS api_identities (id TEXT PRIMARY KEY, tokenHash TEXT, permissions TEXT);
+      CREATE TABLE IF NOT EXISTS sessions (tokenHash TEXT PRIMARY KEY, expiresAt INTEGER);
+    `);
+    d.prepare('INSERT INTO api_identities VALUES (?, ?, ?)').run(token, `hash-${token}`, 'admin');
+    d.prepare('INSERT INTO sessions VALUES (?, ?)').run(`hash-${session}`, 1);
+    d.close();
+  }
+  function rows(p, sql) {
+    const d = new Database(p, { readonly: true, fileMustExist: true });
+    const out = d.prepare(sql).all();
+    d.close();
+    return out;
+  }
+
+  it('APIトークンとセッションは、復元するファイルではなく今のHubのものを残す', async () => {
+    addCredentialTables(fakeDb, { token: 'operator', session: 'operator-session' });
+    const src = path.join(tmpDir, 'crafted.db');
+    makeRealDb(src, 'from-the-backup');
+    addCredentialTables(src, { token: 'intruder', session: 'intruder-session' });
+
+    await backup.restoreFromFile(src);
+
+    assert.equal(readMark(fakeDb), 'from-the-backup', 'the data did come from the backup');
+    assert.deepEqual(rows(fakeDb, 'SELECT id FROM api_identities').map(r => r.id), ['operator']);
+    assert.deepEqual(rows(fakeDb, 'SELECT tokenHash FROM sessions').map(r => r.tokenHash), ['hash-operator-session']);
+    // The backup file itself is left as it was.
+    assert.deepEqual(rows(src, 'SELECT id FROM api_identities').map(r => r.id), ['intruder']);
+  });
+
+  it('トリガーやビューを含むファイルは復元しない', async () => {
+    const src = path.join(tmpDir, 'with-trigger.db');
+    makeRealDb(src, 'triggered');
+    const d = new Database(src);
+    d.exec('CREATE TABLE audit_events (id INTEGER); CREATE TRIGGER wipe AFTER INSERT ON audit_events BEGIN DELETE FROM audit_events; END;');
+    d.close();
+    const before = readMark(fakeDb);
+
+    await assert.rejects(() => backup.restoreFromFile(src), /trigger wipe/);
+    assert.equal(readMark(fakeDb), before, 'the Hub\'s database was not replaced');
+  });
+});
