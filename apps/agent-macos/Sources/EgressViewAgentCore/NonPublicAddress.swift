@@ -104,10 +104,60 @@ public enum NonPublicAddress {
         }
     }
 
-    /// Local or non-routable traffic is not an Internet upload anomaly.
-    /// CGNAT is deliberately retained: a shared address can be outside the LAN.
+    /// What never leaves this network beyond the LAN and loopback ranges the
+    /// log names: nothing is sent to multicast, broadcast or an unspecified
+    /// address across the internet, and site-local was a LAN range before it
+    /// was deprecated. The same list as the Windows Agent's
+    /// `PrivateAddress.StaysOnNetwork`.
+    static let staysOnNetworkIPv4: [(String, Int)] = [
+        ("0.0.0.0", 8), ("224.0.0.0", 4), ("240.0.0.0", 4),
+    ]
+    static let staysOnNetworkIPv6: [(String, Int)] = [
+        ("::", 128), ("fec0::", 10), ("ff00::", 8),
+    ]
+
+    /// Whether traffic to this address stays on this network, and so is not
+    /// an upload the outbound-anomaly measure is about: the LAN, the Mac
+    /// itself, multicast and broadcast.
+    ///
+    /// Narrower than `isNonPublic` on purpose, which answers "can anyone
+    /// outside place this address?". Through 0.5.119 this was `isNonPublic`
+    /// minus CGNAT, and it left out traffic that does leave through the
+    /// router: NAT64 (`64:ff9b::/96`, every IPv4 destination on an IPv6-only
+    /// network), 6to4 and Teredo, and the benchmarking range `198.18.0.0/15`
+    /// that fake-IP proxies hand out for every destination. On such a network
+    /// or behind such a proxy, almost nothing was measured.
+    ///
+    /// CGNAT (`100.64.0.0/10`) is counted: it is where Tailscale and other
+    /// overlay VPNs put their peers, and a peer can be anyone's machine
+    /// anywhere. What is not an address is not said to stay here.
     public static func isExcludedFromOutboundAnomaly(_ address: String) -> Bool {
-        isNonPublic(address) && networkName(address) != cgnat
+        if let name = networkName(address), name == lan || name == loopback { return true }
+        return isWithin(address, ipv4: staysOnNetworkIPv4, ipv6: staysOnNetworkIPv6)
+    }
+
+    static func isWithin(_ address: String, ipv4: [(String, Int)], ipv6: [(String, Int)]) -> Bool {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        guard !trimmed.isEmpty else { return false }
+        let bare = trimmed.split(separator: "%", maxSplits: 1).first.map(String.init) ?? trimmed
+
+        if let value = ipv4ToUInt32(bare) {
+            return ipv4.contains { base, bits in
+                guard let start = ipv4ToUInt32(base) else { return false }
+                let size = UInt64(1) << UInt64(32 - bits)
+                return UInt64(value) >= UInt64(start) && UInt64(value) < UInt64(start) + size
+            }
+        }
+        if let last = bare.split(separator: ":").last, last.contains("."),
+           ipv4ToUInt32(String(last)) != nil {
+            return isWithin(String(last), ipv4: ipv4, ipv6: ipv6)
+        }
+        guard let hex = ipv6ToHex(bare) else { return false }
+        return ipv6.contains { base, bits in
+            guard let baseHex = ipv6ToHex(base) else { return false }
+            return sharesPrefix(hex, baseHex, bits: bits)
+        }
     }
 
     /// "LAN", "loopback" or "CGNAT" for a destination in one of those ranges;
