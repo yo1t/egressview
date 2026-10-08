@@ -2206,8 +2206,9 @@ public sealed partial class ObservationStore : IDisposable
     /// Only destinations outside this network count. Every hour this PC
     /// copied about 400 MB to a machine on its own LAN, and for a week each
     /// copy was reported as unusual outbound traffic -- 105 times -- though
-    /// none of it left the building. What stays on the LAN, on the PC itself
-    /// or on the tailnet is not what this measures.
+    /// none of it left the building. What stays on the LAN or on the PC itself
+    /// is not what this measures; what goes to a tailnet peer is (see
+    /// PrivateAddress.StaysOnNetwork).
     private OutboundTrafficWindow ReadOutboundWindow(DateTimeOffset start, DateTimeOffset end)
     {
         var rows = ReadOutboundRows(start, end);
@@ -2227,7 +2228,7 @@ public sealed partial class ObservationStore : IDisposable
 
     /// The window's observations by destination and application, leaving out
     /// every destination whose traffic stays on this network: the LAN,
-    /// loopback, the tailnet's shared range, multicast and broadcast. Grouped
+    /// loopback, multicast and broadcast. Grouped
     /// in SQL and filtered here, because the ranges are PrivateAddress's, and
     /// a second copy of them written as SQL would drift.
     private List<OutboundRow> ReadOutboundRows(DateTimeOffset start, DateTimeOffset end)
