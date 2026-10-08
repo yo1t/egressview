@@ -497,6 +497,94 @@ The app and its system extension both carry a privacy manifest: no tracking,
 no tracking domains, and an empty collected-data list — accurate rather than
 merely short, because nothing is transmitted anywhere we can reach.
 
+## [2.1.0] - 2026-10-09
+
+**EgressView 2.1.0 = Hub 1.11.0.** The agents are released on their own
+(Agent for Mac 0.5.119, Agent for Windows 0.1.142 at the time of this release)
+and are not part of this bundle.
+
+**If you run your own Hub, upgrade.** 2.0.3 is seven weeks old, and three of the
+changes since are security fixes that only reach you through this release.
+
+### Security
+
+- **`proxy-addr` 2.0.8** (GHSA-jqcg-44mw-7w3h, critical). An IPv4-mapped IPv6
+  address could pass for an address inside a trusted proxy subnet. The Hub uses
+  `trust proxy` and limits requests per `req.ip`, so behind a proxy a client
+  could choose the address its requests were counted against. (#756)
+- **A restore no longer brings in the backup's API tokens and sign-in
+  sessions.** Both are stored as plain SHA-256 hashes, so a crafted backup could
+  carry the hash of a token its author held, and after the restore that token
+  would have administrator rights. A restore now keeps the tokens and sessions
+  of the Hub it replaces, and refuses a file that contains triggers or views,
+  which no Hub database has. (#766)
+- **An agent can only move its own rows.** When an agent's closing report fills
+  in a source address that was `0.0.0.0` or `::`, only the agent that reported
+  the row can move it, and only when no router observation shares it. (#764)
+- A ceiling on AI spend, and a floor under the audit trail. (#301)
+
+### Upgrading
+
+- **The database schema moves from 17 to 31 on the first start.** A verified
+  backup of the database is taken before any change; if there is not room for
+  it, the upgrade stops without touching the database. **Free space of twice
+  the database's size is required** (the copy, plus room for the migration).
+- On a large database the first start can take minutes. The startup page says
+  how far the database check and the migration have got, instead of the Hub
+  appearing not to answer. (#660, #679)
+
+### The Hub stops less
+
+On a Hub holding a few gigabytes of history, a single request could stop every
+screen and every agent upload for seconds to minutes. The heavy reads now run
+on separate database threads:
+
+- Deleting expired agent observations no longer stops the Hub every night for
+  about eleven minutes, or for one to two seconds every thirty. (#727, #730)
+- The connection log, the threat-filtered log, the detection log, the AI cards
+  and application names on a log page are read off the thread that answers
+  requests. (#735, #738, #741, #748, #749)
+- Two narrowed reads that scanned whole tables now use their indexes: the
+  detection log for one device went from 97.7 s to 0.13 s, and naming the
+  applications on a page for one Mac from 17 s to 0.15 s. (#750)
+- The write-ahead log is bounded, and an agent upload is written in pieces.
+  (#578, #604)
+- When the Hub does stop, the log says for how long and what was running.
+  (#562, #570)
+
+### What the record says
+
+- **One connection is one row.** A flow's closing report completes the row its
+  opening report made, fills in a local address the opening report did not
+  have, and moves a row off a `0.0.0.0` / `::` source. (#674, #690, #762)
+- The timeline shows when traffic happened, at the resolution the record has,
+  and marks the five-minute windows in which nothing was recorded. (#589-#600,
+  #630)
+- LAN, loopback and CGNAT destinations are named in the log. (#685)
+- A source that is offline says for how long. (#403)
+- Threat indicators survive a restart, and the screen says which threat feeds
+  answered. (P3-54)
+
+### Backups
+
+- One backup at a time; a backup gets its name only once it is complete. (#644)
+- A damaged database is never deleted before a backup is verified. (#643)
+- Copying and checking a backup happen off the main thread, and a restore from
+  the settings screen no longer stops the Hub. (#647, #661)
+- The next backup is due from the last one, not from the last start. (#684)
+
+### Agents
+
+- The Hub accepts the Windows agent's observations, and keeps the agent each
+  connection came from across every view. (#320)
+- An agent's successful uploads are one audit row an hour, not one per upload.
+  (#682)
+
+### API
+
+- The routes the Hub serves, and their responses, are declared in a contract
+  that CI checks; `docs/openapi.json` is generated from it. (#309-#317)
+
 ## [2.0.3] - 2026-08-22
 
 **EgressView 2.0.3 = Hub 1.10.0 (unchanged) + Agent for Mac 0.5.29.**

@@ -26,7 +26,7 @@
   ],
   "info": {
     "title": "EgressView Hub HTTP API",
-    "version": "1.10.0",
+    "version": "1.11.0",
     "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\nRequest bodies are described for the routes the test suite exercises, captured from the schema the server actually validated rather than written by hand -- a hand-written list would go stale the first time a route changed. Operations without one say so in their description.\n\nResponses come in two kinds and the difference matters. A schema marked `x-observed` describes what a route was **seen to return under test** -- documentation of behaviour, not a promise, and only as complete as the paths the tests happened to walk. A schema without that marking is **declared by the server** and is what the route promises, and CI refuses to ship a build that breaks it. A schema marked `x-enforced` is refused by the running Hub as well: those are responses that project a credential down to a fact about it, where an extra field would be a leak rather than a mismatch. `x-array-elements-observed` marks a declaration that covers the envelope but not every element of an array.\n\nRegenerate with `npm run docs:openapi`, which re-captures first.",
     "license": {
       "name": "AGPL-3.0-only"
