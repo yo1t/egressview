@@ -3143,13 +3143,12 @@ try
                 $"sender{index}")).ToArray());
             // What never leaves this network, in the same window: the hourly
             // copy to a machine on the LAN that was reported as unusual
-            // outbound traffic 105 times in a week, a tailnet peer, the PC
-            // itself, a link-local neighbour and multicast.
+            // outbound traffic 105 times in a week, the PC itself, a
+            // link-local neighbour and multicast. (A tailnet peer is not among
+            // them: it can be outside this network, and is counted.)
             store.WriteBatch([
                 new NetworkObservation(previous.AddMinutes(1), 4, "TCP", "10.0.0.5", 50_445, "192.168.1.20", 445,
                     400L * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "System"),
-                new NetworkObservation(previous.AddMinutes(1), 610, "TCP", "100.101.102.5", 50_500, "100.64.0.9", 22,
-                    90L * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "tailscaled"),
                 new NetworkObservation(previous.AddMinutes(1), 620, "TCP", "127.0.0.1", 50_600, "127.0.0.1", 8080,
                     70L * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw", "sender0"),
                 new NetworkObservation(previous.AddMinutes(1), 630, "UDP", "fe80::5", 50_700, "fe80::1", 5353,
@@ -3194,8 +3193,8 @@ try
                 breakdown.Destinations[0] == new OutboundContributor("upload.example.com (198.51.100.7)", 40UL * 1024 * 1024) &&
                 breakdown.SendingDestinationCount == 13,
                 "the breakdown keeps the five largest senders each way, names a host where one was read, and counts every destination");
-            Assert(!breakdown.Applications.Any(item => item.Name is "System" or "tailscaled") &&
-                !breakdown.Destinations.Any(item => item.Name.Contains("192.168.") || item.Name.Contains("100.64.") || item.Name.Contains("127.0.0.1")),
+            Assert(!breakdown.Applications.Any(item => item.Name is "System") &&
+                !breakdown.Destinations.Any(item => item.Name.Contains("192.168.") || item.Name.Contains("127.0.0.1")),
                 "and names none of what stayed inside this network, so it explains the number it sits beside");
             Assert(breakdown.Pairs is { Count: 5 } pairs &&
                 pairs[0] == new OutboundPair("backup.exe", "upload.example.com (198.51.100.7)", 40UL * 1024 * 1024) &&
@@ -3227,12 +3226,15 @@ try
         // What counts as staying on this network, for the outbound measure.
         // NAT64, 6to4 and Teredo leave through the router, and the
         // documentation ranges are what the tests are written in, so none of
-        // them is dropped as local though none can be placed on a map.
+        // them is dropped as local though none can be placed on a map. The
+        // shared range (CGNAT, a tailnet's peers) is counted, as on the Mac:
+        // a peer can be outside this network.
         foreach (var local in new[] { "192.168.1.20", "10.0.0.1", "172.16.5.5", "169.254.1.1", "127.0.0.1", "::1",
-                     "100.64.0.9", "fd00::1", "fe80::1%12", "224.0.0.251", "239.255.255.250", "255.255.255.255", "ff02::fb", "0.0.0.0" })
+                     "fd00::1", "fe80::1%12", "224.0.0.251", "239.255.255.250", "255.255.255.255", "ff02::fb", "0.0.0.0" })
             Assert(PrivateAddress.StaysOnNetwork(local), $"{local} stays on this network");
         foreach (var outward in new[] { "203.0.113.9", "198.51.100.7", "192.0.2.1", "2001:db8::1", "64:ff9b::c000:201",
-                     "2002:c000:201::1", "2001:0:4136:e378::1", "::ffff:203.0.113.9", "", "not an address" })
+                     "2002:c000:201::1", "2001:0:4136:e378::1", "::ffff:203.0.113.9", "100.64.0.9", "100.127.255.254",
+                     "::ffff:100.100.100.100", "", "not an address" })
             Assert(!PrivateAddress.StaysOnNetwork(outward), $"{outward} is not said to stay on this network");
 
         // Threat notices, as the Mac Agent decides them (P3-180).
