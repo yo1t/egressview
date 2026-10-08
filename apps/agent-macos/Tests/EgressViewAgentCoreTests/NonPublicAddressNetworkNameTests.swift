@@ -18,6 +18,34 @@ final class NonPublicAddressNetworkNameTests: XCTestCase {
         }
     }
 
+    /// The same two lists as the Windows Agent's test of
+    /// `PrivateAddress.StaysOnNetwork`, so the two Agents measure the same
+    /// outbound traffic. NAT64, 6to4 and Teredo leave through the router, the
+    /// documentation and benchmarking ranges are what fake-IP proxies and
+    /// tests use, and a tailnet peer can be outside this network: none of
+    /// them is dropped as local, though none can be placed on a map.
+    func test_送信異常の対象はWindowsと同じ() {
+        let local = ["192.168.1.20", "10.0.0.1", "172.16.5.5", "169.254.1.1", "127.0.0.1", "::1",
+                     "fd00::1", "fe80::1%12", "224.0.0.251", "239.255.255.250", "255.255.255.255", "ff02::fb", "0.0.0.0"]
+        let outward = ["203.0.113.9", "198.51.100.7", "192.0.2.1", "2001:db8::1", "64:ff9b::c000:201",
+                       "2002:c000:201::1", "2001:0:4136:e378::1", "::ffff:203.0.113.9", "100.64.0.9", "100.127.255.254",
+                       "::ffff:100.100.100.100", "", "not an address"]
+        for address in local {
+            XCTAssertTrue(NonPublicAddress.isExcludedFromOutboundAnomaly(address), "\(address) stays on this network")
+        }
+        for address in outward {
+            XCTAssertFalse(NonPublicAddress.isExcludedFromOutboundAnomaly(address), "\(address) is not said to stay on this network")
+        }
+        // Mac-only additions: the fake-IP range, site-local, and the same
+        // addresses written the ways the Mac's log writes them.
+        for address in ["198.18.0.1", "198.19.255.254", "64:ff9b::1.2.3.4", "[2002::1]"] {
+            XCTAssertFalse(NonPublicAddress.isExcludedFromOutboundAnomaly(address), address)
+        }
+        for address in ["fec0::1", "[ff02::1]", "::"] {
+            XCTAssertTrue(NonPublicAddress.isExcludedFromOutboundAnomaly(address), address)
+        }
+    }
+
     func test_範囲ごとの名前() {
         let cases: [(String, String?)] = [
             ("10.0.0.1", "LAN"), ("172.16.0.1", "LAN"), ("172.31.255.255", "LAN"), ("192.168.1.1", "LAN"),
