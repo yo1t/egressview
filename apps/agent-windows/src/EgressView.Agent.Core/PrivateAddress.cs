@@ -103,7 +103,15 @@ public static class PrivateAddress
             })];
 
     /// Whether traffic to this address stays on this network: the LAN, the PC
-    /// itself, the tailnet's shared range, multicast and broadcast.
+    /// itself, multicast and broadcast.
+    ///
+    /// Not the shared range (100.64.0.0/10, "CGNAT"), though the log names it
+    /// beside LAN and loopback. It is where Tailscale and other overlay VPNs
+    /// put their peers, and a peer can be anyone's machine anywhere: an upload
+    /// to one leaves this network, and the application that sent it is named
+    /// only on that flow. The Mac Agent counts it too. On the one PC that uses
+    /// it, seven days of it came to under 100 KB (the tailnet's DNS and LAN
+    /// announcements), too little to raise an anomaly by itself.
     ///
     /// Narrower than <see cref="IsPrivateOrReserved"/> on purpose. That one
     /// answers "can anyone outside place this address?", and NAT64, 6to4,
@@ -113,7 +121,7 @@ public static class PrivateAddress
     /// said to stay here.
     public static bool StaysOnNetwork(string? address)
     {
-        if (NetworkName(address) is not null) return true;
+        if (NetworkName(address) is Lan or Loopback) return true;
         if (TryParse(address) is not { } parsed) return false;
         if (parsed.IsIPv4MappedToIPv6) parsed = parsed.MapToIPv4();
         var bytes = parsed.GetAddressBytes();
