@@ -7,6 +7,7 @@ let _offline = null;
 function setOfflinePolicy(policy) { _offline = policy; }
 
 const axios = require('axios');
+const crypto = require('crypto');
 const path = require('path');
 const Database = require('better-sqlite3');
 
@@ -71,26 +72,97 @@ function closeDb() {
   if (db) { try { db.close(); } catch { /* already gone */ } db = null; }
 }
 
-/** Everything one feed contributed, replacing what was there for that feed. */
-function persistFeed(source, rows) {
+// Rows written per transaction when the cache is written in slices. Each
+// slice is followed by a turn of the event loop, so requests and agent uploads
+// are answered between them.
+const CACHE_WRITE_SLICE = 2000;
+// What each feed's cache last held, so an unchanged feed is not rewritten.
+const persistedDigest = new Map();
+let lastCacheStamp = 0;
+
+// The stall profiler, when the server has one (P3-184). Without it the work
+// runs unmeasured.
+let profiler = null;
+function setProfiler(p) { profiler = p; }
+function measured(name, fn) {
+  return profiler ? profiler.measureSync(name, fn) : fn();
+}
+
+function feedDigest(rows) {
+  return crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex');
+}
+
+// Strictly increasing, so a second write in the same millisecond still
+// replaces the first one's rows.
+function cacheStamp() {
+  lastCacheStamp = Math.max(Date.now(), lastCacheStamp + 1);
+  return lastCacheStamp;
+}
+
+function writeCacheRows(source, rows, stamp) {
+  const insert = db.prepare(
+    'INSERT OR REPLACE INTO threat_indicator_cache (kind, value, source, meta, fetchedAt) '
+    + 'VALUES (?, ?, ?, ?, ?)'
+  );
+  db.transaction(() => {
+    for (const row of rows) {
+      insert.run(row.kind, row.value, source, JSON.stringify(row.meta || {}), stamp);
+    }
+  })();
+}
+
+function dropOlderCacheRows(source, stamp) {
+  db.prepare('DELETE FROM threat_indicator_cache WHERE source = ? AND fetchedAt < ?').run(source, stamp);
+}
+
+/**
+ * Everything one feed contributed, replacing what was there for that feed.
+ *
+ * In slices, yielding between them, when `sliced` (P3-184). Written in one
+ * transaction on the thread that answers requests, the hourly refresh stopped
+ * the Hub for 0.7-1.1 s every hour: URLhaus alone is about 33,000 rows. New
+ * rows are written first and the feed's older rows deleted last, so a Hub that
+ * stops part-way keeps a mix of old and new indicators -- every one of them a
+ * real indicator -- until the next refresh. The cache is read only at start.
+ *
+ * Skipped when the feed is the same as the last one written.
+ */
+async function persistFeeds(jobs, { sliced = false } = {}) {
   if (!db) return;
-  try {
-    const now = Date.now();
-    const remove = db.prepare('DELETE FROM threat_indicator_cache WHERE source = ?');
-    const insert = db.prepare(
-      'INSERT OR REPLACE INTO threat_indicator_cache (kind, value, source, meta, fetchedAt) '
-      + 'VALUES (?, ?, ?, ?, ?)'
-    );
-    db.transaction(() => {
-      remove.run(source);
-      for (const row of rows) {
-        insert.run(row.kind, row.value, source, JSON.stringify(row.meta || {}), now);
+  for (const { source, rows } of jobs) {
+    const digest = feedDigest(rows);
+    if (persistedDigest.get(source) === digest) continue;
+    try {
+      const stamp = cacheStamp();
+      for (let start = 0; start < rows.length; start += CACHE_WRITE_SLICE) {
+        const slice = rows.slice(start, start + CACHE_WRITE_SLICE);
+        measured('threatIntel.cacheWrite', () => writeCacheRows(source, slice, stamp));
+        if (sliced) await new Promise(resolve => setImmediate(resolve));
       }
-    })();
-  } catch (error) {
-    // Never the reason a fetch fails. The indicators are already in memory and
-    // matching works; losing the cache costs a restart, not this run.
-    logger.error(`[threat-intel] Could not cache ${source} indicators: ${error.message}`);
+      measured('threatIntel.cacheWrite', () => dropOlderCacheRows(source, stamp));
+      persistedDigest.set(source, digest);
+    } catch (error) {
+      // Never the reason a fetch fails. The indicators are already in memory and
+      // matching works; losing the cache costs a restart, not this run.
+      logger.error(`[threat-intel] Could not cache ${source} indicators: ${error.message}`);
+    }
+  }
+}
+
+/** The synchronous form, for callers that need the cache written on return. */
+function persistFeedsNow(jobs) {
+  if (!db) return;
+  for (const { source, rows } of jobs) {
+    const digest = feedDigest(rows);
+    if (persistedDigest.get(source) === digest) continue;
+    try {
+      const stamp = cacheStamp();
+      writeCacheRows(source, rows, stamp);
+      dropOlderCacheRows(source, stamp);
+      persistedDigest.set(source, digest);
+    } catch (error) {
+      logger.error(`[threat-intel] Could not cache ${source} indicators: ${error.message}`);
+    }
   }
 }
 
@@ -299,7 +371,8 @@ function ipToNum(ip) {
  * Each element is { status: 'fulfilled', value: { data: string } }
  *                or { status: 'rejected', reason: Error }
  */
-function _applyFeedResults(results) {
+function _applyFeedResults(results, { deferCache = false } = {}) {
+  const cacheJobs = [];
   const newIps     = new Map(threatIps);
   const newDomains = new Map(threatDomains);
   const newCidrs   = [...threatCidrs];
@@ -311,9 +384,9 @@ function _applyFeedResults(results) {
     for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     logger.info(`[threat-intel] Feodo: ${entries.length} IPs`);
     recordFeed('feodo', { count: entries.length });
-    persistFeed('feodo', entries.map(e => ({
+    cacheJobs.push({ source: 'feodo', rows: entries.map(e => ({
       kind: 'ip', value: e.ip, meta: { tag: e.tag, port: e.port },
-    })));
+    })) });
   } else {
     logger.error('[threat-intel] Feodo fetch failed:', results[0].reason?.message);
     recordFeed('feodo', { error: results[0].reason?.message || 'unknown error' });
@@ -326,9 +399,9 @@ function _applyFeedResults(results) {
     for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     logger.info(`[threat-intel] ThreatFox: ${entries.length} IOCs`);
     recordFeed('threatfox', { count: entries.length });
-    persistFeed('threatfox', entries.map(e => ({
+    cacheJobs.push({ source: 'threatfox', rows: entries.map(e => ({
       kind: 'ip', value: e.ip, meta: { tag: e.tag, port: e.port },
-    })));
+    })) });
   } else {
     logger.error('[threat-intel] ThreatFox fetch failed:', results[1].reason?.message);
     recordFeed('threatfox', { error: results[1].reason?.message || 'unknown error' });
@@ -345,11 +418,11 @@ function _applyFeedResults(results) {
     }
     logger.info(`[threat-intel] URLhaus: ${entries.length} entries (IPs + domains)`);
     recordFeed('urlhaus', { count: entries.length });
-    persistFeed('urlhaus', entries.map(e => ({
+    cacheJobs.push({ source: 'urlhaus', rows: entries.map(e => ({
       kind: e.type === 'ip' ? 'ip' : 'domain',
       value: e.value,
       meta: { tag: e.tag, url: e.url, confidence: e.confidence },
-    })));
+    })) });
   } else {
     // Keep existing URLhaus data rather than wiping it on transient failure
     logger.error('[threat-intel] URLhaus fetch failed (keeping previous data):', results[2].reason?.message);
@@ -363,11 +436,11 @@ function _applyFeedResults(results) {
     newCidrs.push(...entries);
     logger.info(`[threat-intel] Spamhaus DROP: ${entries.length} CIDRs`);
     recordFeed('spamhaus', { count: entries.length });
-    persistFeed('spamhaus', entries.map(e => ({
+    cacheJobs.push({ source: 'spamhaus', rows: entries.map(e => ({
       kind: 'cidr',
       value: `${numToIp(e.network)}/${e.prefix}`,
       meta: { network: e.network, mask: e.mask, prefix: e.prefix, tag: e.tag },
-    })));
+    })) });
   } else {
     logger.error('[threat-intel] Spamhaus DROP fetch failed (keeping previous data):', results[3].reason?.message);
     recordFeed('spamhaus', { error: results[3].reason?.message || 'unknown error' });
@@ -401,7 +474,11 @@ function _applyFeedResults(results) {
       )).join(', ')
     );
   }
+  if (deferCache) return cacheJobs;
+  persistFeedsNow(cacheJobs);
+  return undefined;
 }
+
 
 async function fetchThreatIntel() {
   if (_offline?.allows && !_offline.allows('threat-intel')) {
@@ -420,7 +497,8 @@ async function fetchThreatIntel() {
       axios.get('https://urlhaus.abuse.ch/downloads/csv_recent/', { timeout: 30000, responseType: 'text' }),
       axios.get('https://www.spamhaus.org/drop/drop.txt', { timeout: 30000, responseType: 'text' }),
     ]);
-    _applyFeedResults(results);
+    const cacheJobs = measured('threatIntel.apply', () => _applyFeedResults(results, { deferCache: true }));
+    await persistFeeds(cacheJobs, { sliced: true });
   } catch (err) {
     logger.error('[threat-intel] Unexpected error during fetch/parse (existing data preserved):', err.message);
   } finally {
@@ -588,6 +666,7 @@ module.exports = {
   reMatchConnections,
   closeDb,
   setOfflinePolicy,
+  setProfiler,
   fetchThreatIntel,
   matchThreatIntel,
   needsRefresh,
@@ -601,6 +680,7 @@ module.exports = {
   parseSpamhausDrop,
   ipToNum,
   _applyFeedResults,
+  _persistFeeds: persistFeeds,
   _isFetching: () => fetching,
-  _resetForTest: () => { threatIps.clear(); threatDomains.clear(); threatCidrs.length = 0; fetching = false; lastFetch = 0; },
+  _resetForTest: () => { persistedDigest.clear(); threatIps.clear(); threatDomains.clear(); threatCidrs.length = 0; fetching = false; lastFetch = 0; },
 };
