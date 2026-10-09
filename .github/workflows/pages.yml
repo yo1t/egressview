@@ -33,6 +33,12 @@ jobs:
           destination: ./_site
       - name: Check repository links point at published files
         run: node scripts/check-site-repository-links.js _site
+      - name: Check documentation discovery and download canonical
+        run: |
+          set -euo pipefail
+          grep -q '<loc>[^<]*/docs/</loc>' _site/sitemap.xml
+          ! grep -q '<loc>[^<]*/dl/' _site/sitemap.xml
+          grep -q 'rel="canonical" href="https://dl.egressview.com/"' _site/dl/index.html
       - name: Check each document names its other-language version
         # Checked here, before the pages are replaced, because this build runs
         # on pull requests and the www deploy does not.
