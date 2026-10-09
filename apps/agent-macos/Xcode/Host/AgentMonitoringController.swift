@@ -680,6 +680,39 @@ final class AgentMonitoringController {
         }
     }
 
+    /// Removes the System Extension and asks macOS for it again (P3-187).
+    ///
+    /// Reinstalling the same version does not help an extension that is
+    /// installed but not working: the replacement is refused on purpose,
+    /// because two different builds once shared a version number (P3-167).
+    /// This is the way to start over without that loophole. macOS may ask for
+    /// an administrator password to remove the extension and for approval to
+    /// add it back; the approval guide covers the second. If removal can only
+    /// finish after a restart, monitoring resumes after the restart, because
+    /// the chosen mode stays "monitor".
+    func repairFullMonitoring() {
+        guard ensureStorageAvailable() else { return }
+        rememberChosenMode(.full)
+        lightweightCollector?.stop()
+        lightweightCollector = nil
+        fullMonitoringCollector?.stop()
+        statusHandler(.deactivating)
+        extensionController.deactivate { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(false):
+                    self.selectFullMonitoring()
+                case .success(true):
+                    // .removalRebootRequired has already been reported.
+                    break
+                case .failure(let error):
+                    self.statusHandler(.failed(L("Repair could not remove the network extension: %@", error.localizedDescription)))
+                }
+            }
+        }
+    }
+
     /// Stops both collectors, disables the filter, then asks macOS to unregister
     /// the System Extension. `true` means removal is accepted but needs reboot.
     func prepareForUninstall(completion: @escaping (Result<Bool, Error>) -> Void) {

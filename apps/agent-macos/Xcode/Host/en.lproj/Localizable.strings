@@ -310,7 +310,6 @@
 "Prepare to uninstall..." = "Prepare to uninstall...";
 "Prepare EgressView Agent for removal?" = "Prepare EgressView Agent for removal?";
 "Stop monitoring and continue" = "Stop monitoring and continue";
-"Quit EgressView Agent, then move it to Trash in Finder." = "Quit EgressView Agent, then move it to Trash in Finder.";
 
 /* P3-15 / P3-18 charts */
 "Measure" = "Measure";
@@ -859,3 +858,12 @@
 "How to allow network monitoring..." = "How to allow network monitoring...";
 "Choose How to allow network monitoring from the EgressView Agent menu." = "Choose How to allow network monitoring from the EgressView Agent menu.";
 "Close" = "Close";
+"Repair network monitoring" = "Repair network monitoring";
+"If monitoring stays stopped or nothing is recorded, this removes EgressView's network extension and installs it again. Installing the same version again does not replace it. macOS may ask for your password and for approval again; nothing is recorded until monitoring restarts. History and settings are kept." = "If monitoring stays stopped or nothing is recorded, this removes EgressView's network extension and installs it again. Installing the same version again does not replace it. macOS may ask for your password and for approval again; nothing is recorded until monitoring restarts. History and settings are kept.";
+"Repair network monitoring..." = "Repair network monitoring...";
+"Remove and reinstall the network extension?" = "Remove and reinstall the network extension?";
+"Repair" = "Repair";
+"Repair could not remove the network extension: %@" = "Repair could not remove the network extension: %@";
+"Move to Trash and Quit" = "Move to Trash and Quit";
+"Move to Trash and Quit finishes the uninstall. If it cannot, quit EgressView Agent and move it to Trash in Finder." = "Move to Trash and Quit finishes the uninstall. If it cannot, quit EgressView Agent and move it to Trash in Finder.";
+"Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder." = "Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder.";

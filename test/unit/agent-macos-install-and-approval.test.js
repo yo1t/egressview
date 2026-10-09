@@ -44,3 +44,24 @@ test('手順の文言は英語と日本語の両方にある', () => {
     for (const key of keys) assert.ok(strings.includes(`"${key}" =`), `${language}: ${key}`);
   }
 });
+
+test('設定の診断から、ネットワーク監視を修復できる（外して入れ直す）', () => {
+  const settings = read('Xcode/Host/HubDeliveryController.swift');
+  assert.match(settings, /Repair network monitoring\.\.\./, 'the button is offered');
+  assert.match(settings, /model\.repairMonitoring\(\)/, 'the button reaches the model');
+  const delegate = read('Xcode/Host/AgentAppDelegate.swift');
+  assert.match(delegate, /onRepairMonitoring: \{ \[weak self\] in self\?\.controller\.repairFullMonitoring\(\) \}/);
+  const controller = read('Xcode/Host/AgentMonitoringController.swift');
+  const repair = controller.slice(controller.indexOf('func repairFullMonitoring()'), controller.indexOf('func prepareForUninstall('));
+  assert.match(repair, /extensionController\.deactivate/, 'removes the extension first');
+  assert.match(repair, /case \.success\(false\):\s+self\.selectFullMonitoring\(\)/, 'then asks for it again');
+  assert.match(repair, /rememberChosenMode\(\.full\)/, 'a restart in between still resumes monitoring');
+});
+
+test('アンインストールの最後は、アプリをゴミ箱に入れて終了する', () => {
+  const settings = read('Xcode/Host/HubDeliveryController.swift');
+  assert.match(settings, /uninstall\.moveApplicationToTrashAndQuit\(\)/);
+  const uninstall = read('Xcode/Host/AgentUninstallController.swift');
+  assert.match(uninstall, /NSWorkspace\.shared\.recycle\(\[Bundle\.main\.bundleURL\]\)/);
+  assert.match(uninstall, /NSApp\.terminate\(nil\)/);
+});

@@ -370,6 +370,7 @@ private final class AgentSettingsViewModel: ObservableObject {
     private let onRefreshQUICDiagnostics: () -> Void
     private let onRefreshFlowDiagnostics: () -> Void
     private let onSaveDiagnostics: () -> Void
+    private let onRepairMonitoring: () -> Void
     private let onServerNameChanged: (Bool) -> Void
     private let onPacketCountingChanged: () -> Void
     private let maintenanceQueue = DispatchQueue(label: "com.egressview.agent.settings-maintenance")
@@ -384,7 +385,8 @@ private final class AgentSettingsViewModel: ObservableObject {
         onPacketCountingChanged: @escaping () -> Void = {},
         onRefreshQUICDiagnostics: @escaping () -> Void,
         onRefreshFlowDiagnostics: @escaping () -> Void,
-        onSaveDiagnostics: @escaping () -> Void
+        onSaveDiagnostics: @escaping () -> Void,
+        onRepairMonitoring: @escaping () -> Void = {}
     ) {
         self.store = store
         self.launchController = launchController
@@ -396,7 +398,12 @@ private final class AgentSettingsViewModel: ObservableObject {
         self.onRefreshQUICDiagnostics = onRefreshQUICDiagnostics
         self.onRefreshFlowDiagnostics = onRefreshFlowDiagnostics
         self.onSaveDiagnostics = onSaveDiagnostics
+        self.onRepairMonitoring = onRepairMonitoring
         refreshLaunchAtLogin()
+    }
+
+    func repairMonitoring() {
+        onRepairMonitoring()
     }
 
     func setMonitoringMode(_ mode: AgentMonitoringMode) {
@@ -717,6 +724,7 @@ private struct AgentSettingsView: View {
         for: Date().addingTimeInterval(-7 * 86_400)
     )
     @State private var confirmUninstall = false
+    @State private var confirmRepair = false
     @State private var confirmLocalOnlyUninstall = false
     @State private var anthropicAPIKey = ""
     @State private var anthropicCloudConsent = false
@@ -1432,6 +1440,19 @@ private struct AgentSettingsView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+            settingsGroup(L("Repair network monitoring")) {
+                Text(L("If monitoring stays stopped or nothing is recorded, this removes EgressView's network extension and installs it again. Installing the same version again does not replace it. macOS may ask for your password and for approval again; nothing is recorded until monitoring restarts. History and settings are kept."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(L("Repair network monitoring...")) { confirmRepair = true }
+                    .confirmationDialog(
+                        L("Remove and reinstall the network extension?"),
+                        isPresented: $confirmRepair
+                    ) {
+                        Button(L("Repair")) { model.repairMonitoring() }
+                        Button(L("Cancel"), role: .cancel) {}
+                    }
+            }
             settingsGroup(L("QUIC destination-name diagnostics")) {
                 Text(L("These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity."))
                     .font(.caption)
@@ -1727,7 +1748,10 @@ private struct AgentSettingsView: View {
                         Button(L("Cancel"), role: .cancel) {}
                     }
                 } else if uninstall.isReadyToRemoveApplication {
-                    Button(L("Show EgressView Agent in Finder")) { uninstall.revealApplication() }
+                    HStack {
+                        Button(L("Move to Trash and Quit"), role: .destructive) { uninstall.moveApplicationToTrashAndQuit() }
+                        Button(L("Show EgressView Agent in Finder")) { uninstall.revealApplication() }
+                    }
                 } else {
                     Button(L("Prepare to uninstall..."), role: .destructive) {
                         confirmUninstall = true
@@ -1744,7 +1768,7 @@ private struct AgentSettingsView: View {
                     }
                 }
                 if uninstall.isReadyToRemoveApplication {
-                    Text(L("Quit EgressView Agent, then move it to Trash in Finder."))
+                    Text(L("Move to Trash and Quit finishes the uninstall. If it cannot, quit EgressView Agent and move it to Trash in Finder."))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -1829,6 +1853,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         onRefreshQUICDiagnostics: @escaping () -> Void,
         onRefreshFlowDiagnostics: @escaping () -> Void,
         onSaveDiagnostics: @escaping () -> Void,
+        onRepairMonitoring: @escaping () -> Void = {},
         onClose: @escaping () -> Void = {}
     ) {
         self.hub = hub
@@ -1848,7 +1873,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             onPacketCountingChanged: onPacketCountingChanged,
             onRefreshQUICDiagnostics: onRefreshQUICDiagnostics,
             onRefreshFlowDiagnostics: onRefreshFlowDiagnostics,
-            onSaveDiagnostics: onSaveDiagnostics
+            onSaveDiagnostics: onSaveDiagnostics,
+            onRepairMonitoring: onRepairMonitoring
         )
         self.model = model
         let hostingController = NSHostingController(

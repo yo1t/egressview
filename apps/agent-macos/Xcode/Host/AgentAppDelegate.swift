@@ -405,6 +405,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
             onRefreshQUICDiagnostics: { [weak self] in self?.controller.requestQUICDiagnostics() },
             onRefreshFlowDiagnostics: { [weak self] in self?.controller.requestFlowCaptureDiagnostics() },
             onSaveDiagnostics: { [weak self] in self?.diagnosticsExporter.export() },
+            onRepairMonitoring: { [weak self] in self?.controller.repairFullMonitoring() },
             onClose: { [weak self] in self?.settingsWindow = nil }
         )
         controller.updateMonitoringStatus(currentMonitoringStatus)
