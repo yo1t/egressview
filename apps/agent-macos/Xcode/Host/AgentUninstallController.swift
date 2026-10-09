@@ -48,6 +48,22 @@ final class AgentUninstallController: ObservableObject {
         run(allowManualHubRevocation: true)
     }
 
+    /// The last step of uninstalling, done for the user rather than described
+    /// to them. Moving a running app to Trash is allowed; quitting right after
+    /// is what makes it final. If the move fails, Finder is the fallback.
+    func moveApplicationToTrashAndQuit() {
+        NSWorkspace.shared.recycle([Bundle.main.bundleURL]) { [weak self] _, error in
+            DispatchQueue.main.async {
+                if let error {
+                    self?.status = L("Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder.", error.localizedDescription)
+                    self?.revealApplication()
+                } else {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
     func revealApplication() {
         NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
     }
