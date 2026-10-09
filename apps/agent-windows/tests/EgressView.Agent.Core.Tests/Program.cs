@@ -199,6 +199,72 @@ try
             "a timed-out or disconnected UI ends only its IPC connection and the listener accepts the next client");
     }
 
+    // A caller that went away gives its listener back at once (P3-106). A
+    // window killed while showing thirty days held every listener with reads
+    // nobody would collect, and the window opened in its place could not get
+    // status for up to thirty seconds.
+    {
+        var pipeName = $"egressview-test-{Guid.NewGuid():N}";
+        await using (var server = new System.IO.Pipes.NamedPipeServerStream(pipeName, System.IO.Pipes.PipeDirection.InOut, 1,
+            System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.Asynchronous))
+        {
+            var client = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+            await Task.WhenAll(server.WaitForConnectionAsync(), client.ConnectAsync(5000));
+            var never = new TaskCompletionSource<string>();
+            var waiting = EgressView.Agent.Service.AgentIpcServer.AnswerUnlessCallerLeavesAsync(never.Task, server, CancellationToken.None);
+            await Task.Delay(200);
+            Assert(!waiting.IsCompleted, "while the caller is there, the listener waits for the answer");
+            var left = System.Diagnostics.Stopwatch.StartNew();
+            await client.DisposeAsync();
+            Assert(await Task.WhenAny(waiting, Task.Delay(5000)) == waiting && !await waiting && left.ElapsedMilliseconds < 2000,
+                $"and when the caller goes, the listener is free without waiting for the answer ({left.ElapsedMilliseconds} ms)");
+        }
+        await using (var server = new System.IO.Pipes.NamedPipeServerStream(pipeName, System.IO.Pipes.PipeDirection.InOut, 1,
+            System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.Asynchronous))
+        await using (var client = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous))
+        {
+            await Task.WhenAll(server.WaitForConnectionAsync(), client.ConnectAsync(5000));
+            var answer = Task.Delay(100).ContinueWith(_ => "answer");
+            Assert(await EgressView.Agent.Service.AgentIpcServer.AnswerUnlessCallerLeavesAsync(answer, server, CancellationToken.None),
+                "a caller that stays gets its answer");
+            // The caller is already reading, as the window is: this pipe has
+            // no buffer, so a write waits for its reader.
+            using var reader = new StreamReader(client, System.Text.Encoding.UTF8, false, 4096, true);
+            var reading = reader.ReadLineAsync();
+            using var writer = new StreamWriter(server, new System.Text.UTF8Encoding(false), 4096, true) { AutoFlush = true };
+            await writer.WriteLineAsync(await answer);
+            Assert(await reading == "answer", "and the pipe is still usable to send it");
+        }
+    }
+
+    // The same question asked while it is being answered is answered once
+    // (P3-106): the window opened in place of a killed one asks what the
+    // killed one asked, and used to make the service work it out twice.
+    {
+        var reads = new EgressView.Agent.Service.InFlightReads();
+        var computed = 0;
+        using var release = new ManualResetEventSlim();
+        string Slow() { Interlocked.Increment(ref computed); release.Wait(); return $"thirty days {computed}"; }
+        var first = Task.Run(() => reads.Run("analysis/43200/0", Slow));
+        while (reads.Running == 0) await Task.Delay(10);
+        var second = Task.Run(() => reads.Run("analysis/43200/0", Slow));
+        var other = Task.Run(() => reads.Run("analysis/60/0", () => "one hour"));
+        Assert(await other == "one hour", "a different question is not held up by it");
+        await Task.Delay(100);
+        release.Set();
+        Assert(await first == "thirty days 1" && await second == "thirty days 1" && computed == 1,
+            "two callers asking the same thing at once share one computation");
+        while (reads.Running != 0) await Task.Delay(10);
+        Assert(reads.Run("analysis/43200/0", Slow) == "thirty days 2" && computed == 2,
+            "and once it is answered, the next question is a new computation, not an old answer");
+        var failed = false;
+        try { reads.Run<string>("threats/60", () => throw new InvalidOperationException("store busy")); }
+        catch (InvalidOperationException) { failed = true; }
+        while (reads.Running != 0) await Task.Delay(10);
+        Assert(failed && reads.Run("threats/60", () => "recovered") == "recovered",
+            "a failed read is reported to its caller and not remembered");
+    }
+
     // More than one caller at a time (P3-140). The 30-day analysis takes 8.8 s
     // on a real machine, and a status request made during it could not even
     // connect: the server served one caller and had no pipe open meanwhile.
