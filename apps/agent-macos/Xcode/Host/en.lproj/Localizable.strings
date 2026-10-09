@@ -397,7 +397,7 @@
 "Country: any" = "Country: any";
 "Protocol: any" = "Protocol: any";
 "Volume: any" = "Volume: any";
-"Source: any" = "Source: any";
+"Source: any" = "Collection: any";
 "Measured" = "Measured";
 "The measure sizes the marks on the charts. The log lists every connection either way." = "The measure sizes the marks on the charts. The log lists every connection either way.";
 "Whether the charts are sized by connection count or by data volume" = "Whether the charts are sized by connection count or by data volume";
@@ -868,3 +868,4 @@
 "Move to Trash and Quit finishes the uninstall. If it cannot, quit EgressView Agent and move it to Trash in Finder." = "Move to Trash and Quit finishes the uninstall. If it cannot, quit EgressView Agent and move it to Trash in Finder.";
 "Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder." = "Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder.";
 "Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish." = "Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish.";
+"Collection method" = "Collection method";

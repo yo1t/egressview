@@ -693,7 +693,7 @@ struct AgentMainView: View {
                         .monospacedDigit()
                 }
                 .width(60)
-                TableColumn(L("Source"), value: \.sourceName) { row in
+                TableColumn(L("Collection method"), value: \.sourceName) { row in
                     Text(row.sourceName)
                 }
                 .width(100)
@@ -855,7 +855,7 @@ struct AgentLogFilterBar: View {
         .labelsHidden()
         .frame(width: 130)
 
-        Picker(L("Source"), selection: $model.logFilter.collector) {
+        Picker(L("Collection method"), selection: $model.logFilter.collector) {
             Text(L("Source: any")).tag(CollectorKind?.none)
             Text(L("Network")).tag(CollectorKind?.some(.networkExtension))
             Text(L("Lightweight")).tag(CollectorKind?.some(.libproc))
