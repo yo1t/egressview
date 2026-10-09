@@ -395,7 +395,7 @@
 "Country: any" = "国: すべて";
 "Protocol: any" = "プロトコル: すべて";
 "Volume: any" = "転送量: すべて";
-"Source: any" = "収集元: すべて";
+"Source: any" = "収集方式: すべて";
 "Measured" = "計測済み";
 "The measure sizes the marks on the charts. The log lists every connection either way." = "指標はグラフの大きさを決めるものです。通信ログはどちらを選んでも全件を表示します。";
 "Whether the charts are sized by connection count or by data volume" = "グラフの大きさを接続数で決めるか、データ転送量で決めるか";
@@ -868,3 +868,4 @@
 "Move to Trash and Quit finishes the uninstall. If it cannot, quit EgressView Agent and move it to Trash in Finder." = "「ゴミ箱に入れて終了」でアンインストールが完了します。うまくいかないときは、EgressView Agentを終了し、Finderでゴミ箱へ移動してください。";
 "Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder." = "アプリをゴミ箱に移動できませんでした: %@。EgressView Agentを終了し、Finderでゴミ箱へ移動してください。";
 "Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish." = "監視を止め、このMacの後片付けが完了しました。アプリをゴミ箱に入れると、macOSがネットワーク機能拡張を外します。そのあとMacを再起動すると完了です。";
+"Collection method" = "収集方式";

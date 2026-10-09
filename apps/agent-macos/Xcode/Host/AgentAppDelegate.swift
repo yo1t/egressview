@@ -184,6 +184,17 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private func foldCharts() {
         guard let store else { return }
         DispatchQueue.global(qos: .utility).async {
+            // Every five minutes with the fold, so a copy goes about a day
+            // after the migration that wrote it, whether or not the app was
+            // restarted in between (P3-158).
+            if let databaseURL = try? ObservationStore.defaultFileURL() {
+                let pruned = MigrationInventory.pruneBackups(forDatabaseAt: databaseURL)
+                if pruned.deleted > 0 {
+                    self.logger.notice(
+                        "deleted \(pruned.deleted, privacy: .public) migration copies, \(pruned.bytesFreed, privacy: .public) bytes"
+                    )
+                }
+            }
             do {
                 try store.foldCompletedHoursForCharts()
             } catch {

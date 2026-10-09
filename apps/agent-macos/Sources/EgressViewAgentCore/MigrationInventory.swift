@@ -55,6 +55,44 @@ public enum MigrationInventory {
         .sorted { $0.fromVersion < $1.fromVersion }
     }
 
+    /// How long a copy is kept after it was written.
+    ///
+    /// A copy deleted at once would only have been written to be thrown away;
+    /// a day is long enough for the new schema to go through collection,
+    /// delivery, chart folding and retention. The Windows agent made the same
+    /// choice (P3-158, #610), where removing its one retained copy gave back
+    /// 7.32 GiB.
+    public static let backupGracePeriod: TimeInterval = 24 * 60 * 60
+
+    /// Deletes the copies written more than `grace` ago and returns what was
+    /// freed (P3-158).
+    ///
+    /// Call only with a store open: opening it either reaches the current
+    /// schema or fails, so an open store is itself the proof that no copy is
+    /// still needed to undo a migration. Before this, the copies were kept for
+    /// ever and accumulated, one per schema version left behind -- three on
+    /// the Mac measured, 575 MB beside a 330 MB database. The copy's own
+    /// modification time is the clock, so no new state is stored for it. A
+    /// copy without a readable date is kept.
+    @discardableResult
+    public static func pruneBackups(
+        forDatabaseAt url: URL,
+        now: Date = Date(),
+        grace: TimeInterval = backupGracePeriod,
+        fileManager: FileManager = .default
+    ) -> (deleted: Int, bytesFreed: Int64) {
+        var deleted = 0
+        var freed: Int64 = 0
+        for backup in backups(forDatabaseAt: url, fileManager: fileManager) {
+            guard let written = backup.modifiedAt, now.timeIntervalSince(written) >= grace else { continue }
+            if (try? fileManager.removeItem(at: backup.url)) != nil {
+                deleted += 1
+                freed += backup.sizeBytes
+            }
+        }
+        return (deleted, freed)
+    }
+
     /// The migration that was under way when the agent last stopped, if one
     /// was. Present means the previous launch did not get through it.
     public static func interrupted(forDatabaseAt url: URL) -> MigrationProgress? {
