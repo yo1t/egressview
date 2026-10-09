@@ -32,8 +32,14 @@ function viewerRequest(event, canonicalHost, redirects) {
 }
 
 function buildSiteViewerRequestCode(canonicalHost) {
+  const redirects = {
+    ...REPOSITORY_FILE_REDIRECTS,
+    '/dl': 'https://dl.egressview.com/',
+    '/dl/': 'https://dl.egressview.com/',
+    '/dl/index.html': 'https://dl.egressview.com/',
+  };
   return `${viewerRequest.toString()}\nfunction handler(event) {\n` +
-    `  return viewerRequest(event, ${JSON.stringify(canonicalHost)}, ${JSON.stringify(REPOSITORY_FILE_REDIRECTS)});\n}`;
+    `  return viewerRequest(event, ${JSON.stringify(canonicalHost)}, ${JSON.stringify(redirects)});\n}`;
 }
 
 module.exports = { buildSiteViewerRequestCode };

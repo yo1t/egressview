@@ -46,6 +46,11 @@ it('edge redirects all legacy files in one hop and leaves missing files as missi
     }
   }
   const request = { uri: '/missing.md', headers: { host: { value: 'www.egressview.com' } }, querystring: {} };
+  for (const uri of ['/dl', '/dl/', '/dl/index.html']) {
+    const result = context.handler({ request: { ...request, uri } });
+    assert.equal(result.statusCode, 301);
+    assert.equal(result.headers.location.value, 'https://dl.egressview.com/');
+  }
   assert.equal(context.handler({ request }).uri, '/missing.md');
   assert.equal(context.handler({ request: { ...request, uri: '/docs/' } }).uri, '/docs/index.html');
   const alias = context.handler({ request: { ...request, uri: '/docs/architecture.html', headers: { host: { value: 'egressview.com' } } } });
@@ -58,6 +63,13 @@ it('replaces unpublished repository links in the build copy, preserving fragment
   try {
     preparePagesSource({ destination: path.join(temp, 'source') });
     const index = fs.readFileSync(path.join(temp, 'source/docs/README.md'), 'utf8');
+    assert.match(index, /^---\nlayout: default\ntitle: EgressView documentation\npermalink: \/docs\/\n---\n/);
+    const download = fs.readFileSync(path.join(temp, 'source/dl/index.html'), 'utf8');
+    assert.match(download, /^---\nlayout: null\nsitemap: false\n/);
+    assert.match(download, /rel="canonical" href="https:\/\/dl\.egressview\.com\/"/);
+    assert.doesNotMatch(download, /manifest\.json/);
+    assert.equal(fs.existsSync(path.join(temp, 'source/dl/sitemap.xml')), false);
+    assert.equal(fs.existsSync(path.join(temp, 'source/dl/robots.txt')), false);
     for (const [uri, target] of Object.entries(REPOSITORY_FILE_REDIRECTS)) {
       if (uri.endsWith('.json')) continue;
       assert.ok(index.includes(`](${target}`), `${uri} still has a broken site link`);

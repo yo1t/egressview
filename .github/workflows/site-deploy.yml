@@ -125,12 +125,13 @@ jobs:
           for required in 'https://www.egressview.com/' \
                           'https://www.egressview.com/index.ja.html' \
                           'https://www.egressview.com/products.html' \
+                          'https://www.egressview.com/docs/' \
                           'https://www.egressview.com/docs/agent-privacy.html' \
                           'https://www.egressview.com/docs/agent-privacy.ja.html'                           'https://www.egressview.com/docs/agent-privacy-windows.html'                           'https://www.egressview.com/docs/agent-privacy-windows.ja.html'; do
             grep -q "<loc>$required</loc>" _site/sitemap.xml || {
               echo "sitemap is missing $required" >&2; exit 1; }
           done
-          for forbidden in 'dl.egressview.com' 'yo1t.github.io' '/404.html'; do
+          for forbidden in 'dl.egressview.com' 'yo1t.github.io' '/404.html' 'www.egressview.com/dl/'; do
             if grep -q "$forbidden" _site/sitemap.xml; then
               echo "sitemap should not list $forbidden" >&2; exit 1
             fi
