@@ -56,7 +56,9 @@ public partial class App : System.Windows.Application
         ThemeManager.ApplySystemTheme(Resources);
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         LocalizationManager.Apply(Resources);
-        AgentStartupRegistration.InitializeDefault();
+        // Off the startup path: registering the sign-in task runs schtasks,
+        // and the window should not wait on it to appear.
+        _ = Task.Run(AgentStartupRegistration.InitializeDefault);
         activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationName);
         exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitName);
         instanceMutex = new Mutex(true, InstanceName, out var firstInstance);
