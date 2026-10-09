@@ -53,8 +53,11 @@ test('設定の診断から、ネットワーク監視を修復できる（外�
   assert.match(delegate, /onRepairMonitoring: \{ \[weak self\] in self\?\.controller\.repairFullMonitoring\(\) \}/);
   const controller = read('Xcode/Host/AgentMonitoringController.swift');
   const repair = controller.slice(controller.indexOf('func repairFullMonitoring()'), controller.indexOf('func prepareForUninstall('));
-  assert.match(repair, /extensionController\.deactivate/, 'removes the extension first');
-  assert.match(repair, /case \.success\(false\):\s+self\.selectFullMonitoring\(\)/, 'then asks for it again');
+  // macOS 27 refuses an app's own removal request ("authorization
+  // required"), so the repair must not depend on it.
+  assert.doesNotMatch(repair, /\.deactivate\b/, 'does not ask macOS to remove the extension');
+  assert.match(repair, /extensionController\.removeFilterConfiguration/, 'resets the filter configuration');
+  assert.match(repair, /case \.success:\s+self\.selectFullMonitoring\(\)/, 'then asks for the extension again');
   assert.match(repair, /rememberChosenMode\(\.full\)/, 'a restart in between still resumes monitoring');
 });
 
@@ -64,4 +67,12 @@ test('アンインストールの最後は、アプリをゴミ箱に入れて�
   const uninstall = read('Xcode/Host/AgentUninstallController.swift');
   assert.match(uninstall, /NSWorkspace\.shared\.recycle\(\[Bundle\.main\.bundleURL\]\)/);
   assert.match(uninstall, /NSApp\.terminate\(nil\)/);
+});
+
+test('拡張機能を外す依頼が認証で拒否されても、アンインストールは後片付けを続ける', () => {
+  const controller = read('Xcode/Host/AgentMonitoringController.swift');
+  assert.match(controller, /OSSystemExtensionError\.Code\.authorizationRequired/);
+  const uninstall = read('Xcode/Host/AgentUninstallController.swift');
+  assert.match(uninstall, /SystemExtensionRemoval\.isAuthorizationRefusal\(error\)/);
+  assert.match(uninstall, /extensionLeavesWithApp/);
 });

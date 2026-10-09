@@ -1441,12 +1441,12 @@ private struct AgentSettingsView: View {
                     .foregroundStyle(.tertiary)
             }
             settingsGroup(L("Repair network monitoring")) {
-                Text(L("If monitoring stays stopped or nothing is recorded, this removes EgressView's network extension and installs it again. Installing the same version again does not replace it. macOS may ask for your password and for approval again; nothing is recorded until monitoring restarts. History and settings are kept."))
+                Text(L("If monitoring stays stopped or nothing is recorded, this sets network monitoring up again and installs a fresh copy of the network extension. Installing the same version again does not replace it. macOS asks you to allow the extension again, with your password; nothing is recorded until you do. History and settings are kept."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button(L("Repair network monitoring...")) { confirmRepair = true }
                     .confirmationDialog(
-                        L("Remove and reinstall the network extension?"),
+                        L("Set up network monitoring again?"),
                         isPresented: $confirmRepair
                     ) {
                         Button(L("Repair")) { model.repairMonitoring() }

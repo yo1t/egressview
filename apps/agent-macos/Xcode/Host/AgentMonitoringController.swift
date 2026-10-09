@@ -680,16 +680,20 @@ final class AgentMonitoringController {
         }
     }
 
-    /// Removes the System Extension and asks macOS for it again (P3-187).
+    /// Sets network monitoring up again from scratch (P3-187).
     ///
     /// Reinstalling the same version does not help an extension that is
     /// installed but not working: the replacement is refused on purpose,
     /// because two different builds once shared a version number (P3-167).
-    /// This is the way to start over without that loophole. macOS may ask for
-    /// an administrator password to remove the extension and for approval to
-    /// add it back; the approval guide covers the second. If removal can only
-    /// finish after a restart, monitoring resumes after the restart, because
-    /// the chosen mode stays "monitor".
+    ///
+    /// This removes the filter configuration and asks for the extension
+    /// again. Measured on macOS 27 (2026-10-09): that request stages a fresh
+    /// copy of the extension and waits for approval, which the approval guide
+    /// walks through; the old copy is removed at the next restart. It does
+    /// not ask macOS to remove the extension first, as the first version of
+    /// this did: on macOS 27 that request was refused at once with
+    /// "authorization required" and no password prompt, so it could not be
+    /// the step the repair depends on.
     func repairFullMonitoring() {
         guard ensureStorageAvailable() else { return }
         rememberChosenMode(.full)
@@ -697,17 +701,14 @@ final class AgentMonitoringController {
         lightweightCollector = nil
         fullMonitoringCollector?.stop()
         statusHandler(.deactivating)
-        extensionController.deactivate { [weak self] result in
+        extensionController.removeFilterConfiguration { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {
-                case .success(false):
+                case .success:
                     self.selectFullMonitoring()
-                case .success(true):
-                    // .removalRebootRequired has already been reported.
-                    break
                 case .failure(let error):
-                    self.statusHandler(.failed(L("Repair could not remove the network extension: %@", error.localizedDescription)))
+                    self.statusHandler(.failed(L("Repair could not reset network monitoring: %@", error.localizedDescription)))
                 }
             }
         }
@@ -782,6 +783,18 @@ final class AgentMonitoringController {
     }
 }
 
+enum SystemExtensionRemoval {
+    /// macOS 27 refuses an app's request to remove its own extension with
+    /// "authorization required", without asking for a password (measured
+    /// 2026-10-09). Deleting the app removes the extension instead: after the
+    /// app was moved to Trash and the Mac restarted, the extension was gone.
+    static func isAuthorizationRefusal(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == OSSystemExtensionErrorDomain
+            && nsError.code == OSSystemExtensionError.Code.authorizationRequired.rawValue
+    }
+}
+
 private final class SystemExtensionController: NSObject, OSSystemExtensionRequestDelegate {
     private enum PendingOperation {
         case activation
@@ -838,7 +851,7 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
         }
     }
 
-    private func removeFilterConfiguration(completion: @escaping (Result<Void, Error>) -> Void) {
+    func removeFilterConfiguration(completion: @escaping (Result<Void, Error>) -> Void) {
         let manager = NEFilterManager.shared()
         manager.loadFromPreferences { error in
             if let error {
@@ -957,6 +970,12 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
                nsError.code == OSSystemExtensionError.Code.extensionNotFound.rawValue {
                 statusHandler(.paused)
                 finishDeactivation(.success(false))
+            } else if SystemExtensionRemoval.isAuthorizationRefusal(error) {
+                // The filter configuration is already gone, so nothing is
+                // being collected; only the extension itself stays until the
+                // app is deleted.
+                statusHandler(.paused)
+                finishDeactivation(.failure(error))
             } else {
                 finishDeactivation(.failure(error))
             }
