@@ -3807,8 +3807,8 @@ public sealed partial class ObservationStore : IDisposable
                 PRAGMA journal_mode=WAL; {Version1Schema}
                 INSERT INTO observations(observed_at,process_id,protocol,local_address,local_port,
                   remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source)
-                VALUES('2020-01-01T00:00:00.1234567+00:00',4242,'TCP','10.1.1.1',50000,'93.184.216.34',443,1024,2048,'logical','iface-1','etw'),
-                      ('2020-01-01T00:00:01.0000000+00:00',4242,'TCP','10.1.1.1',50000,'93.184.216.34',443,512,256,'logical','iface-1','etw'),
+                VALUES('2020-01-01T00:00:00.1234567+00:00',4242,'TCP','10.1.1.1',50000,'203.0.113.34',443,1024,2048,'logical','iface-1','etw'),
+                      ('2020-01-01T00:00:01.0000000+00:00',4242,'TCP','10.1.1.1',50000,'203.0.113.34',443,512,256,'logical','iface-1','etw'),
                       ('2020-01-01T00:00:02.0000000+00:00',77,'UDP','10.1.1.1',5353,'224.0.0.251',5353,64,0,'logical','iface-1','etw'),
                       ('2020-01-01T00:00:03.0000000+00:00',77,'UDP','10.1.1.1',5353,'239.255.255.250',1900,32,0,'logical','iface-1','etw');
                 """, 0, 0, out var error);

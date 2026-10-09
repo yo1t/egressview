@@ -184,8 +184,36 @@ internal sealed class AgentWindowsService : ServiceBase
         });
     }
 
+    /// When the stop was asked for, so each phase of the tear-down can say how
+    /// long after it the phase ended (P3-126). Zero until a stop arrives.
+    private long stopRequestedAt;
+    private volatile bool stopIsShutdown;
+
+    /// In order: the body noticed the stop, every background task ended, and
+    /// everything was torn down -- the collector stopped and the pipeline
+    /// drained to the database.
+    private static readonly string[] StopPhases = ["noticed", "tasks", "teardown"];
+
+    /// Writes how long the stop has taken so far, under one name per phase.
+    ///
+    /// The drain limit is ten seconds, a guess nobody measured, and the plan
+    /// was always to measure first. On 2026-10-10 the record said only that
+    /// the service was told of a shutdown at 08:17:33.276 and that the event
+    /// log stopped 18 ms later -- nothing about whether the tear-down
+    /// finished. Each phase is written as it ends, so a shutdown that cuts
+    /// the process off still leaves the phases it reached, and the first one
+    /// missing is where it was cut.
+    private void RecordStopPhase(ObservationStore store, string phase)
+    {
+        var requested = Interlocked.Read(ref stopRequestedAt);
+        if (requested == 0) return;
+        try { store.SetCounter($"last-stop-ms-{phase}", (long)System.Diagnostics.Stopwatch.GetElapsedTime(requested).TotalMilliseconds); }
+        catch { /* Timing the stop must never be what fails it. */ }
+    }
+
     protected override void OnStop()
     {
+        Interlocked.CompareExchange(ref stopRequestedAt, System.Diagnostics.Stopwatch.GetTimestamp(), 0);
         stop?.Cancel();
         try { worker?.Wait(TimeSpan.FromSeconds(20)); } catch { }
         stop?.Dispose();
@@ -200,12 +228,23 @@ internal sealed class AgentWindowsService : ServiceBase
     /// Whatever else is lost, the reason is already on disk.
     protected override void OnShutdown()
     {
+        stopIsShutdown = true;
+        Interlocked.CompareExchange(ref stopRequestedAt, System.Diagnostics.Stopwatch.GetTimestamp(), 0);
         var runId = Interlocked.Read(ref activeRunId);
         if (runId != 0)
         {
             try { activeStore?.EndSystemShutdownRun(runId); }
             catch (Exception exception) { WriteEventLogFailure(exception); }
         }
+        // Zero first, so a stop that never gets as far as its first phase is
+        // not read as the previous stop's phases.
+        if (activeStore is { } shuttingDown)
+            try
+            {
+                shuttingDown.SetCounter("last-stop-was-shutdown", 1);
+                foreach (var phase in StopPhases) shuttingDown.SetCounter($"last-stop-ms-{phase}", 0);
+            }
+            catch { }
         OnStop();
     }
 
@@ -312,6 +351,16 @@ internal sealed class AgentWindowsService : ServiceBase
             await lifetime;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        // A plain stop zeroes the phases here; a shutdown has done it already
+        // in OnShutdown, before anything could cut it short.
+        if (Interlocked.Read(ref stopRequestedAt) != 0 && !stopIsShutdown)
+            try
+            {
+                store.SetCounter("last-stop-was-shutdown", 0);
+                foreach (var phase in StopPhases) store.SetCounter($"last-stop-ms-{phase}", 0);
+            }
+            catch { }
+        RecordStopPhase(store, "noticed");
         await coverage;
         await runHeartbeat;
         await delivery;
@@ -325,8 +374,10 @@ internal sealed class AgentWindowsService : ServiceBase
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled,
                 capabilityStatus: deliveryController.CapabilityStatus, deliveryRuntime: deliveryController.Status));
+        RecordStopPhase(store, "tasks");
         bodyCompleted = true;
         }
+        RecordStopPhase(store, "teardown");
         // Everything above has been disposed by here, so this is the first
         // point at which "clean" is a true thing to say.
         store.EndRun(runId);
