@@ -77,11 +77,32 @@ function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+/**
+ * The environment every `aws` call runs with: ten attempts per request, with
+ * adaptive back-off, unless the caller already chose otherwise.
+ *
+ * The arm64 MSI went missing from the bucket five times between Windows
+ * 0.1.136 and 0.1.141. The debug log of the fifth showed why: two parts of the
+ * multipart upload had their connections reset, each used up the CLI's default
+ * three attempts, and the CLI aborted the upload -- then raised inside its own
+ * failure reporting and exited 0 with nothing printed. Uploaded again with
+ * these two settings, it stored on the first try; 0.1.141 was published that
+ * way. assertStored stays: an exit status of 0 is still not evidence.
+ */
+function awsEnvironment(env = process.env) {
+  return {
+    ...env,
+    AWS_MAX_ATTEMPTS: env.AWS_MAX_ATTEMPTS || '10',
+    AWS_RETRY_MODE: env.AWS_RETRY_MODE || 'adaptive',
+  };
+}
+
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
     cwd: ROOT,
     encoding: 'utf8',
     stdio: options.stdio || ['ignore', 'pipe', 'pipe'],
+    env: command === 'aws' ? awsEnvironment() : process.env,
   });
 }
 
@@ -526,6 +547,7 @@ module.exports = {
   serializeManifest,
   assertPublishableTree,
   assertStored,
+  awsEnvironment,
   storePackage,
   verifyPackagesServed,
   releaseTag,

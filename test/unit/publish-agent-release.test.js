@@ -287,6 +287,25 @@ describe('a release must be the tag it claims to be', () => {
   });
 });
 
+// 2026-09-29: a part whose connection was reset used up the CLI's default three
+// attempts, and the upload was aborted with an exit status of 0.
+describe('aws calls retry more than the CLI default', () => {
+  const { awsEnvironment } = require('../../scripts/publish-agent-release');
+
+  it('10回・adaptiveで再送する', () => {
+    const env = awsEnvironment({ PATH: '/bin' });
+    assert.equal(env.AWS_MAX_ATTEMPTS, '10');
+    assert.equal(env.AWS_RETRY_MODE, 'adaptive');
+    assert.equal(env.PATH, '/bin');
+  });
+
+  it('呼び出し側が決めた値は上書きしない', () => {
+    const env = awsEnvironment({ AWS_MAX_ATTEMPTS: '4', AWS_RETRY_MODE: 'standard' });
+    assert.equal(env.AWS_MAX_ATTEMPTS, '4');
+    assert.equal(env.AWS_RETRY_MODE, 'standard');
+  });
+});
+
 // 2026-09-27: Windows 0.1.136 was reported published while its arm64 MSI was
 // missing from the bucket, and the signed manifest pointed at a 403.
 describe('a package must be stored and served before the release counts', () => {
