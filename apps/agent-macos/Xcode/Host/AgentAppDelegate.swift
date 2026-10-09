@@ -77,6 +77,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         store: store, hub: hubDelivery, threats: threatIntelController,
         notifier: AgentUserNotifier.shared
     )
+    private let approvalGuide = ExtensionApprovalGuideWindow()
     private lazy var controller = AgentMonitoringController(
         store: store,
         statusHandler: { [weak self] status in
@@ -297,10 +298,14 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         }
         observationWindow?.updateMonitoringStatus(status)
         settingsWindow?.updateMonitoringStatus(status)
+        approvalGuide.update(for: status)
         let menu = NSMenu()
         let statusRow = NSMenuItem(title: status.label, action: nil, keyEquivalent: "")
         statusRow.isEnabled = false
         menu.addItem(statusRow)
+        if status == .approvalRequired || status == .fullActivationRequested {
+            menu.addItem(item(L("How to allow network monitoring..."), action: #selector(openApprovalGuide)))
+        }
         menu.addItem(.separator())
         menu.addItem(item(L("Open EgressView..."), action: #selector(openObservations), key: "o"))
         menu.addItem(item(L("Settings..."), action: #selector(openSettings), key: ","))
@@ -482,6 +487,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openObservations() {
         observationWindowController().show()
+    }
+
+    @objc private func openApprovalGuide() {
+        approvalGuide.show()
     }
 
     @objc private func openSettings() {

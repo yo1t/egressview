@@ -346,7 +346,7 @@ final class AgentNotificationCoordinator {
                 L("Network monitoring needs approval"),
                 notificationExplanation(
                     reason: L("Network monitoring has not started because macOS approval is still pending."),
-                    action: L("Open EgressView Agent and approve network monitoring in System Settings.")
+                    action: L("Choose How to allow network monitoring from the EgressView Agent menu.")
                 )
             )
         case .rebootRequired:
