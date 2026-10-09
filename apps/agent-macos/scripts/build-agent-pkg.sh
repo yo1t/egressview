@@ -265,14 +265,22 @@ EgressView Agent をインストールし、起動しました。
 macOS がネットワーク機能拡張の承認を求めた場合、承認するまで監視は止まったままです。
 CONCLUSION_JA
 
+# rootVolumeOnly, not <domains>: the app and its system extension only work
+# from /Applications on the startup disk, so there is nothing to choose. With
+# <domains> the installer still showed a "Destination Select" page, and on
+# 2026-10-09 a reinstall stopped there with "EgressView Agent can't be
+# installed in this location" and nothing selected. Measured on macOS 27 with
+# a test package: rootVolumeOnly skips the page and goes straight to
+# installing on the startup disk. Apple marks rootVolumeOnly deprecated in
+# favour of <domains>; it is still honoured, and a unit test keeps the
+# page from coming back unnoticed.
 DISTRIBUTION="$WORK_DIR/distribution.xml"
 cat > "$DISTRIBUTION" <<DISTXML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="1">
     <title>EgressView Agent</title>
     <organization>com.egressview</organization>
-    <domains enable_localSystem="true" enable_anywhere="false" enable_currentUserHome="false"/>
-    <options customize="never" require-scripts="true" hostArchitectures="arm64"/>
+    <options customize="never" require-scripts="true" hostArchitectures="arm64" rootVolumeOnly="true"/>
     <allowed-os-versions><os-version min="13.0"/></allowed-os-versions>
     <conclusion file="conclusion.txt"/>
     <pkg-ref id="$BUNDLE_ID"/>

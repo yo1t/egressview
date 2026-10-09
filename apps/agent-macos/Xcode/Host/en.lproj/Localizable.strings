@@ -110,7 +110,6 @@
 "You selected Send test notification." = "You selected Send test notification.";
 "Network monitoring needs approval" = "Network monitoring needs approval";
 "Network monitoring has not started because macOS approval is still pending." = "Network monitoring has not started because macOS approval is still pending.";
-"Open EgressView Agent and approve network monitoring in System Settings." = "Open EgressView Agent and approve network monitoring in System Settings.";
 "Restart required for monitoring" = "Restart required for monitoring";
 "macOS requires a restart before the approved network extension can monitor connections." = "macOS requires a restart before the approved network extension can monitor connections.";
 "Restart this Mac to finish enabling network monitoring." = "Restart this Mac to finish enabling network monitoring.";
@@ -847,3 +846,16 @@
 "macOS reports zero bytes for every connection made through its own networking — URLSession and Network.framework, and the QUIC connections they make — however much they carried. Those connections are recorded as not measured." = "macOS reports zero bytes for every connection made through its own networking — URLSession and Network.framework, and the QUIC connections they make — however much they carried. Those connections are recorded as not measured.";
 "Count them from packet headers" = "Count them from packet headers";
 "Reads the IP and TCP/UDP header of each packet — protocol, addresses, ports and lengths — and counts the bytes of connections macOS reports as zero. Contents are not read, nothing new leaves this Mac, and every packet passes unchanged. Uses more CPU: on a test Mac the monitor went from about 0.1% to about 1.2% of one core, and more on heavy traffic. Off unless you turn it on. Applies to connections started after the change." = "Reads the IP and TCP/UDP header of each packet — protocol, addresses, ports and lengths — and counts the bytes of connections macOS reports as zero. Contents are not read, nothing new leaves this Mac, and every packet passes unchanged. Uses more CPU: on a test Mac the monitor went from about 0.1% to about 1.2% of one core, and more on heavy traffic. Off unless you turn it on. Applies to connections started after the change.";
+"Allow network monitoring" = "Allow network monitoring";
+"Monitoring has not started. macOS is waiting for you to allow EgressView's network extension." = "Monitoring has not started. macOS is waiting for you to allow EgressView's network extension.";
+"In System Settings, open General > Login Items & Extensions." = "In System Settings, open General > Login Items & Extensions.";
+"Under Extensions, choose By Category. (By App does not list EgressView until it is approved.)" = "Under Extensions, choose By Category. (By App does not list EgressView until it is approved.)";
+"Click the info button next to Network Extensions and turn on EgressView Agent." = "Click the info button next to Network Extensions and turn on EgressView Agent.";
+"Enter your password, then choose Allow if macOS asks about filtering network content." = "Enter your password, then choose Allow if macOS asks about filtering network content.";
+"In System Settings, open Privacy & Security." = "In System Settings, open Privacy & Security.";
+"Under Security, find the message that system software from EgressView Agent was blocked, and click Allow." = "Under Security, find the message that system software from EgressView Agent was blocked, and click Allow.";
+"This window closes by itself once monitoring starts. Nothing is recorded until then." = "This window closes by itself once monitoring starts. Nothing is recorded until then.";
+"Open System Settings" = "Open System Settings";
+"How to allow network monitoring..." = "How to allow network monitoring...";
+"Choose How to allow network monitoring from the EgressView Agent menu." = "Choose How to allow network monitoring from the EgressView Agent menu.";
+"Close" = "Close";
