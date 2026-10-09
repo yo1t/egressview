@@ -101,7 +101,16 @@ final class AgentUninstallController: ObservableObject {
             }
 
             status = L("Removing the System Extension...")
-            let extensionResult = await deactivateSystemExtension()
+            var extensionResult = await deactivateSystemExtension()
+            // Refused for authorization (macOS 27): monitoring has already
+            // stopped with the filter configuration removed, and the extension
+            // goes when the app is deleted. Stopping here would leave the
+            // login item, the Hub credential and the queue behind as well.
+            var extensionLeavesWithApp = false
+            if case .failure(let error) = extensionResult, SystemExtensionRemoval.isAuthorizationRefusal(error) {
+                extensionLeavesWithApp = true
+                extensionResult = .success(false)
+            }
             switch extensionResult {
             case .failure(let error):
                 isRunning = false
@@ -119,9 +128,13 @@ final class AgentUninstallController: ObservableObject {
                     isRunning = false
                     isReadyToRemoveApplication = true
                     onPreparedForRemoval()
-                    status = rebootRequired
-                        ? L("Local cleanup is complete. Move the app to Trash, then restart macOS to finish removing the System Extension.")
-                        : L("Cleanup is complete. Move the app to Trash to finish uninstalling.")
+                    if extensionLeavesWithApp {
+                        status = L("Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish.")
+                    } else {
+                        status = rebootRequired
+                            ? L("Local cleanup is complete. Move the app to Trash, then restart macOS to finish removing the System Extension.")
+                            : L("Cleanup is complete. Move the app to Trash to finish uninstalling.")
+                    }
                 } catch {
                     isRunning = false
                     status = L("Local cleanup was incomplete: %@", error.localizedDescription)

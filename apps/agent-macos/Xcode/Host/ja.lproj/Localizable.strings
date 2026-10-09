@@ -859,11 +859,12 @@
 "Choose How to allow network monitoring from the EgressView Agent menu." = "EgressView Agentのメニューから「ネットワーク監視を許可する手順...」を選んでください。";
 "Close" = "閉じる";
 "Repair network monitoring" = "ネットワーク監視の修復";
-"If monitoring stays stopped or nothing is recorded, this removes EgressView's network extension and installs it again. Installing the same version again does not replace it. macOS may ask for your password and for approval again; nothing is recorded until monitoring restarts. History and settings are kept." = "監視が止まったままになる、何も記録されない、というときに使います。EgressViewのネットワーク機能拡張をいったん外して、入れ直します（同じ版のpkgを入れ直しても、機能拡張は置き換わりません）。macOSからパスワードと、もう一度の許可を求められることがあります。監視が再開するまでは何も記録されません。履歴と設定は残ります。";
+"If monitoring stays stopped or nothing is recorded, this sets network monitoring up again and installs a fresh copy of the network extension. Installing the same version again does not replace it. macOS asks you to allow the extension again, with your password; nothing is recorded until you do. History and settings are kept." = "監視が止まったままになる、何も記録されない、というときに使います。ネットワーク監視を設定し直し、ネットワーク機能拡張の新しいコピーを入れます（同じ版のpkgを入れ直しても、機能拡張は置き換わりません）。macOSから、パスワードとともにもう一度許可を求められます。許可するまでは何も記録されません。履歴と設定は残ります。";
 "Repair network monitoring..." = "ネットワーク監視を修復...";
-"Remove and reinstall the network extension?" = "ネットワーク機能拡張を外して入れ直しますか？";
+"Set up network monitoring again?" = "ネットワーク監視を設定し直しますか？";
 "Repair" = "修復";
-"Repair could not remove the network extension: %@" = "修復のためにネットワーク機能拡張を外せませんでした: %@";
+"Repair could not reset network monitoring: %@" = "修復のためにネットワーク監視の設定を消せませんでした: %@";
 "Move to Trash and Quit" = "ゴミ箱に入れて終了";
 "Move to Trash and Quit finishes the uninstall. If it cannot, quit EgressView Agent and move it to Trash in Finder." = "「ゴミ箱に入れて終了」でアンインストールが完了します。うまくいかないときは、EgressView Agentを終了し、Finderでゴミ箱へ移動してください。";
 "Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder." = "アプリをゴミ箱に移動できませんでした: %@。EgressView Agentを終了し、Finderでゴミ箱へ移動してください。";
+"Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish." = "監視を止め、このMacの後片付けが完了しました。アプリをゴミ箱に入れると、macOSがネットワーク機能拡張を外します。そのあとMacを再起動すると完了です。";

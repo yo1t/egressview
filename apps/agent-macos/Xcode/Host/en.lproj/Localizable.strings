@@ -859,11 +859,12 @@
 "Choose How to allow network monitoring from the EgressView Agent menu." = "Choose How to allow network monitoring from the EgressView Agent menu.";
 "Close" = "Close";
 "Repair network monitoring" = "Repair network monitoring";
-"If monitoring stays stopped or nothing is recorded, this removes EgressView's network extension and installs it again. Installing the same version again does not replace it. macOS may ask for your password and for approval again; nothing is recorded until monitoring restarts. History and settings are kept." = "If monitoring stays stopped or nothing is recorded, this removes EgressView's network extension and installs it again. Installing the same version again does not replace it. macOS may ask for your password and for approval again; nothing is recorded until monitoring restarts. History and settings are kept.";
+"If monitoring stays stopped or nothing is recorded, this sets network monitoring up again and installs a fresh copy of the network extension. Installing the same version again does not replace it. macOS asks you to allow the extension again, with your password; nothing is recorded until you do. History and settings are kept." = "If monitoring stays stopped or nothing is recorded, this sets network monitoring up again and installs a fresh copy of the network extension. Installing the same version again does not replace it. macOS asks you to allow the extension again, with your password; nothing is recorded until you do. History and settings are kept.";
 "Repair network monitoring..." = "Repair network monitoring...";
-"Remove and reinstall the network extension?" = "Remove and reinstall the network extension?";
+"Set up network monitoring again?" = "Set up network monitoring again?";
 "Repair" = "Repair";
-"Repair could not remove the network extension: %@" = "Repair could not remove the network extension: %@";
+"Repair could not reset network monitoring: %@" = "Repair could not reset network monitoring: %@";
 "Move to Trash and Quit" = "Move to Trash and Quit";
 "Move to Trash and Quit finishes the uninstall. If it cannot, quit EgressView Agent and move it to Trash in Finder." = "Move to Trash and Quit finishes the uninstall. If it cannot, quit EgressView Agent and move it to Trash in Finder.";
 "Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder." = "Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder.";
+"Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish." = "Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish.";
