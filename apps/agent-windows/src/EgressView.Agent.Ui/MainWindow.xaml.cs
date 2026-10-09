@@ -1747,6 +1747,7 @@ public partial class MainWindow : Window
                 return;
             }
             ContinueWithoutRevokeButton.Visibility = Visibility.Collapsed;
+            AgentStartupRegistration.RemoveForUninstall();
             UninstallStatus.Text = ja ? "アンインストール準備が完了しました。Windowsの「インストールされているアプリ」でEgressView Agentを選んでください。キャンセルした場合、Hubへ再登録するまで送信は再開しません。" : "Preparation is complete. Select EgressView Agent in Windows Installed apps. If you cancel, delivery will not resume until the Agent is enrolled again.";
             Process.Start(new ProcessStartInfo("ms-settings:appsfeatures-app") { UseShellExecute = true });
         }

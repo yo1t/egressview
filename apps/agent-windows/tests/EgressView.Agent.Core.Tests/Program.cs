@@ -3329,6 +3329,28 @@ try
                      "::ffff:100.100.100.100", "", "not an address" })
             Assert(!PrivateAddress.StaysOnNetwork(outward), $"{outward} is not said to stay on this network");
 
+        // The sign-in task (P3-106): Windows started the Run value 28.5 s after
+        // sign-in. What the task says is what Task Scheduler will do, so each
+        // setting that differs from its defaults is checked.
+        {
+            var xml = StartupTask.Xml("S-1-5-21-1-2-3-1001", @"C:\Program Files\R&D <Agent>\ui\EgressView.Agent.Ui.exe");
+            var task = System.Xml.Linq.XDocument.Parse(xml);
+            System.Xml.Linq.XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+            string Value(params string[] path) => path.Aggregate((System.Xml.Linq.XElement?)task.Root, (node, name) => node?.Element(ns + name))?.Value ?? "";
+            Assert(Value("Triggers", "LogonTrigger", "UserId") == "S-1-5-21-1-2-3-1001" &&
+                Value("Principals", "Principal", "UserId") == "S-1-5-21-1-2-3-1001" &&
+                Value("Principals", "Principal", "LogonType") == "InteractiveToken" &&
+                Value("Principals", "Principal", "RunLevel") == "LeastPrivilege",
+                "the task starts at this user's sign-in only, as this user, with no more than their own rights");
+            Assert(Value("Settings", "ExecutionTimeLimit") == "PT0S" && Value("Settings", "DisallowStartIfOnBatteries") == "false" &&
+                Value("Settings", "StopIfGoingOnBatteries") == "false" && Value("Settings", "Priority") == "5" &&
+                Value("Settings", "MultipleInstancesPolicy") == "IgnoreNew",
+                "and is not stopped after 72 hours, not held back on battery, and not run below normal priority");
+            Assert(Value("Actions", "Exec", "Command") == @"C:\Program Files\R&D <Agent>\ui\EgressView.Agent.Ui.exe" &&
+                Value("Actions", "Exec", "Arguments") == "--tray",
+                "a path with characters XML reserves is written so that it reads back as the same path");
+        }
+
         // Threat notices, as the Mac Agent decides them (P3-180).
         {
             var now = new DateTimeOffset(2026, 9, 28, 9, 0, 0, TimeSpan.Zero);
