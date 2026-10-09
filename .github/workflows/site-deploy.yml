@@ -15,6 +15,8 @@ on:
       - 'site/**'
       - 'docs/**'
       - 'scripts/prepare-pages-source.js'
+      - 'scripts/site-repository-links.js'
+      - 'scripts/check-site-repository-links.js'
       - '.github/workflows/site-deploy.yml'
   workflow_dispatch:
 
@@ -54,6 +56,9 @@ jobs:
         with:
           source: ./.pages-source
           destination: ./_site
+
+      - name: Check repository links point at published files
+        run: node scripts/check-site-repository-links.js _site
 
       - name: Check the build produced the pages we publish
         # A Jekyll change that stops converting docs would otherwise be
