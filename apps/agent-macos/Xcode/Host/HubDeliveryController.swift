@@ -1441,7 +1441,7 @@ private struct AgentSettingsView: View {
                     .foregroundStyle(.tertiary)
             }
             settingsGroup(L("Repair network monitoring")) {
-                Text(L("If monitoring stays stopped or nothing is recorded, this sets network monitoring up again and installs a fresh copy of the network extension. Installing the same version again does not replace it. macOS asks you to allow the extension again, with your password; nothing is recorded until you do. History and settings are kept."))
+                Text(L("If monitoring stays stopped or nothing is recorded, this sets up the network monitoring configuration again. Recording pauses for a few seconds. If macOS asks you to allow the network extension, follow the guide that appears. History and settings are kept. This does not replace the network extension itself; if monitoring still does not resume, uninstall and install EgressView Agent again."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button(L("Repair network monitoring...")) { confirmRepair = true }

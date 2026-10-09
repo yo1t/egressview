@@ -687,13 +687,16 @@ final class AgentMonitoringController {
     /// because two different builds once shared a version number (P3-167).
     ///
     /// This removes the filter configuration and asks for the extension
-    /// again. Measured on macOS 27 (2026-10-09): that request stages a fresh
-    /// copy of the extension and waits for approval, which the approval guide
-    /// walks through; the old copy is removed at the next restart. It does
-    /// not ask macOS to remove the extension first, as the first version of
-    /// this did: on macOS 27 that request was refused at once with
-    /// "authorization required" and no password prompt, so it could not be
-    /// the step the repair depends on.
+    /// again, then turns the filter back on. Measured on macOS 27 with 0.5.123
+    /// (2026-10-10): recording paused for about four seconds, the installed
+    /// extension stayed as it was, and macOS did not ask for approval. It does
+    /// not replace the extension itself; if macOS does ask, the approval guide
+    /// covers it. (On 2026-10-09 a fresh copy was staged and approval was
+    /// needed, but that followed a removal request this no longer makes.)
+    ///
+    /// It does not ask macOS to remove the extension first, as the first
+    /// version of this did: on macOS 27 that request was refused at once with
+    /// "authorization required" and no password prompt.
     func repairFullMonitoring() {
         guard ensureStorageAvailable() else { return }
         rememberChosenMode(.full)

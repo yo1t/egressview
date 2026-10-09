@@ -859,7 +859,7 @@
 "Choose How to allow network monitoring from the EgressView Agent menu." = "EgressView Agentのメニューから「ネットワーク監視を許可する手順...」を選んでください。";
 "Close" = "閉じる";
 "Repair network monitoring" = "ネットワーク監視の修復";
-"If monitoring stays stopped or nothing is recorded, this sets network monitoring up again and installs a fresh copy of the network extension. Installing the same version again does not replace it. macOS asks you to allow the extension again, with your password; nothing is recorded until you do. History and settings are kept." = "監視が止まったままになる、何も記録されない、というときに使います。ネットワーク監視を設定し直し、ネットワーク機能拡張の新しいコピーを入れます（同じ版のpkgを入れ直しても、機能拡張は置き換わりません）。macOSから、パスワードとともにもう一度許可を求められます。許可するまでは何も記録されません。履歴と設定は残ります。";
+"If monitoring stays stopped or nothing is recorded, this sets up the network monitoring configuration again. Recording pauses for a few seconds. If macOS asks you to allow the network extension, follow the guide that appears. History and settings are kept. This does not replace the network extension itself; if monitoring still does not resume, uninstall and install EgressView Agent again." = "監視が止まったままになる、何も記録されない、というときに使います。ネットワーク監視の設定を作り直します。記録は数秒止まります。macOSからネットワーク機能拡張の許可を求められた場合は、表示される案内に沿って許可してください。履歴と設定は残ります。機能拡張そのものは置き換わりません。それでも監視が再開しないときは、アンインストールしてから入れ直してください。";
 "Repair network monitoring..." = "ネットワーク監視を修復...";
 "Set up network monitoring again?" = "ネットワーク監視を設定し直しますか？";
 "Repair" = "修復";
