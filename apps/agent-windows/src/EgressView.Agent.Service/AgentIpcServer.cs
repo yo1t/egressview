@@ -129,7 +129,55 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, true);
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
         var line = await reader.ReadLineAsync(cancellationToken);
-        if (line is not null) await writer.WriteLineAsync(IpcProtocol.Handle(line, Status, Summary, credential =>
+        if (line is null) return;
+        var answering = Task.Run(() => Handle(line), CancellationToken.None);
+        if (!await AnswerUnlessCallerLeavesAsync(answering, pipe, cancellationToken))
+        {
+            try { store.AddCounter("ipc-caller-gone", 1); } catch { }
+            return;
+        }
+        await writer.WriteLineAsync(await answering);
+    }
+
+    /// Waits for the answer, or for the caller to go -- whichever comes first.
+    ///
+    /// A caller that went away used to keep its listener until the answer it
+    /// would never read was written. A window killed while showing thirty
+    /// days held every listener that way, and status from the window opened
+    /// in its place could not connect for up to thirty seconds (P3-106). The
+    /// work itself is not stopped -- the store has one connection, and
+    /// interrupting it would cut short someone else's read -- but the
+    /// listener is free at once, and InFlightReads hands the result to the
+    /// next caller who asks the same thing.
+    ///
+    /// A caller sends one line and then only reads, so anything the pipe
+    /// returns after it is the end: zero bytes, or a broken pipe.
+    /// <returns>True when the answer is ready for a caller still there.</returns>
+    internal static async Task<bool> AnswerUnlessCallerLeavesAsync(Task answering, Stream pipe, CancellationToken cancellationToken)
+    {
+        using var watching = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var gone = WatchForCallerLeavingAsync(pipe, watching.Token);
+        var first = await Task.WhenAny(answering, gone);
+        if (first == answering) { watching.Cancel(); return true; }
+        // Seen, so a read that failed after its caller left is not reported
+        // as unobserved.
+        _ = answering.ContinueWith(task => _ = task.Exception, TaskScheduler.Default);
+        return false;
+    }
+
+    private static async Task WatchForCallerLeavingAsync(Stream pipe, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[1];
+        try
+        {
+            while (await pipe.ReadAsync(buffer, cancellationToken) > 0) { }
+        }
+        catch (OperationCanceledException) { }
+        catch (IOException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    private string Handle(string line) => IpcProtocol.Handle(line, Status, Summary, credential =>
         {
             credentialStore.Save(credential);
             delivery.SettingsChanged();
@@ -146,8 +194,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         store.ReadRecentObservations, store.ReadLogSnapshot, store.ReadObservationsSince, RecordUiRun, setReadsHostnames,
         enrichment.SetPublicFeedsEnabled, SetCountryTableAccount, enrichment.SetCountryTableEnabled,
         () => _ = enrichment.FetchPublicFeedsOnceAsync(CancellationToken.None),
-        enrichment.SetLookupSource));
-    }
+        enrichment.SetLookupSource);
 
     /// Either the text of a GeoIP.conf, or nothing at all to withdraw.
     private bool SetCountryTableAccount(string? configuration)
@@ -208,19 +255,26 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     private string Diagnostics() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), verifyIntegrity: false,
         reportChannel: "authenticated-named-pipe", capabilityStatus: delivery.CapabilityStatus,
         deliveryRuntime: delivery.Status);
-    private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
-    private IReadOnlyList<GlobePoint> Globe(int minutes) => store.ReadGlobePoints(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow);
-    private IReadOnlyList<CountryHistoryRow> CountryHistory(int? minutes)
+    /// The heavy reads a window asks for when a view opens, each computed once
+    /// for however many callers ask it at the same time.
+    private readonly InFlightReads inFlight = new();
+
+    private IReadOnlyList<HourlySummary> Summary(int days) => inFlight.Run($"summary/{days}", () =>
+        store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow));
+    private IReadOnlyList<GlobePoint> Globe(int minutes) => inFlight.Run($"globe/{minutes}", () =>
+        store.ReadGlobePoints(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow));
+    private IReadOnlyList<CountryHistoryRow> CountryHistory(int? minutes) => inFlight.Run($"countries/{minutes?.ToString() ?? "all"}", () =>
     {
         var now = DateTimeOffset.UtcNow;
         return minutes is { } value ? store.ReadCountryHistory(now.AddMinutes(-value), now) : store.ReadCountryHistory();
-    }
-    private PeriodAnalysis Analysis(int minutes, int offsetMinutes)
+    });
+    private PeriodAnalysis Analysis(int minutes, int offsetMinutes) => inFlight.Run($"analysis/{minutes}/{offsetMinutes}", () =>
     {
         var to = DateTimeOffset.UtcNow.AddMinutes(-offsetMinutes);
         return store.ReadPeriodAnalysis(to.AddMinutes(-minutes), to);
-    }
-    private ThreatReport Threats(int minutes) => store.ReadThreatReport(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow);
+    });
+    private ThreatReport Threats(int minutes) => inFlight.Run($"threats/{minutes}", () =>
+        store.ReadThreatReport(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow));
     private string DeliveryStatus()
     {
         var credential = credentialStore.Load();
