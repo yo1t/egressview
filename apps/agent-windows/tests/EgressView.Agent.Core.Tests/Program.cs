@@ -1799,6 +1799,32 @@ try
             "and a pass over a drained backlog finds nothing");
     }
 
+    // Compaction gives the space back, all of it (P3-158). On 2026-10-09 a
+    // 0.76 GiB database sat beside a 0.75 GiB WAL: VACUUM writes every page
+    // through the log, and a log file is reused, not shrunk.
+    {
+        var compactPath = Path.Combine(directory, "compaction.db");
+        var now = new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero);
+        using (var compactStore = new ObservationStore(compactPath))
+        {
+            var aged = Enumerable.Range(0, 40_000).Select(index => new NetworkObservation(
+                now.AddDays(-20).AddSeconds(index), 6, "TCP", "10.0.0.1", 10_000 + index % 50_000,
+                $"203.0.113.{index % 250}", 443, 100, 100, ObservationLayer.Logical, null, "etw", $"Aged{index % 40}",
+                $"host-{index}.compaction.example")).ToArray();
+            compactStore.WriteBatch(aged);
+            while (compactStore.PendingChartFoldHours(now) > 0) compactStore.FoldCompletedHoursForCharts(now);
+            while (compactStore.PruneRetentionBatch(now, batchSize: 50_000).TotalDeleted > 0) { }
+            var before = new FileInfo(compactPath).Length;
+            Assert(compactStore.CompactIfBeneficial(), "a database that is mostly freed pages is compacted");
+            var wal = new FileInfo(compactStore.WalPath);
+            var walBytes = wal.Exists ? wal.Length : 0;
+            Assert(walBytes <= ObservationStore.WalSizeLimitBytes && walBytes < before / 10,
+                $"and the WAL the VACUUM wrote through is cut back afterwards, not left at the database's size: {walBytes:N0} B beside {before:N0} B before");
+            Assert(new FileInfo(compactPath).Length < before / 2,
+                $"while the database itself shrinks: {new FileInfo(compactPath).Length:N0} B from {before:N0} B");
+        }
+    }
+
     using (var historyStore = new ObservationStore(Path.Combine(directory, "history-controls.db")))
     {
         var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);

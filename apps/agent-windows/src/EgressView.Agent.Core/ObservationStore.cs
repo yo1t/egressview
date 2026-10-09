@@ -540,7 +540,12 @@ public sealed partial class ObservationStore : IDisposable
 
     private void Initialize()
     {
-        Execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;");
+        // A WAL file is reused, never shrunk, unless a size limit says so. The
+        // compaction's VACUUM writes every page through it, so on 2026-10-09
+        // a 0.76 GiB database sat beside a 0.75 GiB WAL, doubling what the
+        // Agent occupied (P3-158). With the limit, each checkpoint that resets
+        // the log cuts the file back to it.
+        Execute($"PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA journal_size_limit={WalSizeLimitBytes};");
         var hasVersion = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'") == 1;
         if (!hasVersion)
         {
@@ -1878,6 +1883,12 @@ public sealed partial class ObservationStore : IDisposable
             """);
     }
 
+    /// What a WAL file is cut back to after a checkpoint resets it.
+    public const long WalSizeLimitBytes = 64L * 1024 * 1024;
+
+    /// Where the WAL file is, so a caller can measure what the Agent occupies.
+    public string WalPath => path + "-wal";
+
     public bool CompactIfBeneficial(double minimumFreeFraction = 0.20)
     {
         if (minimumFreeFraction is <= 0 or >= 1) throw new ArgumentOutOfRangeException(nameof(minimumFreeFraction));
@@ -1890,6 +1901,9 @@ public sealed partial class ObservationStore : IDisposable
             EnsureFreeSpaceForCopy();
             Execute("PRAGMA wal_checkpoint(TRUNCATE)");
             Execute("VACUUM");
+            // VACUUM rewrote every page into the WAL; until it is moved into
+            // the database and cut back, the space it freed is still taken.
+            Execute("PRAGMA wal_checkpoint(TRUNCATE)");
             return true;
         }
     }
