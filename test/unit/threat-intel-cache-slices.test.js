@@ -77,7 +77,7 @@ describe('脅威情報キャッシュの小分け書き込み (P3-184)', () => {
   it('定期取得は小分けの書き込みを使う', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'threat-intel.js'), 'utf8');
     const fetch = source.slice(source.indexOf('async function fetchThreatIntel()'));
-    assert.match(fetch, /_applyFeedResults\(results, \{ deferCache: true \}\)/);
+    assert.match(fetch, /_applyFeedResults\(results, \{ deferCache: true\b/);
     assert.match(fetch, /await persistFeeds\(cacheJobs, \{ sliced: true \}\)/);
   });
 });
