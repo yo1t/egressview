@@ -8,6 +8,7 @@ function setOfflinePolicy(policy) { _offline = policy; }
 
 const axios = require('axios');
 const crypto = require('crypto');
+const { Worker } = require('node:worker_threads');
 const path = require('path');
 const Database = require('better-sqlite3');
 
@@ -371,7 +372,7 @@ function ipToNum(ip) {
  * Each element is { status: 'fulfilled', value: { data: string } }
  *                or { status: 'rejected', reason: Error }
  */
-function _applyFeedResults(results, { deferCache = false } = {}) {
+function _applyFeedResults(results, { deferCache = false, parsed = {} } = {}) {
   const cacheJobs = [];
   const newIps     = new Map(threatIps);
   const newDomains = new Map(threatDomains);
@@ -379,7 +380,7 @@ function _applyFeedResults(results, { deferCache = false } = {}) {
 
   // Feodo Tracker
   if (results[0].status === 'fulfilled') {
-    const entries = parseFeodoTracker(results[0].value.data);
+    const entries = parsed.feodo ?? parseFeodoTracker(results[0].value.data);
     for (const [ip, v] of newIps) { if (v.source === 'feodo') newIps.delete(ip); }
     for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     logger.info(`[threat-intel] Feodo: ${entries.length} IPs`);
@@ -394,7 +395,7 @@ function _applyFeedResults(results, { deferCache = false } = {}) {
 
   // ThreatFox
   if (results[1].status === 'fulfilled') {
-    const entries = parseThreatFox(results[1].value.data);
+    const entries = parsed.threatfox ?? parseThreatFox(results[1].value.data);
     for (const [ip, v] of newIps) { if (v.source === 'threatfox') newIps.delete(ip); }
     for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     logger.info(`[threat-intel] ThreatFox: ${entries.length} IOCs`);
@@ -409,7 +410,7 @@ function _applyFeedResults(results, { deferCache = false } = {}) {
 
   // URLhaus — owns both IPs and domains with 'urlhaus' source
   if (results[2].status === 'fulfilled') {
-    const entries = parseUrlhaus(results[2].value.data);
+    const entries = parsed.urlhaus ?? parseUrlhaus(results[2].value.data);
     for (const [ip,  v] of newIps)     { if (v.source === 'urlhaus') newIps.delete(ip); }
     for (const [dom, v] of newDomains) { if (v.source === 'urlhaus') newDomains.delete(dom); }
     for (const e of entries) {
@@ -431,7 +432,7 @@ function _applyFeedResults(results, { deferCache = false } = {}) {
 
   // Spamhaus DROP — owns CIDRs
   if (results[3].status === 'fulfilled') {
-    const entries = parseSpamhausDrop(results[3].value.data);
+    const entries = parsed.spamhaus ?? parseSpamhausDrop(results[3].value.data);
     newCidrs.length = 0;
     newCidrs.push(...entries);
     logger.info(`[threat-intel] Spamhaus DROP: ${entries.length} CIDRs`);
@@ -480,6 +481,40 @@ function _applyFeedResults(results, { deferCache = false } = {}) {
 }
 
 
+const FEED_NAMES = ['feodo', 'threatfox', 'urlhaus', 'spamhaus'];
+
+/**
+ * The feeds' entries, parsed on a worker thread (P3-184). Resolves to {} if
+ * the worker cannot run, and the apply then parses on this thread as before:
+ * slower for a moment, never wrong.
+ */
+function parseFeedsOffThread(results) {
+  const texts = {};
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled' && typeof result.value?.data === 'string') {
+      texts[FEED_NAMES[index]] = result.value.data;
+    }
+  });
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = value => { if (!settled) { settled = true; resolve(value); } };
+    let worker;
+    try {
+      worker = new Worker(path.join(__dirname, 'threat-feed-parse-worker.js'), { workerData: texts });
+    } catch (error) {
+      logger.error(`[threat-intel] Could not start the feed parser thread: ${error.message}`);
+      finish({});
+      return;
+    }
+    worker.once('message', finish);
+    worker.once('error', error => {
+      logger.error(`[threat-intel] Feed parser thread failed, parsing here instead: ${error.message}`);
+      finish({});
+    });
+    worker.once('exit', () => finish({}));
+  });
+}
+
 async function fetchThreatIntel() {
   if (_offline?.allows && !_offline.allows('threat-intel')) {
     // Decided before any feed URL is touched, so nothing leaves the host.
@@ -497,7 +532,8 @@ async function fetchThreatIntel() {
       axios.get('https://urlhaus.abuse.ch/downloads/csv_recent/', { timeout: 30000, responseType: 'text' }),
       axios.get('https://www.spamhaus.org/drop/drop.txt', { timeout: 30000, responseType: 'text' }),
     ]);
-    const cacheJobs = measured('threatIntel.apply', () => _applyFeedResults(results, { deferCache: true }));
+    const parsed = await parseFeedsOffThread(results);
+    const cacheJobs = measured('threatIntel.apply', () => _applyFeedResults(results, { deferCache: true, parsed }));
     await persistFeeds(cacheJobs, { sliced: true });
   } catch (err) {
     logger.error('[threat-intel] Unexpected error during fetch/parse (existing data preserved):', err.message);
@@ -681,6 +717,7 @@ module.exports = {
   ipToNum,
   _applyFeedResults,
   _persistFeeds: persistFeeds,
+  _parseFeedsOffThread: parseFeedsOffThread,
   _isFetching: () => fetching,
   _resetForTest: () => { persistedDigest.clear(); threatIps.clear(); threatDomains.clear(); threatCidrs.length = 0; fetching = false; lastFetch = 0; },
 };
