@@ -160,6 +160,17 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private int startingEventsLost;
     private bool startupSettled;
     private DateTimeOffset sessionStartedAt;
+
+    /// Corrects event times that fell behind while a virtual machine was
+    /// paused (P3-188).
+    private readonly EventClockDrift clock = new();
+
+    /// When the event happened, by the wall clock.
+    private DateTimeOffset At(TraceEvent e) => clock.Correct(e.TimeStamp.ToUniversalTime());
+
+    /// How far event times have fallen behind the wall clock since the
+    /// session started; corrected when a second or more.
+    public TimeSpan EventClockDrift => clock.Drift;
     public string? Error => error;
     /// Why process start events are unavailable, when they are. Network
     /// collection continues without them; names just fall back to querying,
@@ -192,6 +203,9 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             // then not one more for the rest of the run -- the session sat at
             // exactly that number while it went on seeing 300 events a second.
             // The loss was never a capacity problem; it was an ordering one.
+            // Read as TraceEvent reads its own clocks for this session: the
+            // drift is measured from here (P3-188).
+            clock.Anchor();
             session.Source.Dynamic.All += Dispatch;
             processing = Task.Run(() =>
             {
@@ -291,7 +305,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
 
     private void Dispatch(TraceEvent e)
     {
-        var eventAt = e.TimeStamp.ToUniversalTime();
+        var eventAt = At(e);
         // Trace callbacks can arrive well after the event under load. Expiring
         // against wall clock used to discard an observation immediately before
         // its delayed ProcessStop callback supplied the real image name. Give
@@ -321,8 +335,8 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private void RecordDnsResult(TraceEvent e)
     {
         if ((int)e.ID != 3008 || !string.Equals(Payload(e, "QueryStatus"), "0", StringComparison.Ordinal)) return;
-        var identity = processNames.ResolveIdentity(e.ProcessID, e.TimeStamp.ToUniversalTime());
-        dnsNames.Observe(identity.InstanceId, Payload(e, "QueryName"), Payload(e, "QueryResults"), e.TimeStamp.ToUniversalTime());
+        var identity = processNames.ResolveIdentity(e.ProcessID, At(e));
+        dnsNames.Observe(identity.InstanceId, Payload(e, "QueryName"), Payload(e, "QueryResults"), At(e));
     }
 
     /// Names a process from its lifecycle events, before its traffic is seen.
@@ -340,7 +354,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
 
         var pid = Payload(e, "ProcessID") is { } raw && int.TryParse(raw, out var parsed) ? parsed : 0;
         if (pid <= 0) return;
-        var createdAt = CreateTime(e) ?? e.TimeStamp.ToUniversalTime();
+        var createdAt = CreateTime(e) ?? At(e);
 
         if (started)
         {
@@ -350,12 +364,12 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             return;
         }
 
-        var stopping = processNames.ResolveIdentity(pid, e.TimeStamp.ToUniversalTime());
+        var stopping = processNames.ResolveIdentity(pid, At(e));
         dnsNames.ForgetProcessInstance(stopping.InstanceId);
         var stoppedName = processNames.Observe(pid, Payload(e, "ImageName"), createdAt);
         if (stoppedName is not null)
         {
-            var stoppedIdentity = processNames.ResolveIdentity(pid, e.TimeStamp.ToUniversalTime());
+            var stoppedIdentity = processNames.ResolveIdentity(pid, At(e));
             foreach (var observation in deferredNames.Complete(pid, createdAt, stoppedName))
             {
                 var localInterface = FindInterface(observation.LocalAddress);
@@ -425,12 +439,12 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         // The event timestamp, not the current time: events reach here through
         // a channel, so a short-lived process may already be gone by now and
         // the name has to be judged against when the traffic happened.
-        var process = processNames.ResolveIdentity(pid, e.TimeStamp.ToUniversalTime());
+        var process = processNames.ResolveIdentity(pid, At(e));
         var processName = process.Name;
-        var remoteHostname = dnsNames.Resolve(process.InstanceId, remoteAddress, e.TimeStamp.ToUniversalTime());
+        var remoteHostname = dnsNames.Resolve(process.InstanceId, remoteAddress, At(e));
         var layer = IsVpnTransport(processName, localInterface) ? ObservationLayer.VpnTransport : ObservationLayer.Logical;
         var observation = new NetworkObservation(
-            e.TimeStamp.ToUniversalTime(), pid,
+            At(e), pid,
             e.EventName.Contains("UDP", StringComparison.OrdinalIgnoreCase) ? "UDP" : "TCP",
             localAddress, localPort, remoteAddress, remotePort,
             direction == Direction.Send ? bytes : 0, direction == Direction.Receive ? bytes : 0,
