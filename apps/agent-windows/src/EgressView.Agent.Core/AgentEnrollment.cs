@@ -43,7 +43,7 @@ public sealed partial class AgentEnrollmentClient
     internal static void EnsureUserAgent(HttpClient client)
     {
         if (client.DefaultRequestHeaders.UserAgent.Count == 0)
-            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("EgressView-Agent-Windows", "0.1.0-dev"));
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("EgressView-Agent-Windows", DiagnosticsReport.CurrentVersion));
     }
 
     public async Task<AgentEnrollmentTicket> ApplyAsync(
