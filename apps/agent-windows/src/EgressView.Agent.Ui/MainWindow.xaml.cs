@@ -2728,7 +2728,7 @@ public partial class MainWindow : Window
         try
         {
             EnrollmentStatus.Text = LocalizationManager.EffectiveLanguage == "ja" ? "登録を申請しています…" : "Requesting enrollment…";
-            var metadata = new AgentEnrollmentMetadata(Environment.MachineName, "windows", Environment.OSVersion.VersionString, "0.1.0-dev");
+            var metadata = new AgentEnrollmentMetadata(Environment.MachineName, "windows", Environment.OSVersion.VersionString, DiagnosticsReport.CurrentVersion);
             var ticket = await enrollment.ApplyAsync(hubUrl, EnrollmentCode.Password, metadata, lifetime.Token);
             EnrollmentCode.Clear();
             while (DateTimeOffset.UtcNow <= ticket.ExpiresAt)

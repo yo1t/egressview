@@ -3329,6 +3329,45 @@ try
                      "::ffff:100.100.100.100", "", "not an address" })
             Assert(!PrivateAddress.StaysOnNetwork(outward), $"{outward} is not said to stay on this network");
 
+        // Event times after a virtual machine was paused (P3-188): a VM's
+        // observations reached the Hub 27.5 minutes old, steadily, from the
+        // moment it resumed. The high-resolution counter does not advance
+        // while the machine is paused; the wall clock is set forward after.
+        {
+            var wallNow = new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero);
+            long counterNow = 1_000_000;
+            const long frequency = 10_000_000;
+            var drift = new EventClockDrift(() => wallNow, () => counterNow, frequency);
+            Assert(drift.Drift == TimeSpan.Zero && drift.Correct(wallNow) == wallNow,
+                "before the session has started there is nothing to correct");
+            drift.Anchor();
+            void Advance(TimeSpan wall, TimeSpan counter) { wallNow += wall; counterNow += (long)(counter.TotalSeconds * frequency); }
+
+            Advance(TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(10));
+            var stamped = wallNow - TimeSpan.FromSeconds(3); // an event delivered three seconds late
+            Assert(drift.Drift == TimeSpan.Zero && drift.Correct(stamped) == stamped,
+                "while the clocks agree an event keeps its time, however late it was delivered");
+
+            Advance(TimeSpan.FromMilliseconds(400), TimeSpan.Zero);
+            Assert(drift.Correct(stamped) == stamped,
+                "a fraction of a second of slew is not corrected");
+
+            // Paused for 27.5 minutes: the wall clock moves, the counter does not.
+            Advance(TimeSpan.FromMinutes(27.5), TimeSpan.Zero);
+            var lagging = wallNow - TimeSpan.FromMinutes(27.5) - TimeSpan.FromMilliseconds(400);
+            Assert(Math.Abs((drift.Correct(lagging) - wallNow).TotalMilliseconds) < 1,
+                $"after the pause an event stamped by the counter is moved to when it happened, not 27.5 minutes before: {drift.Drift}");
+            Advance(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+            Assert(Math.Abs((drift.Drift - TimeSpan.FromMinutes(27.5) - TimeSpan.FromMilliseconds(400)).TotalMilliseconds) < 1,
+                "and the correction stays while the session runs, since the counter never catches up");
+
+            drift.Anchor();
+            Assert(drift.Drift == TimeSpan.Zero, "a new session starts from agreeing clocks again");
+            Advance(TimeSpan.FromSeconds(-90), TimeSpan.Zero);
+            Assert(drift.Correct(wallNow + TimeSpan.FromSeconds(90)) == wallNow,
+                "a wall clock set back is followed as well");
+        }
+
         // The sign-in task (P3-106): Windows started the Run value 28.5 s after
         // sign-in. What the task says is what Task Scheduler will do, so each
         // setting that differs from its defaults is checked.

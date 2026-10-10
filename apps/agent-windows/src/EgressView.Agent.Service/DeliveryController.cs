@@ -65,7 +65,7 @@ internal sealed class DeliveryController : IDisposable
                         if (!store.DeliveryEnabled) { SetState("disabled", null); continue; }
                         SetState("sending", null, attemptedAt);
                         result = await sender.SendNextAsync(store, credential,
-                            new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, "0.1.0-dev"), cancellationToken);
+                            new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, DiagnosticsReport.CurrentVersion), cancellationToken);
                     }
                     finally { sendGate.Release(); }
                     delay = result.Narrowed ? NarrowingDelay : result.Kind switch
