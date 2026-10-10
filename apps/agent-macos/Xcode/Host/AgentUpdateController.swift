@@ -27,7 +27,6 @@ final class AgentUpdateController: ObservableObject {
     private let preferences: AgentUpdatePreferences
     private let defaults: UserDefaults
     private let coordinator: AgentUpdateCoordinator
-    private let verifier: AgentPackageVerifier
     private let onUpdateReady: (String) -> Void
     private var lastState = AgentUpdateState.notDue
     /// The version running right now, so a package left over from before an
@@ -37,13 +36,11 @@ final class AgentUpdateController: ObservableObject {
     init(
         preferences: AgentUpdatePreferences = AgentUpdatePreferences(),
         defaults: UserDefaults = .standard,
-        verifier: AgentPackageVerifier = AgentPackageVerifier(),
         onUpdateReady: @escaping (String) -> Void = { _ in }
     ) {
         self.preferences = preferences
         self.defaults = defaults
         self.onUpdateReady = onUpdateReady
-        self.verifier = verifier
         isEnabled = preferences.isEnabled
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             ?? "0.0.0"
@@ -52,7 +49,6 @@ final class AgentUpdateController: ObservableObject {
                 currentVersion: version,
                 osVersion: ProcessInfo.processInfo.operatingSystemVersionString
             ),
-            verifier: verifier,
             preferences: preferences
         )
         runningVersion = version

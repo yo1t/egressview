@@ -33,23 +33,6 @@ private struct PayloadDownloadTransport: AgentUpdateDownloadTransport {
     }
 }
 
-private struct StubVerifierRunner: AgentCommandRunning {
-    var accept = true
-
-    func run(_ executable: String, _ arguments: [String]) throws -> AgentCommandResult {
-        if executable.hasSuffix("spctl") {
-            return AgentCommandResult(
-                exitCode: accept ? 0 : 3,
-                standardOutput: "",
-                standardError: accept ? "accepted" : "source=Unnotarized Developer ID"
-            )
-        }
-        return AgentCommandResult(
-            exitCode: 0, standardOutput: "", standardError: "TeamIdentifier=TEAMID1234"
-        )
-    }
-}
-
 /// The real published manifest and its real signature. Only the release key
 /// can produce a valid pair, so tests that need a manifest the agent will
 /// accept use this one, and tests that need a rejected manifest build their own
@@ -141,10 +124,6 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
                 transport: ManifestTransport(manifest: Fixture.manifest, signature: Fixture.signature)
             ),
             downloader: AgentUpdateDownloader(transport: PayloadDownloadTransport(payload: payload)),
-            verifier: AgentPackageVerifier(
-                currentTeamIdentifier: "TEAMID1234",
-                resolvePackageIdentity: { _ in "TEAMID1234" }
-            ),
             preferences: preferences,
             clock: { now }
         )
@@ -178,10 +157,6 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
                 )
             ),
             downloader: AgentUpdateDownloader(transport: PayloadDownloadTransport(payload: payload)),
-            verifier: AgentPackageVerifier(
-                currentTeamIdentifier: "TEAMID1234",
-                resolvePackageIdentity: { _ in "TEAMID1234" }
-            ),
             preferences: preferences
         )
 
@@ -308,29 +283,6 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             AgentUpdateCoordinator.describe(AgentUpdateError.signatureInvalid),
             "The update information was not signed by the EgressView release key."
-        )
-        XCTAssertEqual(
-            AgentUpdateCoordinator.describe(
-                AgentPackageVerificationError.teamIdentifierMismatch(
-                    expected: "AAAA", actual: "BBBB"
-                )
-            ),
-            "The update was signed by a different developer (BBBB) than the copy already installed (AAAA)."
-        )
-        // The sandbox made the old spctl check impossible, so these are the
-        // states the in-process check can now report. Each has to say what
-        // happened, not just which case it was.
-        XCTAssertEqual(
-            AgentUpdateCoordinator.describe(AgentPackageVerificationError.signatureInvalid(-67061)),
-            "The downloaded package's signature did not verify (code -67061)."
-        )
-        XCTAssertEqual(
-            AgentUpdateCoordinator.describe(AgentPackageVerificationError.teamIdentifierMissing),
-            "The downloaded package is not signed by a developer this Mac can identify."
-        )
-        XCTAssertEqual(
-            AgentUpdateCoordinator.describe(AgentPackageVerificationError.packageUnreadable),
-            "The downloaded package could not be read for verification."
         )
         XCTAssertEqual(
             AgentUpdateCoordinator.describe(AgentUpdateError.httpStatus(503)),

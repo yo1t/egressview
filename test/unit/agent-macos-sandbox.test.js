@@ -115,10 +115,6 @@ describe('macOS Agent App Sandbox boundary', () => {
   });
 
   it('does not offer Lightweight monitoring in sandboxed release builds', () => {
-    const identity = fs.readFileSync(
-      path.join(root, 'apps/agent-macos/Sources/EgressViewAgentCore/AgentPackageVerifier.swift'),
-      'utf8'
-    );
     const controller = fs.readFileSync(
       path.join(root, 'apps/agent-macos/Xcode/Host/AgentMonitoringController.swift'),
       'utf8'
@@ -134,7 +130,6 @@ describe('macOS Agent App Sandbox boundary', () => {
 
     assert.match(controller, /isLightweightMonitoringAvailable: Bool \{\s*\/\/[\s\S]*?false\s*\}/);
     assert.match(settings, /isLightweightMonitoringAvailable = false/);
-    assert.doesNotMatch(identity, /SecTaskCopyValueForEntitlement/);
     assert.match(appDelegate, /if controller\.isLightweightMonitoringAvailable/);
     assert.match(settings, /availableMonitoringModes/);
     assert.doesNotMatch(settings, /development builds only/);
