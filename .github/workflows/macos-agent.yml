@@ -1,10 +1,12 @@
 name: macOS agent
 
+# Runs on every pull request so that "build-and-test" can be a required check
+# (P3-111): a required check from a path-filtered workflow never reports on a
+# PR that does not touch those paths, and that PR could never merge. The
+# "changes" job decides; build-and-test is skipped when nothing under the
+# agent changed, and GitHub counts a skipped required check as passing.
 on:
   pull_request:
-    paths:
-      - "apps/agent-macos/**"
-      - ".github/workflows/macos-agent.yml"
   push:
     branches: [main]
     paths:
@@ -15,7 +17,35 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      agent: ${{ steps.diff.outputs.agent }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            range="origin/$BASE_REF...HEAD"
+          else
+            range="$BEFORE...HEAD"
+          fi
+          if git diff --name-only "$range" | grep -qE '^(apps/agent-macos/|\.github/workflows/macos-agent\.yml$)'; then
+            echo "agent=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-test:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     steps:

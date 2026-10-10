@@ -28,7 +28,6 @@ public enum AgentUpdateState: Equatable, Sendable {
 public actor AgentUpdateCoordinator {
     private let checker: AgentUpdateChecker
     private let downloader: AgentUpdateDownloader
-    private let verifier: AgentPackageVerifier
     private let preferences: AgentUpdatePreferences
     private let clock: @Sendable () -> Date
 
@@ -37,13 +36,11 @@ public actor AgentUpdateCoordinator {
     public init(
         checker: AgentUpdateChecker,
         downloader: AgentUpdateDownloader = AgentUpdateDownloader(),
-        verifier: AgentPackageVerifier = AgentPackageVerifier(),
         preferences: AgentUpdatePreferences = AgentUpdatePreferences(),
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.checker = checker
         self.downloader = downloader
-        self.verifier = verifier
         self.preferences = preferences
         self.clock = clock
     }
@@ -111,18 +108,6 @@ public actor AgentUpdateCoordinator {
             return "The downloaded package did not match the signed checksum (got \(actual.prefix(12))…)."
         case let AgentUpdateDownloadError.sizeMismatch(expected, actual):
             return "The download was incomplete (\(actual) of \(expected) bytes)."
-        case AgentPackageVerificationError.runningBuildIsNotTeamSigned:
-            return "This build is not signed with a developer identity, so it cannot verify an update."
-        case let AgentPackageVerificationError.teamIdentifierMismatch(expected, actual):
-            return "The update was signed by a different developer (\(actual)) than the copy already installed (\(expected))."
-        case AgentPackageVerificationError.teamIdentifierMissing:
-            return "The downloaded package is not signed by a developer this Mac can identify."
-        case let AgentPackageVerificationError.signatureInvalid(status):
-            return "The downloaded package's signature did not verify (code \(status))."
-        case AgentPackageVerificationError.packageUnreadable:
-            return "The downloaded package could not be read for verification."
-        case let AgentPackageVerificationError.notarisationRejected(reason):
-            return "macOS refused the downloaded package: \(reason)"
         default:
             return String(describing: error)
         }
