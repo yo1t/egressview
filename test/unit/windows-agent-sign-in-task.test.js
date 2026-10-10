@@ -22,6 +22,15 @@ describe('Windows Agent sign-in task', () => {
     assert.ok(action.includes('Return="ignore"'), 'and an uninstall does not fail when there is no task');
   });
 
+  it('registers the installed window, not whichever copy is running', () => {
+    const registration = fs.readFileSync(path.join(agentRoot, 'src', 'EgressView.Agent.Ui', 'AgentStartupRegistration.cs'), 'utf8');
+    // The installer records where it put the window.
+    assert.ok(packageWxs.includes('<RegistryValue Name="UiPath" Type="string" Value="[UIFOLDER]EgressView.Agent.Ui.exe" />'));
+    assert.match(registration, /GetValue\("UiPath"\) is string installed && File\.Exists\(installed\)\) return installed;/);
+    assert.match(registration, /var path = ExecutablePath\(\);/);
+    assert.doesNotMatch(registration, /RegisterTask\(Environment\.ProcessPath/);
+  });
+
   it('only on a full uninstall, not on an upgrade', () => {
     assert.match(packageWxs,
       /<Custom Action="RemoveSignInTask" Before="RemoveFiles"\s+Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" \/>/);
