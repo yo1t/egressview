@@ -72,11 +72,30 @@ internal static class AgentStartupRegistration
             SetRunValue(false);
             return;
         }
-        var path = Environment.ProcessPath ?? throw new InvalidOperationException("The UI executable path is unavailable.");
+        var path = ExecutablePath();
         var registered = RegisterTask(path);
         // Never both: the second would start a second window at sign-in,
         // which the single-instance check then turns into a flash.
         SetRunValue(!registered);
+    }
+
+    /// The installed window, as the installer recorded it, rather than
+    /// whichever copy happens to be running.
+    ///
+    /// Registration runs on every start, so on 2026-10-10 a copy of the window
+    /// started from another folder to time its start-up pointed the sign-in
+    /// task at itself, and the next sign-in would have started that copy. The
+    /// running executable is used only when nothing is installed, as for a
+    /// build run from its own folder.
+    private static string ExecutablePath()
+    {
+        try
+        {
+            using var machine = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\EgressView\Agent");
+            if (machine?.GetValue("UiPath") is string installed && File.Exists(installed)) return installed;
+        }
+        catch { /* Fall back to the running copy. */ }
+        return Environment.ProcessPath ?? throw new InvalidOperationException("The UI executable path is unavailable.");
     }
 
     private static bool RegisterTask(string path)
@@ -130,11 +149,7 @@ internal static class AgentStartupRegistration
         try
         {
             using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-            if (enabled)
-            {
-                var path = Environment.ProcessPath ?? throw new InvalidOperationException("The UI executable path is unavailable.");
-                key.SetValue(ValueName, $"\"{path}\" --tray", RegistryValueKind.String);
-            }
+            if (enabled) key.SetValue(ValueName, $"\"{ExecutablePath()}\" --tray", RegistryValueKind.String);
             else key.DeleteValue(ValueName, throwOnMissingValue: false);
         }
         catch { /* The task, if registered, is what counts. */ }
