@@ -633,6 +633,7 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
     appState.offlinePolicy = offlinePolicy;
     enrichment.setOfflinePolicy(offlinePolicy);
     threatIntel.setOfflinePolicy(offlinePolicy);
+    threatIntel.setProfiler(runtimeProfiler);
     deviceId.setOfflinePolicy(offlinePolicy);
     manualThreatModule.setOfflinePolicy(offlinePolicy);
     aiProviderModule.setOfflinePolicy(offlinePolicy);
