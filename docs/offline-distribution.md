@@ -69,7 +69,18 @@ openssl pkeyutl -verify -rawin -pubin \
 sha256sum -c "${ARTIFACT}.sha256"
 ```
 
-On macOS, use `shasum -a 256 -c "${ARTIFACT}.sha256"` for the second command.
+The first command requires OpenSSL 3; macOS's bundled LibreSSL cannot verify
+Ed25519 this way. From a source checkout, the Node.js verifier works without
+an OpenSSL CLI and checks both the signature and the complete bundle:
+
+```bash
+node scripts/verify-offline-bundle.js --artifact "$ARTIFACT" \
+  --checksum "${ARTIFACT}.sha256" --signature "${ARTIFACT}.sig" \
+  --public-key "${ARTIFACT}.pub.pem"
+```
+
+If using the OpenSSL command on macOS, use `shasum -a 256 -c "${ARTIFACT}.sha256"`
+for the second command.
 Do not extract or run the installer if either check fails.
 
 ## Install or upgrade

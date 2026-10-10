@@ -12,6 +12,7 @@
 
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -19,6 +20,8 @@ const { execFileSync } = require('node:child_process');
 
 const SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'build-offline-bundle.js');
 const { parseArgs } = require(SCRIPT);
+const { verify: verifyBundle } = require('../../scripts/verify-offline-bundle');
+const { verifyDetached } = require('../../scripts/ed25519-signature');
 
 /**
  * A stand-in for the AWS CLI backed by a local key. It answers the two
@@ -27,33 +30,32 @@ const { parseArgs } = require(SCRIPT);
  */
 function installAwsStub(dir, keyPath) {
   const stub = path.join(dir, 'aws');
-  fs.writeFileSync(stub, `#!/bin/bash
-set -e
-sub="$1 $2"
-msg=""; out=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --message) msg="\${2#fileb://}"; shift 2 ;;
-    --query) out="$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-case "$sub" in
-  "kms sign")
-    [ "$out" = "Signature" ] || { echo "unexpected --query $out" >&2; exit 1; }
-    openssl pkeyutl -sign -rawin -inkey "${keyPath}" -in "$msg" | base64 ;;
-  "kms get-public-key")
-    [ "$out" = "PublicKey" ] || { echo "unexpected --query $out" >&2; exit 1; }
-    openssl pkey -in "${keyPath}" -pubout -outform DER | base64 ;;
-  *) echo "unexpected aws subcommand: $sub" >&2; exit 1 ;;
-esac
+  fs.writeFileSync(stub, `#!${process.execPath}
+'use strict';
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const key = crypto.createPrivateKey(fs.readFileSync(${JSON.stringify(keyPath)}));
+const args = process.argv.slice(2);
+const option = (name) => args[args.indexOf(name) + 1];
+if (args[0] === 'kms' && args[1] === 'sign' && option('--query') === 'Signature') {
+  const messageArg = option('--message');
+  if (!messageArg.startsWith('fileb://')) process.exit(1);
+  const message = fs.readFileSync(messageArg.slice('fileb://'.length));
+  process.stdout.write(crypto.sign(null, message, key).toString('base64'));
+} else if (args[0] === 'kms' && args[1] === 'get-public-key' && option('--query') === 'PublicKey') {
+  process.stdout.write(crypto.createPublicKey(key).export({ format: 'der', type: 'spki' }).toString('base64'));
+} else {
+  process.stderr.write('unexpected aws subcommand');
+  process.exitCode = 1;
+}
 `, { mode: 0o755 });
   return stub;
 }
 
 function buildWithStubbedKms(dir, extraArgs = []) {
   const keyPath = path.join(dir, 'signing.key');
-  execFileSync('openssl', ['genpkey', '-algorithm', 'ED25519', '-out', keyPath]);
+  const { privateKey } = crypto.generateKeyPairSync('ed25519');
+  fs.writeFileSync(keyPath, privateKey.export({ format: 'pem', type: 'pkcs8' }));
   installAwsStub(dir, keyPath);
   const output = path.join(dir, 'dist');
   const stdout = execFileSync(process.execPath, [
@@ -63,10 +65,7 @@ function buildWithStubbedKms(dir, extraArgs = []) {
 }
 
 function verify(publicKey, signature, message) {
-  execFileSync('openssl', [
-    'pkeyutl', '-verify', '-rawin', '-pubin',
-    '-inkey', publicKey, '-sigfile', signature, '-in', message,
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  verifyDetached(fs.readFileSync(message), fs.readFileSync(signature), publicKey);
 }
 
 describe('offline bundle: KMS 署名', () => {
@@ -82,8 +81,14 @@ describe('offline bundle: KMS 署名', () => {
   after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   it('検証側を変更せずに検証できる署名を出力する', () => {
-    // The point of choosing KMS: the verifier and its inputs are untouched.
+    // KMS output must be accepted by the normal offline verifier.
     assert.doesNotThrow(() => verify(result.publicKey, result.signature, result.checksum));
+    assert.doesNotThrow(() => verifyBundle({
+      artifact: result.artifact,
+      checksum: result.checksum,
+      signature: result.signature,
+      'public-key': result.publicKey,
+    }));
   });
 
   it('署名は生のEd25519（64バイト、DER包装なし）', () => {
@@ -92,8 +97,7 @@ describe('offline bundle: KMS 署名', () => {
 
   it('公開鍵をPEMで出力し、DERの中間ファイルを残さない', () => {
     assert.match(fs.readFileSync(result.publicKey, 'utf8'), /^-----BEGIN PUBLIC KEY-----/);
-    // The DER form is written only to feed openssl; leaving it behind would
-    // put an undeclared file next to the release.
+    // No intermediate DER file belongs next to the release.
     assert.equal(fs.existsSync(`${result.publicKey}.der`), false);
   });
 

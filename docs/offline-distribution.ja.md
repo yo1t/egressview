@@ -64,7 +64,16 @@ openssl pkeyutl -verify -rawin -pubin \
 sha256sum -c "${ARTIFACT}.sha256"
 ```
 
-macOSでは2番目を`shasum -a 256 -c "${ARTIFACT}.sha256"`に置き換えます。
+1番目のコマンドにはOpenSSL 3が必要です。macOS標準のLibreSSLでは、この方法でEd25519署名を検証できません。
+ソースのチェックアウトがある場合は、Node.jsの検証スクリプトで署名と配布物全体を確認できます（OpenSSL CLIは不要）。
+
+```bash
+node scripts/verify-offline-bundle.js --artifact "$ARTIFACT" \
+  --checksum "${ARTIFACT}.sha256" --signature "${ARTIFACT}.sig" \
+  --public-key "${ARTIFACT}.pub.pem"
+```
+
+OpenSSL 3のコマンドをmacOSで使う場合、2番目を`shasum -a 256 -c "${ARTIFACT}.sha256"`に置き換えます。
 どちらかが失敗した場合、展開もinstaller実行も行いません。
 
 ## Install / upgrade

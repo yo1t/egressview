@@ -2,7 +2,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -15,24 +15,15 @@ const { verify } = require('../../scripts/verify-provenance');
 function scratchKey(dir) {
   const priv = path.join(dir, 'key.pem');
   const pub = path.join(dir, 'key.pub.pem');
-  execFileSync('openssl', ['genpkey', '-algorithm', 'ed25519', '-out', priv], { stdio: 'ignore' });
-  execFileSync('openssl', ['pkey', '-in', priv, '-pubout', '-out', pub], { stdio: 'ignore' });
+  const keys = crypto.generateKeyPairSync('ed25519');
+  fs.writeFileSync(priv, keys.privateKey.export({ format: 'pem', type: 'pkcs8' }));
+  fs.writeFileSync(pub, keys.publicKey.export({ format: 'pem', type: 'spki' }));
   return { priv, pub };
 }
 
 function signLocally(priv) {
-  return ({ message }) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-sign-'));
-    try {
-      const m = path.join(dir, 'm.bin');
-      const s = path.join(dir, 's.bin');
-      fs.writeFileSync(m, message);
-      execFileSync('openssl', ['pkeyutl', '-sign', '-rawin', '-inkey', priv, '-in', m, '-out', s]);
-      return fs.readFileSync(s).toString('base64');
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  };
+  const key = crypto.createPrivateKey(fs.readFileSync(priv));
+  return ({ message }) => crypto.sign(null, message, key).toString('base64');
 }
 
 function fixture() {

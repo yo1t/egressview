@@ -14,13 +14,12 @@
  * different file proves nothing about this one.
  */
 
-const { execFileSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const { pae, PAYLOAD_TYPE, PREDICATE_TYPE, STATEMENT_TYPE } = require('./build-provenance');
+const { verifyDetached } = require('./ed25519-signature');
 
 function parseArgs(argv) {
   const options = {};
@@ -50,21 +49,7 @@ function verify(options) {
   const payload = Buffer.from(envelope.payload, 'base64').toString('utf8');
   const message = pae(envelope.payloadType, payload);
 
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-provenance-'));
-  try {
-    const messagePath = path.join(scratch, 'pae.bin');
-    const signaturePath = path.join(scratch, 'sig.bin');
-    fs.writeFileSync(messagePath, message);
-    fs.writeFileSync(signaturePath, Buffer.from(envelope.signatures[0].sig, 'base64'));
-    execFileSync('openssl', [
-      'pkeyutl', '-verify', '-rawin', '-pubin',
-      '-inkey', options.publicKey,
-      '-sigfile', signaturePath,
-      '-in', messagePath,
-    ], { stdio: ['ignore', 'ignore', 'pipe'] });
-  } finally {
-    fs.rmSync(scratch, { recursive: true, force: true });
-  }
+  verifyDetached(message, Buffer.from(envelope.signatures[0].sig, 'base64'), options.publicKey);
 
   const statement = JSON.parse(payload);
   if (statement._type !== STATEMENT_TYPE) throw new Error(`Unexpected statement type: ${statement._type}`);

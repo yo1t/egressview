@@ -12,6 +12,7 @@ const {
   sha256,
   verifyManifest,
 } = require('./offline-bundle-lib');
+const { verifyDetached } = require('./ed25519-signature');
 
 function parseArgs(argv) {
   const options = {};
@@ -86,15 +87,7 @@ function assertPortableArchive(artifact) {
 }
 
 function verify(options) {
-  execFileSync('openssl', [
-    'pkeyutl',
-    '-verify',
-    '-rawin',
-    '-pubin',
-    '-inkey', options['public-key'],
-    '-sigfile', options.signature,
-    '-in', options.checksum,
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  verifyDetached(fs.readFileSync(options.checksum), fs.readFileSync(options.signature), options['public-key']);
 
   const line = fs.readFileSync(options.checksum, 'utf8').trim();
   const match = /^([0-9a-f]{64}) {2}([A-Za-z0-9._-]+)$/.exec(line);

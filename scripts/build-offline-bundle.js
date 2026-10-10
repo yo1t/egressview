@@ -2,6 +2,7 @@
 'use strict';
 
 const { execFileSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -10,6 +11,7 @@ const {
   createManifest,
   sha256,
 } = require('./offline-bundle-lib');
+const { publicKeyPemFromDer, signDetached } = require('./ed25519-signature');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -42,10 +44,8 @@ const KMS_MAX_RAW_MESSAGE_BYTES = 4096;
  * Sign the checksum file with an asymmetric KMS key and write the detached
  * signature plus the public key beside the artifact.
  *
- * The signature is byte-identical in form to the openssl path: raw Ed25519
- * over the checksum file. Verification therefore stays `openssl pkeyutl
- * -verify -rawin -pubin` and needs neither AWS access nor a code change, which
- * is the reason KMS was chosen over a scheme that changes the verifier.
+ * The signature is raw Ed25519 over the checksum file. Verification needs
+ * neither AWS access nor an OpenSSL CLI.
  */
 function signWithKms(keyId, region, checksumPath, signaturePath, publicKeyPath) {
   const size = fs.statSync(checksumPath).size;
@@ -66,20 +66,13 @@ function signWithKms(keyId, region, checksumPath, signaturePath, publicKeyPath) 
   ]).trim();
   fs.writeFileSync(signaturePath, Buffer.from(signature, 'base64'), { mode: 0o644 });
 
-  // KMS returns SPKI DER; ship PEM so the documented verification command
-  // works unchanged for anyone who does not have the AWS CLI.
+  // KMS returns SPKI DER; ship PEM for offline verification.
   const publicDer = run('aws', [
     'kms', 'get-public-key', ...regionArgs,
     '--key-id', keyId,
     '--query', 'PublicKey', '--output', 'text',
   ]).trim();
-  const derPath = `${publicKeyPath}.der`;
-  fs.writeFileSync(derPath, Buffer.from(publicDer, 'base64'), { mode: 0o600 });
-  try {
-    run('openssl', ['pkey', '-pubin', '-inform', 'DER', '-in', derPath, '-out', publicKeyPath]);
-  } finally {
-    fs.rmSync(derPath, { force: true });
-  }
+  fs.writeFileSync(publicKeyPath, publicKeyPemFromDer(Buffer.from(publicDer, 'base64')), { mode: 0o644 });
 }
 
 function run(command, args, options = {}) {
@@ -168,8 +161,9 @@ function build(options) {
       result.publicKey = publicKey;
     } else if (options['private-key']) {
       const privateKey = path.resolve(options['private-key']);
-      run('openssl', ['pkeyutl', '-sign', '-rawin', '-inkey', privateKey, '-in', checksum, '-out', signature]);
-      run('openssl', ['pkey', '-in', privateKey, '-pubout', '-out', publicKey]);
+      fs.writeFileSync(signature, signDetached(fs.readFileSync(checksum), privateKey));
+      const key = crypto.createPrivateKey(fs.readFileSync(privateKey));
+      fs.writeFileSync(publicKey, crypto.createPublicKey(key).export({ format: 'pem', type: 'spki' }));
       result.signature = signature;
       result.publicKey = publicKey;
     }
