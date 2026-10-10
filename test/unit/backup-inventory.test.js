@@ -159,7 +159,10 @@ describe('backup prune planning', () => {
     assert.ok(plan.protectedRestorePoints.every(entry => entry.header === 'ok'));
   });
 
-  it('plans large sparse generations without reading their contents', () => {
+  // NTFS does not make a truncated file sparse, so on Windows the twelve 4 GiB
+  // files would be written out in full and allocated equals logical size.
+  // The Hub runs on Linux, where this is what it meets.
+  it('plans large sparse generations without reading their contents', { skip: process.platform === 'win32' }, () => {
     for (let index = 1; index <= 12; index += 1) {
       const filePath = normal(`egressview_2026-02-${String(index).padStart(2, '0')}_00-00-00.db`);
       fs.truncateSync(filePath, 4 * 1024 * 1024 * 1024);

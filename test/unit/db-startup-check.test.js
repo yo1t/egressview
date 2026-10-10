@@ -70,7 +70,9 @@ describe('the clean-shutdown marker', () => {
 
   it('is written readable only by its owner, and not left half-written', () => {
     writeCleanShutdownMarker(db, { lastFullCheckAt: 5, now: 6 });
-    assert.equal(fs.statSync(markerPath(db)).mode & 0o777, 0o600);
+    // Windows has no POSIX permission bits to set: every file reports 0666
+    // there. The rest of this test means the same on every platform.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(markerPath(db)).mode & 0o777, 0o600);
     assert.equal(fs.existsSync(`${markerPath(db)}.tmp`), false);
     assert.deepEqual(JSON.parse(fs.readFileSync(markerPath(db), 'utf8')), { closedAt: 6, lastFullCheckAt: 5 });
   });

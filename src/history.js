@@ -130,8 +130,17 @@ function _secureDbFiles() {
 
 function _openDb(p) {
   const d = new Database(p);
-  applyWalPragmas(d);
-  d.pragma('busy_timeout = 5000');
+  // A damaged file opens and then fails on the first statement. Closed before
+  // the error goes on, or the handle stays open behind the restore: Linux lets
+  // a file that is still open be replaced, Windows does not, and the restore
+  // and the tests' clean-up both failed there with EPERM.
+  try {
+    applyWalPragmas(d);
+    d.pragma('busy_timeout = 5000');
+  } catch (error) {
+    try { d.close(); } catch {}
+    throw error;
+  }
   return d;
 }
 
