@@ -531,6 +531,13 @@ module.exports = function agentRoutes({
       // agent reuses an id only when this says true: a Hub without it counts
       // the second report as a duplicate and the counts would be lost.
       observationUpdates: true,
+      // A closing report without byte counts -- macOS reported none, and the
+      // agent records "not measured" rather than zero -- may also come back
+      // under its opening's id, and completes the row's end time and local
+      // address with the counts left empty (P3-177). Without this, such a
+      // report was sent under a new id and the Hub stored one flow as two
+      // rows: 1.1-2.1% of a Mac's rows from 2026-10-04 on.
+      unmeasuredClosings: true,
     });
   });
 

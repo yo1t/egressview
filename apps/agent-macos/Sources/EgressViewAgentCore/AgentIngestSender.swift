@@ -282,6 +282,9 @@ public actor AgentIngestSender {
             queue.setHubCompletesObservations(
                 AgentCapabilityNegotiation.completesObservations(capabilities: hubCapabilities)
             )
+            queue.setHubCompletesUnmeasuredClosings(
+                AgentCapabilityNegotiation.completesUnmeasuredClosings(capabilities: hubCapabilities)
+            )
             logger.notice("hub-capabilities: includeHostname=\(includeHostname, privacy: .public)")
             guard let envelope = try queue.prepareBatch(
                 limit: limit, sentAt: now(), metadata: metadata, schemaVersion: schemaVersion,
