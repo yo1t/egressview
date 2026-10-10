@@ -218,6 +218,82 @@ final class ClosingReportCompletesRowTests: XCTestCase {
             capabilities: try decode(#"{"schemaVersions":[1]}"#)))
         XCTAssertFalse(AgentCapabilityNegotiation.completesObservations(capabilities: nil))
     }
+
+    // P3-177: macOS reports no byte counts for many flows. Sent under a new
+    // id, such a closing report became a second row of the same flow at the
+    // Hub -- 1.1-2.1% of this Mac's rows from 2026-10-04.
+    private func unmeasured(start: TimeInterval, end: TimeInterval, localPort: UInt16) -> ConnectionObservation {
+        ConnectionObservation(
+            networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: localPort,
+            remoteAddress: "203.0.113.10", remotePort: 443, processID: 42, processName: "TestApp",
+            firstObservedAt: Date(timeIntervalSince1970: start), lastObservedAt: Date(timeIntervalSince1970: end),
+            bytesIn: nil, bytesOut: nil, collector: .networkExtension, confidence: .exact,
+            flowID: flow
+        )
+    }
+
+    func test_バイト数の無い終了報告も_Hubが受けるなら開始時のidで送る() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        queue.setHubCompletesObservations(true)
+        queue.setHubCompletesUnmeasuredClosings(true)
+        try queue.enqueue([unmeasured(start: 10, end: 10, localPort: 0)])
+        let opening = try deliver(queue)
+
+        try queue.enqueue([unmeasured(start: 10, end: 14, localPort: 50_000)])
+        let closing = try deliver(queue)
+
+        XCTAssertEqual(closing, opening)
+    }
+
+    func test_バイト数の無い報告の後も_バイト数のある報告は同じidで送る() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        queue.setHubCompletesObservations(true)
+        queue.setHubCompletesUnmeasuredClosings(true)
+        try queue.enqueue([unmeasured(start: 10, end: 10, localPort: 0)])
+        let opening = try deliver(queue)
+        try queue.enqueue([unmeasured(start: 10, end: 14, localPort: 50_000)])
+        _ = try deliver(queue)
+
+        try queue.enqueue([observation(bytes: 288)])
+        let measured = try deliver(queue)
+
+        XCTAssertEqual(measured, opening)
+    }
+
+    func test_Hubが受けると言わなければ_バイト数の無い終了報告は別のidで送る() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        queue.setHubCompletesObservations(true)
+        try queue.enqueue([unmeasured(start: 10, end: 10, localPort: 0)])
+        let opening = try deliver(queue)
+
+        try queue.enqueue([unmeasured(start: 10, end: 14, localPort: 50_000)])
+        let closing = try deliver(queue)
+
+        XCTAssertNotEqual(closing, opening)
+    }
+
+    func test_バイト数の無い報告でも別の回の開始時のidは借りない() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        queue.setHubCompletesObservations(true)
+        queue.setHubCompletesUnmeasuredClosings(true)
+        try queue.enqueue([unmeasured(start: 10, end: 10, localPort: 0)])
+        let earlier = try deliver(queue)
+
+        try queue.enqueue([unmeasured(start: 70, end: 70, localPort: 0)])
+        let later = try deliver(queue)
+
+        XCTAssertNotEqual(later, earlier)
+    }
+
+    func test_Hubの機能の答えは両方そろって初めて使う() {
+        XCTAssertFalse(AgentCapabilityNegotiation.completesUnmeasuredClosings(capabilities: nil))
+        XCTAssertFalse(AgentCapabilityNegotiation.completesUnmeasuredClosings(
+            capabilities: AgentHubCapabilities(schemaVersions: [1], unmeasuredClosings: true)))
+        XCTAssertFalse(AgentCapabilityNegotiation.completesUnmeasuredClosings(
+            capabilities: AgentHubCapabilities(schemaVersions: [1], observationUpdates: true)))
+        XCTAssertTrue(AgentCapabilityNegotiation.completesUnmeasuredClosings(
+            capabilities: AgentHubCapabilities(schemaVersions: [1], observationUpdates: true, unmeasuredClosings: true)))
+    }
 }
 
 private final class CompletingHubStore: AgentCredentialStoring, @unchecked Sendable {
