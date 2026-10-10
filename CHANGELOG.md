@@ -497,6 +497,25 @@ The app and its system extension both carry a privacy manifest: no tracking,
 no tracking domains, and an empty collected-data list — accurate rather than
 merely short, because nothing is transmitted anywhere we can reach.
 
+## [2.1.1] - 2026-10-10
+
+**EgressView 2.1.1 = Hub 1.11.1.** One fix, for anyone running their own Hub.
+
+### The Hub no longer stops for a second every hour
+
+Once an hour the Hub refreshes its threat feeds, and for 0.7-1.1 s every
+screen and every agent upload waited: URLhaus's recent list is a 7.7 MB CSV of
+about 33,000 lines, and it was parsed, and then written to the restart cache in
+one transaction, on the thread that answers requests.
+
+- The feeds are now parsed on a worker thread; only the resulting indicators
+  are applied on the main thread. (#786)
+- The restart cache is written 2,000 rows at a time, with requests answered in
+  between, and not at all when a feed has not changed. (#784)
+
+Measured on the production Hub: the apply went from 381-643 ms to 33-80 ms, and
+no stall over 500 ms has been recorded since (2.1.0 logged one every hour).
+
 ## [2.1.0] - 2026-10-09
 
 **EgressView 2.1.0 = Hub 1.11.0.** The agents are released on their own
