@@ -171,12 +171,28 @@ function yieldToLoop() {
  */
 function completesStoredObservation(stored, observation) {
   if (stored.bytesIn != null || stored.bytesOut != null) return false;
-  if (observation.bytesIn == null && observation.bytesOut == null) return false;
+  if (observation.bytesIn == null && observation.bytesOut == null
+    && !closesWithoutCounts(stored, observation)) return false;
   return stored.networkProtocol === observation.networkProtocol
     && stored.remoteAddress === observation.remoteAddress
     && stored.remotePort === observation.remotePort
     && stored.processId === observation.processID
     && (stored.localPort === 0 || stored.localPort === observation.localPort);
+}
+
+/**
+ * Whether a report without byte counts is the closing report of the stored
+ * opening, rather than a retry of it (P3-177).
+ *
+ * macOS reports no counts for many flows, and the agent records those as not
+ * measured. Such a closing report still says when the flow ended and, often,
+ * which local address it left from. A retry of the opening says nothing new,
+ * so it must move the end time or bring the local endpoint the opening lacked.
+ */
+function closesWithoutCounts(stored, observation) {
+  const endedAt = Date.parse(observation.lastObservedAt);
+  return (Number.isFinite(endedAt) && endedAt > stored.lastObservedAt)
+    || (!hasLocalEndpoint(stored) && hasLocalEndpoint(observation));
 }
 
 const UNSPECIFIED_ADDRESSES = new Set(['0.0.0.0', '::', '']);

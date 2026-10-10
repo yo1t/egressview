@@ -430,6 +430,44 @@ describe('終了時の報告で、開始時の行を完成させる', () => {
     assert.equal(row.bytesIn, '5000');
   });
 
+  // P3-177: macOS reports no counts for many flows; the agent records them as
+  // not measured, and from 2026-10-04 1.1-2.1% of a Mac's rows were one flow
+  // stored twice because such a closing report could not complete its row.
+  it('バイト数の無い終了時の報告でも、終わった時刻とローカルのポートで行を完成させる', async () => {
+    await store.storeBatch(agentId, opening(), { receivedAt });
+    const ack = await store.storeBatch(agentId, closing({ bytesIn: null, bytesOut: null }),
+      { receivedAt: receivedAt + 1 });
+
+    assert.equal(ack.accepted, 0);
+    assert.equal(ack.completed, 1);
+    assert.deepEqual(rows(), [{
+      localPort: 49152, bytesIn: null, bytesOut: null,
+      lastObservedAt: Date.parse('2026-08-11T13:00:05Z'), remoteHostname: 'api.example',
+    }]);
+  });
+
+  it('バイト数の無い開始時の報告の再送は、行を完成させたことにしない', async () => {
+    await store.storeBatch(agentId, opening(), { receivedAt });
+    const retry = opening();
+    retry.batchId = secondBatch;
+    const ack = await store.storeBatch(agentId, retry, { receivedAt: receivedAt + 1 });
+
+    assert.equal(ack.completed, 0);
+    assert.deepEqual(rows().map(row => row.localPort), [0]);
+  });
+
+  it('バイト数の無い終了時の報告の後でも、バイト数のある報告で行を完成させられる', async () => {
+    await store.storeBatch(agentId, opening(), { receivedAt });
+    await store.storeBatch(agentId, closing({ bytesIn: null, bytesOut: null }), { receivedAt: receivedAt + 1 });
+    const measured = closing({ lastObservedAt: '2026-08-11T13:00:09Z' });
+    measured.batchId = '00000000-0000-4000-8000-0000000000b3';
+    const ack = await store.storeBatch(agentId, measured, { receivedAt: receivedAt + 2 });
+
+    assert.equal(ack.completed, 1);
+    assert.equal(rows()[0].bytesIn, '5000');
+    assert.equal(rows().length, 1);
+  });
+
   it('JSONの応答には completed を出さない（Agentが読む形を変えない）', async () => {
     await store.storeBatch(agentId, opening(), { receivedAt });
     const ack = await store.storeBatch(agentId, closing(), { receivedAt: receivedAt + 1 });

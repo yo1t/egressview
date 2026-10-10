@@ -106,6 +106,8 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     /// byte counts. Told by the sender after every capability answer; until
     /// then, and for a Hub that does not, every report gets its own id.
     private var hubCompletesObservations = false
+    /// Whether it also does so from a report without byte counts (P3-177).
+    private var hubCompletesUnmeasuredClosings = false
     /// How many opening ids are remembered. A flow's closing report comes
     /// within seconds for almost every flow; a long one whose opening has
     /// been forgotten simply gets its own row, as it did before.
@@ -374,12 +376,24 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         lock.withLock { hubCompletesObservations = value }
     }
 
+    /// Told by the sender whether the Hub completes a stored opening from a
+    /// closing report without byte counts (P3-177).
+    public func setHubCompletesUnmeasuredClosings(_ value: Bool) {
+        lock.withLock { hubCompletesUnmeasuredClosings = value }
+    }
+
     /// The id of this flow's opening report, if the Hub has it and will
     /// complete it from this report. Used once: a second report with counts
     /// gets its own id rather than two pending entries sharing one.
     private func takeOpeningID(for observation: ConnectionObservation) -> UUID? {
+        // A report without counts takes the id too when the Hub completes
+        // from one: macOS reports no counts for many flows, and sent under a
+        // new id their closing report became a second row of the same flow --
+        // 1.1-2.1% of this Mac's rows at the Hub from 2026-10-04 (P3-177).
+        // Its acknowledgement remembers the id again (it still has no
+        // counts), so a later report with counts completes the same row.
         guard hubCompletesObservations,
-              observation.bytesIn != nil || observation.bytesOut != nil,
+              observation.bytesIn != nil || observation.bytesOut != nil || hubCompletesUnmeasuredClosings,
               let flowID = observation.flowID,
               // The opening of this same time the flow was open. A flow id
               // macOS reuses has one opening per time, and a closing report

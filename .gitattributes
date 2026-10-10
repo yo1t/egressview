@@ -11,6 +11,11 @@
 *.html  text eol=lf
 *.css   text eol=lf
 *.sql   text eol=lf
+# The macOS sources are read by the Hub's unit tests, which expect LF line
+# ends. Checked out with CRLF on Windows (core.autocrlf), ten of those tests
+# failed there while passing on Linux and macOS.
+*.swift text eol=lf
+*.strings text eol=lf
 
 # Binary files — no line-ending conversion
 *.db     binary
