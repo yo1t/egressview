@@ -11,9 +11,8 @@
  *
  * Signing follows the offline-bundle convention exactly -- a detached raw
  * Ed25519 signature produced by KMS over the literal manifest bytes. The
- * agent, and anyone else, verifies with `openssl pkeyutl -verify -rawin`
- * against the published release key. Nothing about verification needs AWS
- * access.
+ * agent, and anyone else, verifies against the published release key.
+ * Nothing about verification needs AWS access or an OpenSSL CLI.
  *
  * The signature is detached rather than embedded because an embedded field
  * would force the agent to re-serialise the JSON byte-for-byte before
@@ -26,6 +25,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { publicKeyPemFromDer, verifyDetached } = require('./ed25519-signature');
 
 const ROOT = path.join(__dirname, '..');
 const WITHDRAWN = path.join(ROOT, 'release-signing', 'withdrawn-agent-releases.json');
@@ -310,29 +310,18 @@ function publicKeyPem(config, destination) {
     '--key-id', config.keyId,
     '--query', 'PublicKey', '--output', 'text',
   ])).trim();
-  const derPath = `${destination}.der`;
-  fs.writeFileSync(derPath, Buffer.from(der, 'base64'), { mode: 0o600 });
-  try {
-    run('openssl', ['pkey', '-pubin', '-inform', 'DER', '-in', derPath, '-out', destination]);
-  } finally {
-    fs.rmSync(derPath, { force: true });
-  }
+  fs.writeFileSync(destination, publicKeyPemFromDer(Buffer.from(der, 'base64')), { mode: 0o644 });
   return destination;
 }
 
 /**
- * Verify before uploading, with the same command the agent will use. A
+ * Verify before uploading, against the same signed bytes the agent will use. A
  * manifest that cannot be verified must never reach the bucket -- once it is
  * served, every agent that fetches it rejects the update and there is no way
  * to tell them to look again sooner.
  */
 function verifySignature(manifestPath, signaturePath, publicKeyPath) {
-  run('openssl', [
-    'pkeyutl', '-verify', '-rawin', '-pubin',
-    '-inkey', publicKeyPath,
-    '-sigfile', signaturePath,
-    '-in', manifestPath,
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  verifyDetached(fs.readFileSync(manifestPath), fs.readFileSync(signaturePath), publicKeyPath);
 }
 
 function upload(config, file, key, cacheControl, contentType, runCommand = run) {
@@ -550,6 +539,7 @@ module.exports = {
   awsEnvironment,
   storePackage,
   verifyPackagesServed,
+  verifySignature,
   releaseTag,
   MANIFEST_SCHEMA_VERSION,
 };
