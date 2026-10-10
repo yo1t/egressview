@@ -22,6 +22,11 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
     /// and absence means no: such a Hub drops the second report as a
     /// duplicate.
     public let observationUpdates: Bool?
+    /// Whether this Hub also completes the stored opening from a closing
+    /// report without byte counts -- its end time and local address, the
+    /// counts left empty (P3-177). Absent, such a report is dropped as a
+    /// duplicate, so it is sent under its own id instead.
+    public let unmeasuredClosings: Bool?
 
     public init(
         schemaVersions: [Int],
@@ -30,7 +35,8 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
         requestsPerMinute: Int? = nil,
         compression: [String]? = nil,
         observationFields: [String]? = nil,
-        observationUpdates: Bool? = nil
+        observationUpdates: Bool? = nil,
+        unmeasuredClosings: Bool? = nil
     ) {
         self.schemaVersions = schemaVersions
         self.maxObservationsPerBatch = maxObservationsPerBatch
@@ -39,6 +45,7 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
         self.compression = compression
         self.observationFields = observationFields
         self.observationUpdates = observationUpdates
+        self.unmeasuredClosings = unmeasuredClosings
     }
 }
 
@@ -68,6 +75,13 @@ public enum AgentCapabilityNegotiation {
     /// said so: anything less, and the counts are dropped as a duplicate.
     public static func completesObservations(capabilities: AgentHubCapabilities?) -> Bool {
         capabilities?.observationUpdates == true
+    }
+
+    /// Whether a closing report without byte counts may be sent under its
+    /// opening's id (P3-177). Needs both answers: completing at all, and
+    /// completing without counts.
+    public static func completesUnmeasuredClosings(capabilities: AgentHubCapabilities?) -> Bool {
+        completesObservations(capabilities: capabilities) && capabilities?.unmeasuredClosings == true
     }
 
     public static func acceptsRemoteHostname(capabilities: AgentHubCapabilities?) -> Bool {
