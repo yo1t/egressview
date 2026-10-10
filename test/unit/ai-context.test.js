@@ -19,7 +19,7 @@ describe('AI context', () => {
     const dstRows = [
       { dst: '203.0.113.9', dstHost: 'evil.example', cnt: 2 },    // danger
       { dst: '198.51.100.5', dstHost: 'warn.example', cnt: 8 },   // warn
-      { dst: '93.184.216.34', dstHost: 'example.com', cnt: 50 },  // safe
+      { dst: '203.0.113.34', dstHost: 'example.com', cnt: 50 },  // safe
     ];
     const threatIntel = {
       matchThreatIntel(ip) {
@@ -61,7 +61,7 @@ describe('AI context', () => {
     assert.equal(context.threats[1].devices[0].mac, null);
 
     // Top destinations sorted by connections, with IP + hostname.
-    assert.equal(context.topDestinations[0].ip, '93.184.216.34');
+    assert.equal(context.topDestinations[0].ip, '203.0.113.34');
     assert.equal(context.topDestinations[0].connections, 50);
     assert.deepEqual(context.topServices, [{ port: 443, protocol: 'tcp', connections: 50 }]);
 
