@@ -1537,7 +1537,7 @@ try
         foreach (var inside in new[] { "127.0.0.1", "127.53.1.9", "::1", "0:0:0:0:0:0:0:1" })
             Assert(DestinationScope.IsLoopback(inside), $"{inside} never left this PC");
         // The line is the network card, not the router. These do leave.
-        foreach (var outside in new[] { "192.168.1.1", "10.0.0.5", "224.0.0.251", "ff02::fb", "169.254.1.1", "93.184.216.34" })
+        foreach (var outside in new[] { "192.168.1.1", "10.0.0.5", "224.0.0.251", "ff02::fb", "169.254.1.1", "203.0.113.34" })
             Assert(!DestinationScope.IsLoopback(outside), $"{outside} left this PC, however far it got");
         Assert(!DestinationScope.IsLoopback(null) && !DestinationScope.IsLoopback("")
                && !DestinationScope.IsLoopback("not-an-address"),
@@ -1554,7 +1554,7 @@ try
         using var scopeStore = new ObservationStore(scopeDatabase);
         var scopeAt = DateTimeOffset.UtcNow.AddMinutes(-5);
         scopeStore.WriteBatch([
-            new NetworkObservation(scopeAt, 10, "TCP", "10.1.1.1", 4000, "93.184.216.34", 443, 100, 100,
+            new NetworkObservation(scopeAt, 10, "TCP", "10.1.1.1", 4000, "203.0.113.34", 443, 100, 100,
                 ObservationLayer.Logical, null, "etw", "outward"),
             new NetworkObservation(scopeAt, 10, "TCP", "10.1.1.1", 4001, "192.168.1.9", 445, 100, 100,
                 ObservationLayer.Logical, null, "etw", "outward"),
@@ -1582,7 +1582,7 @@ try
 
         var namedAt = scopeAt.AddSeconds(1);
         scopeStore.WriteBatch([
-            new NetworkObservation(namedAt, 12, "TCP", "10.1.1.1", 4010, "93.184.216.34", 443, 10, 10,
+            new NetworkObservation(namedAt, 12, "TCP", "10.1.1.1", 4010, "203.0.113.34", 443, 10, 10,
                 ObservationLayer.Logical, null, "etw", "outward", "example.com"),
             // The address written out again is what the chart falls back to,
             // and it must not be counted as a name. NormalizeDomain is where
@@ -1595,7 +1595,7 @@ try
             // one connection each, counting connections and counting distinct
             // addresses give the same answer, and a mutation that counted the
             // wrong one survived -- it did. Here the two answers are 2 and 1.
-            new NetworkObservation(namedAt, 14, "TCP", "10.1.1.1", 4012, "93.184.216.34", 8443, 10, 10,
+            new NetworkObservation(namedAt, 14, "TCP", "10.1.1.1", 4012, "203.0.113.34", 8443, 10, 10,
                 ObservationLayer.Logical, null, "etw", "outward", "example.com"),
         ]);
         var withNames = scopeStore.ReadPeriodAnalysis(scopeAt.AddMinutes(-1), DateTimeOffset.UtcNow);
@@ -1637,7 +1637,7 @@ try
         var foldedDatabase = Path.Combine(directory, "scope-folded.db");
         using var foldedStore = new ObservationStore(foldedDatabase);
         foldedStore.WriteBatch([
-            new NetworkObservation(foldedHour.AddMinutes(5), 20, "TCP", "10.1.1.1", 5000, "93.184.216.34", 443,
+            new NetworkObservation(foldedHour.AddMinutes(5), 20, "TCP", "10.1.1.1", 5000, "203.0.113.34", 443,
                 100, 100, ObservationLayer.Logical, null, "etw", "outward"),
             new NetworkObservation(foldedHour.AddMinutes(6), 21, "TCP", "127.0.0.1", 5001, "127.0.0.1", 9000,
                 500, 500, ObservationLayer.Logical, null, "etw", "inward"),
@@ -1711,7 +1711,7 @@ try
         var tcp = carried.Where(flow => flow.Protocol == "TCP").ToArray();
         var udp = carried.Where(flow => flow.Protocol == "UDP").ToArray();
         Assert(tcp.Length == 2 && tcp.All(flow => flow.LocalAddress == "10.1.1.1" && flow.LocalPort == 50000
-                                                  && flow.RemoteAddress == "93.184.216.34" && flow.ProcessId == 4242),
+                                                  && flow.RemoteAddress == "203.0.113.34" && flow.ProcessId == 4242),
             "a rebuilt TCP flow keeps the local end, the remote end and the process it belonged to");
         Assert(udp.Length == 2 && udp.Select(flow => flow.RemoteAddress).Distinct().Count() == 2,
             "and one UDP socket keeps both of the peers it spoke to, which only the observation rows know");

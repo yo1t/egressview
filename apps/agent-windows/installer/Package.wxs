@@ -150,6 +150,22 @@
       </Files>
     </ComponentGroup>
 
+    <!-- The window registers its own sign-in task (StartupTask.Name) as the
+         user who runs it, so nothing the installer laid down removes it. An
+         uninstall from Installed apps, without preparing it from the window
+         first, left the task behind to start an executable that no longer
+         exists at every sign-in. Deleted here, as SYSTEM, on a full uninstall
+         only: an upgrade keeps the same executable path and the same task.
+         Ignored if there is none - a user who turned the setting off, or a
+         PC that fell back to the Run value. -->
+    <CustomAction Id="RemoveSignInTask" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[System64Folder]schtasks.exe&quot; /Delete /TN &quot;EgressView Agent UI&quot; /F"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveSignInTask" Before="RemoveFiles"
+              Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
     <Feature Id="Complete" Title="EgressView Agent" Level="1">
       <ComponentRef Id="ServiceExecutable" />
       <ComponentRef Id="ServiceDataFolder" />
