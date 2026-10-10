@@ -945,7 +945,7 @@ describe('queryByTimeRangePaged / countByTimeRange: filter options', () => {
   it('filters by dst (contains)', () => {
     insertWithFields({ dst: '8.8.8.8',    dstHost: 'dns.google',   dport: 53 });
     insertWithFields({ dst: '1.1.1.1',    dstHost: 'one.one.one.one', dport: 53 });
-    insertWithFields({ dst: '93.184.216.34', dstHost: 'example.com', dport: 80 });
+    insertWithFields({ dst: '203.0.113.34', dstHost: 'example.com', dport: 80 });
 
     const results = history.queryByTimeRangePaged(null, null, 10, 0, {
       filters: { dst: { mode: 'contains', value: 'google' } },

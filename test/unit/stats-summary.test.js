@@ -69,7 +69,7 @@ describe('statsTargetRows', () => {
 
   it('byDst falls back to dstHost then dst for label', () => {
     const rows = statsTargetRows({
-      byDst: [{ dstHost: 'example.com', dst: '93.184.216.34', count: 2 }],
+      byDst: [{ dstHost: 'example.com', dst: '203.0.113.34', count: 2 }],
     });
     assert.equal(rows[0].key, 'example.com');
   });

@@ -187,7 +187,7 @@ describe('whitelistDomains option', () => {
   function regularEvents(dstHost, n = 6) {
     const T0 = 1_700_000_000_000;
     return Array.from({ length: n }, (_, i) => ({
-      src: '192.168.1.5', dst: '93.184.216.34', dstHost,
+      src: '192.168.1.5', dst: '203.0.113.34', dstHost,
       dport: 443, proto: 'tcp', seenAt: T0 + i * 300_000,
     }));
   }
