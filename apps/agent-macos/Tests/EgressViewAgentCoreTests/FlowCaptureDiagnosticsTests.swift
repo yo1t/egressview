@@ -44,6 +44,21 @@ final class FlowCaptureDiagnosticsTests: XCTestCase {
         XCTAssertEqual(restored.unresolvedClosesInbound, 2)
         XCTAssertEqual(restored.unresolvedClosesMissingLocalEndpoint, 1)
         XCTAssertEqual(restored.unresolvedClosesMissingRemoteEndpoint, 1)
+        XCTAssertEqual(restored.unresolvedOutboundClosesWithBytes, 0)
+    }
+
+    /// P3-181: an outbound close that could not be recorded is either an
+    /// attempt that never got through or traffic that went missing.
+    func testUnresolvedOutboundClosesCountThoseThatCarriedBytes() throws {
+        var counters = FlowCaptureDiagnostics(startedAt: Date(timeIntervalSince1970: 1))
+        counters.record(.unresolvedCloseMissingLocalEndpoint)
+        counters.record(.unresolvedCloseMissingLocalEndpoint)
+        counters.record(.unresolvedOutboundCloseWithBytes)
+        let restored = try FullMonitoringXPC.decoder().decode(
+            FlowCaptureDiagnostics.self, from: FullMonitoringXPC.encoder().encode(counters)
+        )
+        XCTAssertEqual(restored.unresolvedClosesMissingLocalEndpoint, 2)
+        XCTAssertEqual(restored.unresolvedOutboundClosesWithBytes, 1)
     }
 
     func testHostCountsDistinguishReceiptFromPersistence() {

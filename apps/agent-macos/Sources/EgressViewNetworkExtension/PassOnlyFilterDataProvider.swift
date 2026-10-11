@@ -293,6 +293,13 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
                 case .missingRemoteEndpoint: didRecordFlowCapture(.unresolvedCloseMissingRemoteEndpoint)
                 case .success, .unsupportedProtocol: break
                 }
+                // Whether the outbound flow that went unrecorded carried any
+                // traffic, or was an attempt that never got through (P3-181).
+                switch described {
+                case .missingLocalEndpoint, .missingRemoteEndpoint:
+                    if !reportedZero { didRecordFlowCapture(.unresolvedOutboundCloseWithBytes) }
+                case .success, .nonOutbound, .unsupportedProtocol: break
+                }
             }
         }
         if kind == .flowClosed {
