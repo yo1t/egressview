@@ -184,6 +184,29 @@ try
         EtwConnectionEvents.Classify("TcpDatasent") == EtwConnectionEventKind.Other,
         "ETW connection lifecycle event counters distinguish starts and endings from data events");
 
+    {
+        // P3-108: each connection followed from its start to its end.
+        var audit = new ConnectionEndAudit();
+        var t0 = new DateTimeOffset(2026, 10, 11, 0, 0, 0, TimeSpan.Zero);
+        audit.Started("192.0.2.10", 50000, "198.51.100.7", 443, t0);
+        audit.Started("192.0.2.10", 50001, "198.51.100.7", 443, t0);
+        audit.Started("192.0.2.10", 50002, "198.51.100.8", 443, t0);
+        audit.Started("127.0.0.1", 50003, "127.0.0.1", 8080, t0);
+        Assert(audit.Opened == 3, "loopback connections are not followed");
+        audit.Ended("198.51.100.7", 443, "192.0.2.10", 50000);
+        Assert(audit.EndedMatched == 1, "an end matches its start whichever end the event names as the source");
+        audit.Ended("192.0.2.10", 49999, "198.51.100.7", 443);
+        Assert(audit.EndedWithoutStart == 1, "an end without a seen start is counted apart from matched ends");
+        var stillInTable = new[] { (new IPEndPoint(IPAddress.Parse("192.0.2.10"), 50001), new IPEndPoint(IPAddress.Parse("::ffff:198.51.100.7"), 443)) };
+        audit.Reconcile(stillInTable, t0.AddSeconds(10));
+        Assert(audit.MissedEnds == 0 && audit.StillOpen == 2, "a connection inside the grace period is not judged");
+        audit.Reconcile(stillInTable, t0.AddMinutes(1));
+        Assert(audit.MissedEnds == 1 && audit.StillOpen == 1,
+            "a connection gone from the system table with no end reported is a missed end; one still in it is left open");
+        Assert(ConnectionEndAudit.Key("fe80::1%12", 1, "2001:db8::1", 2) == ConnectionEndAudit.Key("fe80::1", 1, "2001:db8::1", 2),
+            "a scope id does not make the same connection look like two");
+    }
+
     using (var ipcLoopStop = new CancellationTokenSource())
     {
         var attempts = 0;

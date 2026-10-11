@@ -91,6 +91,8 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private Task? processing;
     private long eventsSeen, eventsIgnored, interfaceUnresolved, inboundMulticastIgnored;
     private long connectionAttempted, connectionAccepted, connectionDisconnected, connectionClosed;
+    private readonly ConnectionEndAudit connectionEnds = new();
+    private DateTimeOffset lastConnectionReconcile = DateTimeOffset.MinValue;
     private string? error;
     private string? processNameSourceError;
     private string? hostnameSourceError;
@@ -270,6 +272,13 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         EtwConnectionAccepted = ConnectionAccepted,
         EtwConnectionDisconnected = ConnectionDisconnected,
         EtwConnectionClosed = ConnectionClosed,
+        ConnectionsFollowed = connectionEnds.Opened,
+        ConnectionEndsMatched = connectionEnds.EndedMatched,
+        ConnectionEndsWithoutStart = connectionEnds.EndedWithoutStart,
+        ConnectionEndsMissed = connectionEnds.MissedEnds,
+        ConnectionsStillOpen = connectionEnds.StillOpen,
+        ConnectionsNotFollowed = connectionEnds.Overflow,
+        ConnectionTableChecks = connectionEnds.Reconciliations,
         EventsFolded = coalescer.Folded,
         ObservationsEmitted = coalescer.Emitted,
         CoalescerOverflows = coalescer.Overflows,
@@ -403,9 +412,9 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         {
             switch (EtwConnectionEvents.Classify(e.EventName))
             {
-                case EtwConnectionEventKind.Attempted: Interlocked.Increment(ref connectionAttempted); break;
-                case EtwConnectionEventKind.Accepted: Interlocked.Increment(ref connectionAccepted); break;
-                case EtwConnectionEventKind.Disconnect: Interlocked.Increment(ref connectionDisconnected); break;
+                case EtwConnectionEventKind.Attempted: Interlocked.Increment(ref connectionAttempted); FollowConnection(e, started: true); break;
+                case EtwConnectionEventKind.Accepted: Interlocked.Increment(ref connectionAccepted); FollowConnection(e, started: true); break;
+                case EtwConnectionEventKind.Disconnect: Interlocked.Increment(ref connectionDisconnected); FollowConnection(e, started: false); break;
                 case EtwConnectionEventKind.Close: Interlocked.Increment(ref connectionClosed); break;
             }
             Interlocked.Increment(ref eventsIgnored);
@@ -458,6 +467,26 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         // hundred against millions, and folding a row whose bucket has already
         // been emitted would be work for no reduction.
         Submit(coalescer.Add(observation));
+    }
+
+    private void FollowConnection(TraceEvent e, bool started)
+    {
+        var source = Address(Raw(e, "saddr"));
+        var destination = Address(Raw(e, "daddr"));
+        var sourcePort = Port(Raw(e, "sport"));
+        var destinationPort = Port(Raw(e, "dport"));
+        if (started) connectionEnds.Started(source, sourcePort, destination, destinationPort, At(e));
+        else connectionEnds.Ended(source, sourcePort, destination, destinationPort);
+    }
+
+    /// Compares the followed connections with the system's TCP table, at
+    /// most once a minute however often it is asked.
+    public void ReconcileConnectionEnds(DateTimeOffset now)
+    {
+        if (now - lastConnectionReconcile < TimeSpan.FromMinutes(1)) return;
+        lastConnectionReconcile = now;
+        try { connectionEnds.Reconcile(ConnectionEndAudit.SystemTable(), now); }
+        catch (NetworkInformationException) { }
     }
 
     private static bool IsVpnTransport(string? processName, InterfaceInfo? localInterface)
