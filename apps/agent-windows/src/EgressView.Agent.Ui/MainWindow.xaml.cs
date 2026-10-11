@@ -2847,9 +2847,9 @@ public sealed class FlowRow(RecentFlow value, bool spansTime = true, DateTimeOff
 {
     /// How recently data must have flowed for a row to be called active.
     ///
-    /// The collector watches data, not connections: it handles Datasent and
-    /// Datareceived and drops Connect and Disconnect. So nothing here knows
-    /// that a connection is open -- only that something crossed it lately.
+    /// The mark is about data, not about the connection being open: a TCP
+    /// row that has an end says so in its own column (P3-108), and a UDP row
+    /// has no end to say. So this says only that something crossed it lately.
     ///
     /// Derived from how often the log is read, not written as a number.
     /// Between two reads the screen cannot learn anything new, so a window
@@ -2863,11 +2863,15 @@ public sealed class FlowRow(RecentFlow value, bool spansTime = true, DateTimeOff
     public string FirstSeenText => value.FirstSeen.LocalDateTime.ToString("G", CultureInfo.CurrentCulture);
     public DateTimeOffset LastSeen => value.LastSeen;
     public string LastSeenText => value.LastSeen.LocalDateTime.ToString("G", CultureInfo.CurrentCulture);
+    /// When the TCP connection closed. Empty when there is no end to show:
+    /// UDP, a single observation, or an end Windows did not report.
+    public string EndedText => value.EndedAt?.LocalDateTime.ToString("G", CultureInfo.CurrentCulture) ?? string.Empty;
+    public DateTimeOffset EndedSort => value.EndedAt ?? DateTimeOffset.MinValue;
 
     /// Empty rather than a second word for finished flows: a column where
     /// most rows say nothing reads as a flag, and one where every row says
     /// something reads as noise.
-    public string StateText { get; } = spansTime && readAt - value.LastSeen <= ActiveWindow
+    public string StateText { get; } = spansTime && value.EndedAt is null && readAt - value.LastSeen <= ActiveWindow
         ? LocalizationManager.Text("StillActive")
         : string.Empty;
 

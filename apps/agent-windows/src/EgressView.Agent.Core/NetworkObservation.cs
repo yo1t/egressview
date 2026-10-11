@@ -59,7 +59,11 @@ public sealed record RecentFlow(
     string Origin,
     string? RemoteHostname = null,
     string? CountryCode = null,
-    string? ProcessInstanceId = null);
+    string? ProcessInstanceId = null,
+    // When the TCP connection closed, if Windows said so (P3-108). Null for
+    // UDP, for a single observation, and for a connection whose end did not
+    // arrive.
+    DateTimeOffset? EndedAt = null);
 
 public enum RunComponent { Service, Ui }
 
@@ -289,6 +293,11 @@ public sealed record CollectorSnapshot(
     int ConnectionsStillOpen = 0,
     long ConnectionsNotFollowed = 0,
     long ConnectionTableChecks = 0,
+    // Ends written onto their rows, and ends that found no row within a
+    // minute and were given up on.
+    long ConnectionEndsRecorded = 0,
+    long ConnectionEndsDropped = 0,
+    int ConnectionEndsWaiting = 0,
     // How many packet events were summed into a row that already existed, and
     // how many rows that produced. The ratio between them is what says the
     // store is being asked for something it can keep up with; before the

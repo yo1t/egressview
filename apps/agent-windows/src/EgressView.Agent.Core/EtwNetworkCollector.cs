@@ -92,6 +92,9 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private long eventsSeen, eventsIgnored, interfaceUnresolved, inboundMulticastIgnored;
     private long connectionAttempted, connectionAccepted, connectionDisconnected, connectionClosed;
     private readonly ConnectionEndAudit connectionEnds = new();
+    /// Ends waiting to be written onto their rows (P3-108). The service
+    /// applies them from its heartbeat, against the store.
+    public ConnectionEndQueue ConnectionEndsToRecord { get; } = new();
     private DateTimeOffset lastConnectionReconcile = DateTimeOffset.MinValue;
     private string? error;
     private string? processNameSourceError;
@@ -279,6 +282,9 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         ConnectionsStillOpen = connectionEnds.StillOpen,
         ConnectionsNotFollowed = connectionEnds.Overflow,
         ConnectionTableChecks = connectionEnds.Reconciliations,
+        ConnectionEndsRecorded = ConnectionEndsToRecord.Recorded,
+        ConnectionEndsDropped = ConnectionEndsToRecord.Dropped,
+        ConnectionEndsWaiting = ConnectionEndsToRecord.Waiting,
         EventsFolded = coalescer.Folded,
         ObservationsEmitted = coalescer.Emitted,
         CoalescerOverflows = coalescer.Overflows,
@@ -476,7 +482,12 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         var sourcePort = Port(Raw(e, "sport"));
         var destinationPort = Port(Raw(e, "dport"));
         if (started) connectionEnds.Started(source, sourcePort, destination, destinationPort, At(e));
-        else connectionEnds.Ended(source, sourcePort, destination, destinationPort);
+        else
+        {
+            connectionEnds.Ended(source, sourcePort, destination, destinationPort);
+            if (source is not null && destination is not null)
+                ConnectionEndsToRecord.Add(new ConnectionEnd(source, sourcePort, destination, destinationPort, At(e)));
+        }
     }
 
     /// Compares the followed connections with the system's TCP table, at
