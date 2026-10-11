@@ -25,7 +25,9 @@ describe('isAllowedRouterIp', () => {
 
 // ─── isAllowedLogPath ─────────────────────────────────────────────────────────
 
-describe('isAllowedLogPath', () => {
+// Router logs are read on Linux and macOS only. On Windows path.normalize turns
+// every separator into a backslash, so no path matches a prefix: it fails closed.
+describe('isAllowedLogPath', { skip: process.platform === 'win32' }, () => {
   afterEach(() => { delete process.env.EGRESSVIEW_LOG_PATH_PREFIXES; });
 
   it('accepts /var/log/ paths', () =>
