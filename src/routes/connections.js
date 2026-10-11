@@ -550,7 +550,7 @@ function connectionsRoutes(ctx) {
     res.json({ ...summary, serverTime: Date.now(), cached });
   });
 
-  router.get('/connections/new-nodes', requireAdmin, (req, res) => {
+  router.get('/connections/new-nodes', requireAdmin, async (req, res) => {
     const parsed = parseRequest(timeQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const { from: fromRaw, to: toRaw } = parsed.data;
@@ -558,7 +558,9 @@ function connectionsRoutes(ctx) {
     if (e1) return;
     const { ts: to, err: e2 } = parseTimestampParam(toRaw, 'to', res);
     if (e2) return;
-    res.json({ ...history.queryNewNodes(from, to), serverTime: Date.now() });
+    // Two whole-table groupings, 1.7-2.1 s measured on production: read on the
+    // read thread so the Hub keeps answering meanwhile (P3-190).
+    res.json({ ...await reader.read('queryNewNodes', from, to), serverTime: Date.now() });
   });
 
   router.get('/connections/threat-connections', requireAdmin, async (req, res) => {

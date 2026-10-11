@@ -298,6 +298,10 @@ describe('読み取り用スレッド', () => {
         history.groupSrcByTimeRange(from, null, 30, {}));
       assert.deepEqual(await reader.read('groupAgentOnlyDstByTimeRange', from, null),
         history.groupAgentOnlyDstByTimeRange(from, null));
+      // Every destination was first seen within the last half hour.
+      const newNodes = await reader.read('queryNewNodes', now - 60 * 60_000, now);
+      assert.deepEqual(newNodes, history.queryNewNodes(now - 60 * 60_000, now));
+      assert.ok(newNodes.newDestinations.length > 0);
       assert.ok((await reader.read('groupServiceByTimeRange', from, null, {})).length > 0);
       const routerScope = { sourceKind: 'router', sourceId: 'yamaha1' };
       assert.deepEqual(await reader.read('listSourceDeviceKeys', routerScope),

@@ -64,6 +64,8 @@ const HISTORY_READS = new Set([
   'groupSrcForDstsByTimeRange',
   'groupSrcByTimeRange',
   'groupAgentOnlyDstByTimeRange',
+  // The MCP's new-nodes list, which groups the whole connection table.
+  'queryNewNodes',
   'listSourceDeviceKeys',
   'attachAgentAttributions',
   'queryNotificationLog',
