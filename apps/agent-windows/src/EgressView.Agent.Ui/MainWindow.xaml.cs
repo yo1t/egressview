@@ -228,12 +228,24 @@ public partial class MainWindow : Window
 
     private Task RefreshShownTabAsync() => MainTabs.SelectedIndex switch
     {
-        0 => RefreshNetworkAsync(),
+        0 => RefreshNetworkAndDeliveryAsync(),
         1 => RefreshInsightsAsync(),
         2 => RefreshFlowsAsync(),
         3 => DateTimeOffset.UtcNow - threatReadAt >= EnrichmentRefreshInterval ? RefreshThreatsAsync() : Task.CompletedTask,
         _ => RefreshStatusAsync(),
     };
+
+    /// The summary on this tab says when Hub delivery is stuck, and how long
+    /// for, from the delivery status. That status used to be read only with
+    /// the settings tab or a full refresh, so the sentence kept the queue it
+    /// had once seen: "stuck for 7 hours 53 minutes, 47 waiting" while the Hub
+    /// had acknowledged a batch seconds earlier. Read it with the tab it is
+    /// shown on.
+    private async Task RefreshNetworkAndDeliveryAsync()
+    {
+        await RefreshDeliveryStatusAsync();
+        await RefreshNetworkAsync();
+    }
 
     private async Task RefreshNetworkAsync()
     {
@@ -958,6 +970,8 @@ public partial class MainWindow : Window
             HubDeliveryTarget.Text = enrolled && data.TryGetProperty("hub", out var hub) && hub.ValueKind == JsonValueKind.String
                 ? hub.GetString() ?? LocalizationManager.Text("NotEnrolled") : LocalizationManager.Text("NotEnrolled");
             HubDeliveryState.Text = DeliveryStateText(state);
+            ShowEnrollment(enrolled, enrolled && data.TryGetProperty("hub", out var enrolledHub) && enrolledHub.ValueKind == JsonValueKind.String
+                ? enrolledHub.GetString() : null);
             var pending = data.GetProperty("pending").GetInt64();
             deliveryPending = pending;
             deliveryOldestPendingAt = data.TryGetProperty("oldestPendingAt", out var oldestPending)
@@ -984,6 +998,20 @@ public partial class MainWindow : Window
             HubDeliveryState.Text = LocalizationManager.Text("CannotConnect");
             SendNowButton.IsEnabled = false;
         }
+    }
+
+    /// The enrollment box said "Not enrolled" on a PC that was enrolled and
+    /// delivering, because only the enrollment steps ever wrote to it. It now
+    /// follows the Service's answer, but leaves alone a message one of those
+    /// steps has just written.
+    private void ShowEnrollment(bool enrolled, string? hub)
+    {
+        var current = EnrollmentStatus.Text;
+        var enrolledPrefix = LocalizationManager.Text("EnrolledHubFormat").Split("{0}")[0];
+        if (current != LocalizationManager.Text("NotEnrolled") && !current.StartsWith(enrolledPrefix, StringComparison.Ordinal)) return;
+        EnrollmentStatus.Text = enrolled && hub is not null
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("EnrolledHubFormat"), hub)
+            : LocalizationManager.Text("NotEnrolled");
     }
 
     private static string DateText(JsonElement data, string property)
