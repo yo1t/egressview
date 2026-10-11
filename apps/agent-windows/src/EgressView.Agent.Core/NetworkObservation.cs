@@ -279,6 +279,16 @@ public sealed record CollectorSnapshot(
     long EtwConnectionAccepted = 0,
     long EtwConnectionDisconnected = 0,
     long EtwConnectionClosed = 0,
+    // Each TCP connection followed from its start to its end (P3-108):
+    // whether Windows reports the end of every connection it reported the
+    // start of. Loopback is left out.
+    long ConnectionsFollowed = 0,
+    long ConnectionEndsMatched = 0,
+    long ConnectionEndsWithoutStart = 0,
+    long ConnectionEndsMissed = 0,
+    int ConnectionsStillOpen = 0,
+    long ConnectionsNotFollowed = 0,
+    long ConnectionTableChecks = 0,
     // How many packet events were summed into a row that already existed, and
     // how many rows that produced. The ratio between them is what says the
     // store is being asked for something it can keep up with; before the

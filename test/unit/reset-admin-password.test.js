@@ -37,6 +37,7 @@ describe('TTY administrator recovery', () => {
     reopened.close();
     assert.equal(authPassword.verifyPassword(result.password, config.auth.password), true);
     assert.notEqual(config.adminToken, 'old-token');
-    assert.equal((fs.statSync(configPath).mode & 0o777), 0o600);
+    // Windows has no POSIX permission bits to set: every file reports 0666 there.
+    if (process.platform !== 'win32') assert.equal((fs.statSync(configPath).mode & 0o777), 0o600);
   });
 });

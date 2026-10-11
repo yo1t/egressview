@@ -77,7 +77,8 @@ describe('offline atomic installation', () => {
     assert.throws(() => assertNodeRequirement('^22', '22.1.0'), /Unsupported Node\.js requirement/);
   });
 
-  it('installs, upgrades, and rolls back without touching external data', () => withTemp((root) => {
+  // 切り替えはシンボリックリンクを既存のリンクの上へrenameする。Linuxの手順で、Windowsでは許されない。
+  it('installs, upgrades, and rolls back without touching external data', { skip: process.platform === 'win32' }, () => withTemp((root) => {
     const prefix = path.join(root, 'prefix');
     const first = path.join(root, 'first');
     const second = path.join(root, 'second');
@@ -124,7 +125,7 @@ describe('offline atomic installation', () => {
       );
     }));
 
-  it('refuses rollback when a release target is missing', () => withTemp((root) => {
+  it('refuses rollback when a release target is missing', { skip: process.platform === 'win32' }, () => withTemp((root) => {
     const prefix = path.join(root, 'prefix');
     const first = path.join(root, 'first');
     const second = path.join(root, 'second');

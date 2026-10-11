@@ -68,7 +68,8 @@ function verify(publicKey, signature, message) {
   verifyDetached(fs.readFileSync(message), fs.readFileSync(signature), publicKey);
 }
 
-describe('offline bundle: KMS 署名', () => {
+// オフライン配布物はLinux向けで、作成はnpmとUnixのtarを前提にする。Windowsでは作れない。
+describe('offline bundle: KMS 署名', { skip: process.platform === 'win32' }, () => {
   // Building the bundle packs a ~10 MB tarball, so do it once and assert the
   // separate properties against that one artifact. Rebuilding per case added
   // about 14 s to a suite that otherwise runs in ~3 s.
