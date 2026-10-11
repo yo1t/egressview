@@ -386,3 +386,98 @@ describe('a package must be stored and served before the release counts', () => 
     assert.equal(calls, 3);
   });
 });
+
+describe('a version already published with other bytes is not published again', () => {
+  const { assertNotPublishedElsewhere } = require('../../scripts/publish-agent-release');
+  const config = { platform: 'macos', version: '0.5.126', verifyOrigin: 'https://dl.example' };
+  const ours = Buffer.from('our build');
+  const theirs = Buffer.from('their build');
+  const hash = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+  const name = 'egressview-agent-0.5.126.pkg';
+  const manifest = { packages: [{ url: `https://dl.example/macos/${name}`, sha256: hash(ours) }] };
+  const response = (status, body = Buffer.alloc(0)) => ({ ok: status === 200, status, arrayBuffer: async () => body });
+  const notFound = Object.assign(new Error('Command failed: gh release view'), { stderr: 'release not found\n' });
+  const cask = (version, digest) => `cask "egressview-agent" do\n  version "${version}"\n  sha256 "${digest}"\nend\n`;
+
+  function world({ servedManifest = null, servedPackage = null, release = null, caskText = cask('0.5.125', hash(theirs)) } = {}) {
+    return {
+      log: () => {},
+      fetch: async (url) => {
+        if (url.endsWith('/manifest.json')) {
+          return servedManifest ? response(200, Buffer.from(JSON.stringify(servedManifest))) : response(404);
+        }
+        return servedPackage ? response(200, servedPackage) : response(403);
+      },
+      run: (command, args) => {
+        assert.equal(command, 'gh');
+        if (args[0] === 'release') {
+          if (!release) throw notFound;
+          return JSON.stringify(release);
+        }
+        return caskText;
+      },
+    };
+  }
+
+  it('どこにも出ていない版は通す', async () => {
+    await assertNotPublishedElsewhere(config, manifest, world());
+  });
+
+  it('同じ中身の再実行は通す', async () => {
+    await assertNotPublishedElsewhere(config, manifest, world({
+      servedManifest: { version: '0.5.126', packages: manifest.packages },
+      servedPackage: ours,
+      release: { assets: [{ name, digest: `sha256:${hash(ours)}` }] },
+      caskText: cask('0.5.126', hash(ours)),
+    }));
+  });
+
+  it('配布サイトのmanifestが同じ版を別のSHA-256で載せていれば止める', async () => {
+    await assert.rejects(assertNotPublishedElsewhere(config, manifest, world({
+      servedManifest: { version: '0.5.126', packages: [{ url: `https://dl.example/macos/${name}`, sha256: hash(theirs) }] },
+    })), /already published with different bytes[\s\S]*manifest\.json names/);
+  });
+
+  it('同じ名前のパッケージが別の中身で配信されていれば止める', async () => {
+    await assert.rejects(assertNotPublishedElsewhere(config, manifest, world({ servedPackage: theirs })),
+      /is already served with SHA-256/);
+  });
+
+  it('同じタグのGitHub Releaseに別の中身があれば止める（0.5.126の事故）', async () => {
+    await assert.rejects(assertNotPublishedElsewhere(config, manifest, world({
+      release: { assets: [{ name, digest: `sha256:${hash(theirs)}` }] },
+    })), /GitHub Release agent-macos\/v0\.5\.126 has/);
+  });
+
+  it('caskが同じ版を別のSHA-256で載せていれば止める', async () => {
+    await assert.rejects(assertNotPublishedElsewhere(config, manifest, world({ caskText: cask('0.5.126', hash(theirs)) })),
+      /Homebrew cask already names 0\.5\.126/);
+  });
+
+  it('確かめられなければ「出ていない」と見なさない', async () => {
+    const io = world();
+    io.run = () => { throw Object.assign(new Error('Command failed'), { stderr: 'HTTP 401: Bad credentials\n' }); };
+    await assert.rejects(assertNotPublishedElsewhere(config, manifest, io), /could not check[\s\S]*Bad credentials/);
+    const offline = world();
+    offline.fetch = async () => { throw new Error('fetch failed'); };
+    await assert.rejects(assertNotPublishedElsewhere(config, manifest, offline), /could not check[\s\S]*fetch failed/);
+  });
+
+  it('Windowsではcaskを見ない', async () => {
+    const windows = { ...config, platform: 'windows', version: '0.1.148' };
+    const msi = 'EgressView-Agent-Windows-0.1.148-x64.msi';
+    const io = world();
+    const asked = [];
+    const inner = io.run;
+    io.run = (command, args) => { asked.push(args[0]); return inner(command, args); };
+    await assertNotPublishedElsewhere(windows, { packages: [{ url: `https://dl.example/windows/${msi}`, sha256: hash(ours) }] }, io);
+    assert.deepEqual(asked, ['release']);
+  });
+
+  it('署名とアップロードより前に確かめる', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', 'publish-agent-release.js'), 'utf8');
+    const body = source.slice(source.indexOf('async function publish('));
+    const guard = body.indexOf('await assertNotPublishedElsewhere(config, manifest, io);');
+    assert.ok(guard > 0 && guard < body.indexOf('signManifest(config'));
+  });
+});

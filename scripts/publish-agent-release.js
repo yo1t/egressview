@@ -446,6 +446,133 @@ async function verifyPublished(config, manifestBytes, io = {}) {
   throw new Error(`${url} did not converge on the published manifest: ${last}`);
 }
 
+const GITHUB_REPOSITORY = 'yo1t/egressview';
+const HOMEBREW_TAP = 'yo1t/homebrew-egressview';
+const HOMEBREW_CASK = 'Casks/egressview-agent.rb';
+
+function commandError(error) {
+  return String(error.stderr || error.message || error);
+}
+
+/**
+ * Refuse to publish a version that is already out with different bytes.
+ *
+ * On 2026-10-10 two sessions built macOS 0.5.126 separately. One published the
+ * GitHub Release and the Homebrew cask; the other, three hours later, replaced
+ * the manifest and the package on dl.egressview.com without looking. Both
+ * builds were good, but they were not the same bytes, and for two hours
+ * `brew install` failed its checksum because the cask named one build and the
+ * CDN served the other.
+ *
+ * A version number names one set of bytes. Before anything is signed or
+ * uploaded, every place that version may already have been published is
+ * read: the manifest agents poll, the package URL itself (served with a
+ * one-year immutable cache, so overwriting it does not even reach everyone),
+ * the GitHub Release for the tag and, on macOS, the cask. A place that names
+ * this version with the same SHA-256 is a re-run of the same release and
+ * passes. A different SHA-256 stops the release: publish a new version
+ * instead. A place that cannot be read stops it too, because "could not
+ * check" is not "not published".
+ */
+async function assertNotPublishedElsewhere(config, manifest, io = {}) {
+  const get = io.fetch || fetch;
+  const runCommand = io.run || run;
+  const log = io.log || ((message) => process.stdout.write(`${message}\n`));
+  const ours = new Map(manifest.packages.map((entry) => [path.basename(entry.url), entry.sha256]));
+  const conflicts = [];
+  const unreadable = [];
+  const same = [];
+
+  const manifestUrl = `${config.verifyOrigin}/${config.platform}/manifest.json`;
+  try {
+    const response = await get(manifestUrl, { cache: 'no-store' });
+    if (response.ok) {
+      const served = JSON.parse(Buffer.from(await response.arrayBuffer()).toString('utf8'));
+      if (served.version === config.version) {
+        for (const entry of served.packages || []) {
+          const name = path.basename(entry.url || '');
+          const wanted = ours.get(name);
+          if (wanted === undefined) continue;
+          if (entry.sha256 !== wanted) conflicts.push(`${manifestUrl} names ${name} with SHA-256 ${entry.sha256}`);
+          else same.push(manifestUrl);
+        }
+      }
+    } else if (response.status !== 403 && response.status !== 404) {
+      unreadable.push(`${manifestUrl}: HTTP ${response.status}`);
+    }
+  } catch (error) {
+    unreadable.push(`${manifestUrl}: ${error.message}`);
+  }
+
+  for (const [name, wanted] of ours) {
+    const url = `${config.verifyOrigin}/${config.platform}/${name}`;
+    try {
+      const response = await get(url, { cache: 'no-store' });
+      if (response.ok) {
+        const digest = crypto.createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex');
+        if (digest !== wanted) conflicts.push(`${url} is already served with SHA-256 ${digest}`);
+        else same.push(url);
+      } else if (response.status !== 403 && response.status !== 404) {
+        unreadable.push(`${url}: HTTP ${response.status}`);
+      }
+    } catch (error) {
+      unreadable.push(`${url}: ${error.message}`);
+    }
+  }
+
+  const tag = releaseTag(config.platform, config.version);
+  try {
+    const release = JSON.parse(runCommand('gh', [
+      'release', 'view', tag, '--repo', GITHUB_REPOSITORY, '--json', 'assets',
+    ]));
+    for (const asset of release.assets || []) {
+      const wanted = ours.get(asset.name);
+      if (wanted === undefined) continue;
+      if (asset.digest !== `sha256:${wanted}`) {
+        conflicts.push(`GitHub Release ${tag} has ${asset.name} with ${asset.digest || 'no digest'}`);
+      } else {
+        same.push(`GitHub Release ${tag}`);
+      }
+    }
+  } catch (error) {
+    const said = commandError(error);
+    if (!/release not found/i.test(said)) unreadable.push(`GitHub Release ${tag}: ${said.trim().split('\n').pop()}`);
+  }
+
+  if (config.platform === 'macos') {
+    try {
+      const cask = String(runCommand('gh', [
+        'api', `repos/${HOMEBREW_TAP}/contents/${HOMEBREW_CASK}`,
+        '-H', 'Accept: application/vnd.github.raw',
+      ]));
+      const version = /^\s*version\s+"([^"]+)"/m.exec(cask)?.[1];
+      const digest = /^\s*sha256\s+"([0-9a-f]{64})"/m.exec(cask)?.[1];
+      if (version === config.version) {
+        if (![...ours.values()].includes(digest)) {
+          conflicts.push(`the Homebrew cask already names ${version} with SHA-256 ${digest || 'none'}`);
+        } else {
+          same.push('the Homebrew cask');
+        }
+      }
+    } catch (error) {
+      unreadable.push(`the Homebrew cask: ${commandError(error).trim().split('\n').pop()}`);
+    }
+  }
+
+  if (conflicts.length) {
+    throw new Error(
+      `Refusing to publish ${config.platform} ${config.version}: it is already published with different bytes.\n`
+      + `  - ${conflicts.join('\n  - ')}\n`
+      + '  Someone else may be releasing this version. Compare the builds, then publish a new version rather than replacing this one.');
+  }
+  if (unreadable.length) {
+    throw new Error(
+      `Refusing to publish ${config.platform} ${config.version}: could not check whether it is already published.\n`
+      + `  - ${unreadable.join('\n  - ')}`);
+  }
+  if (same.length) log(`Already published with the same bytes, continuing: ${[...new Set(same)].join(', ')}`);
+}
+
 async function publish(config, io = {}) {
   const log = io.log || ((message) => process.stdout.write(`${message}\n`));
   // Before anything is built, hashed or signed: a release that is not the
@@ -467,6 +594,10 @@ async function publish(config, io = {}) {
     log(`Dry run: wrote ${manifestPath} (unsigned, not uploaded)`);
     return { manifest, manifestPath, published: false };
   }
+
+  // Before signing: a version that is already out with other bytes must cost
+  // nothing to refuse.
+  await assertNotPublishedElsewhere(config, manifest, io);
 
   signManifest(config, manifestPath, signaturePath);
   const publicKeyPath = publicKeyPem(config, path.join(work, 'release-key.pem'));
@@ -536,6 +667,7 @@ module.exports = {
   serializeManifest,
   assertPublishableTree,
   assertStored,
+  assertNotPublishedElsewhere,
   awsEnvironment,
   storePackage,
   verifyPackagesServed,
