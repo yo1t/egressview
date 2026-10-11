@@ -8,6 +8,8 @@
 // notes, raw per-connection logs, and router or mesh-node management addresses.
 // The consent/privacy UI copy reflects this boundary.
 
+const runtimeProfiler = require('./runtime-profiler');
+
 const MAX_SERVICES = 20;
 const MAX_DESTINATIONS = 15;
 const MAX_THREATS = 40;
@@ -46,9 +48,8 @@ function hostOrNull(dst, dstHost) {
   return host && host !== dst ? host.slice(0, 253) : null;
 }
 
-// Classify grouped destinations into prioritized threats (danger before warn)
-// and attach the source devices that contacted each threat destination.
-function buildThreats({ dstGroups, threatIntel, history, from, to, sourceScope = null }) {
+// Classify grouped destinations into prioritized threats (danger before warn).
+function rankThreats(dstGroups, threatIntel) {
   if (!threatIntel?.matchThreatIntel) return [];
   const threats = [];
   for (const { dst, dstHost, cnt } of dstGroups) {
@@ -67,11 +68,11 @@ function buildThreats({ dstGroups, threatIntel, history, from, to, sourceScope =
   threats.sort((a, b) => (a.level === b.level
     ? b.connections - a.connections
     : (a.level === 'danger' ? -1 : 1)));
-  const top = threats.slice(0, MAX_THREATS);
+  return threats.slice(0, MAX_THREATS);
+}
 
-  const links = typeof history.groupSrcForDstsByTimeRange === 'function'
-    ? history.groupSrcForDstsByTimeRange(from, to, top.map(threat => threat.ip), { sourceScope })
-    : [];
+// Attach the source devices that contacted each threat destination.
+function attachThreatDevices(top, links) {
   const devicesByDst = new Map();
   for (const row of links) {
     const list = devicesByDst.get(row.dst) || [];
@@ -98,10 +99,7 @@ function deviceName(row) {
   );
 }
 
-function buildDeviceInventory({ history, devices, from, to, sourceScope = null }) {
-  const activity = typeof history.groupSrcByTimeRange === 'function'
-    ? history.groupSrcByTimeRange(from, to, MAX_DEVICE_INVENTORY, { sourceScope })
-    : [];
+function deviceInventory({ activity, devices, sourceScope = null }) {
   const known = typeof devices?.getAll === 'function' ? devices.getAll() : [];
   const knownByIp = new Map();
   const knownByMac = new Map();
@@ -233,18 +231,33 @@ function fitContextToByteLimit(context) {
   return context;
 }
 
-function buildAiContext({
-  facts, history, routers = [], from, to, threatIntel = null, devices = null, asus = null, sourceScope = null,
+// The reads a context needs, in the order it needs them. `read(fn, ...args)`
+// is either the history module on this thread or the history reader, which
+// runs them on the read thread (P3-190): the scheduled AI notification built
+// its context on the thread that answers every request, and held it for
+// 0.65-0.71 s every morning at 09:00.
+function contextReads({ read, from, to, threatIntel, sourceScope }) {
+  return {
+    services: () => read('groupServiceByTimeRange', from, to, { sourceScope }),
+    dstGroups: () => read('groupDstByTimeRange', from, to, { sourceScope }),
+    threatLinks: (top) => (top.length
+      ? read('groupSrcForDstsByTimeRange', from, to, top.map(threat => threat.ip), { sourceScope })
+      : []),
+    activity: () => read('groupSrcByTimeRange', from, to, MAX_DEVICE_INVENTORY, { sourceScope }),
+    rank: (dstGroups) => rankThreats(dstGroups, threatIntel),
+  };
+}
+
+function assembleAiContext({
+  facts, routers, devices, asus, sourceScope, services, dstGroups, threats, activity,
 }) {
-  const services = history.groupServiceByTimeRange(from, to, { sourceScope })
+  const topServices = services
     .slice(0, MAX_SERVICES)
     .map(row => ({
       port: Number(row.dport) || 0,
       protocol: String(row.proto || 'unknown').slice(0, 20),
       connections: Number(row.count) || 0,
     }));
-
-  const dstGroups = history.groupDstByTimeRange(from, to, { sourceScope });
   const topDestinations = [...dstGroups]
     .sort((a, b) => (Number(b.cnt) || 0) - (Number(a.cnt) || 0))
     .slice(0, MAX_DESTINATIONS)
@@ -253,9 +266,7 @@ function buildAiContext({
       host: hostOrNull(row.dst, row.dstHost),
       connections: Number(row.cnt) || 0,
     }));
-
-  const threats = buildThreats({ dstGroups, threatIntel, history, from, to, sourceScope });
-  const deviceInventory = buildDeviceInventory({ history, devices, from, to, sourceScope });
+  const deviceInventoryResult = deviceInventory({ activity, devices, sourceScope });
   // ASUS topology has no routerId/agentId provenance, so presenting it in a
   // scoped prompt would mix global devices into the selected source.
   const networkTopology = sourceScope ? null : buildNetworkTopology(asus);
@@ -273,10 +284,10 @@ function buildAiContext({
     },
     current: facts.current,
     previous: facts.previous,
-    topServices: services,
+    topServices,
     topDestinations,
     threats,
-    deviceInventory,
+    deviceInventory: deviceInventoryResult,
     networkTopology,
     limits: {
       deviceInventory: MAX_DEVICE_INVENTORY,
@@ -292,12 +303,51 @@ function buildAiContext({
   });
 }
 
+/**
+ * Build the context on this thread, straight from the history module.
+ * Kept for callers without a reader; the routes and the notifications use
+ * buildAiContextAsync.
+ */
+function buildAiContext({
+  facts, history, routers = [], from, to, threatIntel = null, devices = null, asus = null, sourceScope = null,
+}) {
+  const read = (fn, ...args) => (typeof history[fn] === 'function' ? history[fn](...args) : []);
+  const reads = contextReads({ read, from, to, threatIntel, sourceScope });
+  const dstGroups = reads.dstGroups();
+  const top = reads.rank(dstGroups);
+  return assembleAiContext({
+    facts, routers, devices, asus, sourceScope,
+    services: reads.services(),
+    dstGroups,
+    threats: attachThreatDevices(top, reads.threatLinks(top)),
+    activity: reads.activity(),
+  });
+}
+
+/** The same context, with every query going through `read` (P3-190). */
+async function buildAiContextAsync({
+  facts, read, routers = [], from, to, threatIntel = null, devices = null, asus = null, sourceScope = null,
+}) {
+  const reads = contextReads({ read, from, to, threatIntel, sourceScope });
+  const services = await reads.services();
+  const dstGroups = await reads.dstGroups();
+  const top = runtimeProfiler.measureSync('aiContext.rankThreats', () => reads.rank(dstGroups));
+  const links = await reads.threatLinks(top);
+  const activity = await reads.activity();
+  return runtimeProfiler.measureSync('aiContext.assemble', () => assembleAiContext({
+    facts, routers, devices, asus, sourceScope, services, dstGroups,
+    threats: attachThreatDevices(top, links),
+    activity,
+  }));
+}
+
 // Backwards-compatible alias: the previous name implied anonymization, which no
 // longer holds. Kept so existing imports keep working.
 const buildAnonymousAiContext = buildAiContext;
 
 module.exports = {
   buildAiContext,
+  buildAiContextAsync,
   buildAnonymousAiContext,
   routerKinds,
   MAX_SERVICES,

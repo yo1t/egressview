@@ -185,6 +185,7 @@ const aiNotificationService = createAiNotificationService({
   getLanguage: () => appState.uiLanguage,
   emit: (event, payload) => io.emit(event, payload),
   aiBudget,
+  historyReader,
 });
 
 // ─── Config: load from / save to config file ─────────────────────────────────

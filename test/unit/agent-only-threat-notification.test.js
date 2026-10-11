@@ -112,7 +112,7 @@ describe('通知が両方の出どころを見る', () => {
     const source = fs.readFileSync(
       path.join(__dirname, '..', '..', 'src', 'ai-notification-service.js'), 'utf8'
     );
-    assert.match(source, /history\.groupDstByTimeRange\(from, to\)/);
-    assert.match(source, /groupAgentOnlyDstByTimeRange\?\.\(from, to\)/);
+    assert.match(source, /read\('groupDstByTimeRange', from, to\)/);
+    assert.match(source, /read\('groupAgentOnlyDstByTimeRange', from, to\)/);
   });
 });

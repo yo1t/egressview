@@ -5,7 +5,7 @@ const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
 const { buildAiFactsAsync } = require('../ai-facts');
 const { createHistoryReader, createSharedReader } = require('../history-reader');
-const { buildAiContext } = require('../ai-context');
+const { buildAiContextAsync } = require('../ai-context');
 const { randomUUID } = require('node:crypto');
 const { monthlyRanges, pricingCoverage, pricingMetadata, pricingStatus } = require('../ai-usage');
 const { AI_PRIOR_ANALYSIS_MAX_CHARS } = require('../ai-limits');
@@ -410,7 +410,9 @@ module.exports = function aiRoutes({
       const facts = await readFacts({
         threatIntel, routers, from, to, openEnded: endsAboutNow(parsed.data.to), sourceScope,
       });
-      const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus, sourceScope });
+      const context = await buildAiContextAsync({
+        facts, read: reader.read, routers, from, to, threatIntel, devices, asus, sourceScope,
+      });
       const result = await aiProvider.generateInsight(context, {
         signal: controller.signal,
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,
@@ -521,7 +523,9 @@ module.exports = function aiRoutes({
       const facts = await readFacts({
         threatIntel, routers, from, to, openEnded: endsAboutNow(parsed.data.to), sourceScope,
       });
-      const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus, sourceScope });
+      const context = await buildAiContextAsync({
+        facts, read: reader.read, routers, from, to, threatIntel, devices, asus, sourceScope,
+      });
       const response = await aiProvider.generateInsight(context, {
         signal: controller.signal,
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,

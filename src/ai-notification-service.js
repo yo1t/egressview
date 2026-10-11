@@ -1,9 +1,10 @@
 'use strict';
 
 const { createHash, randomUUID } = require('node:crypto');
-const { buildAiFacts } = require('./ai-facts');
-const { buildAiContext } = require('./ai-context');
+const { buildAiFactsAsync } = require('./ai-facts');
+const { buildAiContextAsync } = require('./ai-context');
 const logger = require('./logger');
+const runtimeProfiler = require('./runtime-profiler');
 
 const CLOUD_PROVIDERS = new Set(['anthropic', 'openai', 'bedrock']);
 const DEFAULT_CONFIG = Object.freeze({
@@ -170,8 +171,15 @@ function createAiNotificationService(deps) {
     aiProvider, history, threatIntel, devices, asus, notifier,
     getRouters, getLanguage = () => 'ja', emit = () => {},
     now = () => Date.now(), setIntervalFn = setInterval, clearIntervalFn = clearInterval,
-    aiBudget,
+    aiBudget, historyReader = null,
   } = deps;
+  // Every query goes through the history reader, so it runs on the read thread
+  // when the server has one. The scheduled notification read a day of history
+  // on the thread that answers every request and held it for 0.65-0.71 s each
+  // morning at 09:00 (P3-190). Without a reader, here, as before.
+  const read = historyReader
+    ? (fn, ...args) => historyReader.read(fn, ...args)
+    : async (fn, ...args) => (typeof history[fn] === 'function' ? history[fn](...args) : []);
   let config = normalizeConfig();
   let timer = null;
   let running = false;
@@ -253,16 +261,18 @@ function createAiNotificationService(deps) {
    * Agent-only rows are matched by address: the Agent keeps destination names
    * on the Mac and never sends one.
    */
-  function threatDestinations(from, to) {
+  async function threatDestinations(from, to) {
     const rows = [
-      ...history.groupDstByTimeRange(from, to),
-      ...(history.groupAgentOnlyDstByTimeRange?.(from, to) || []),
+      ...await read('groupDstByTimeRange', from, to),
+      ...await read('groupAgentOnlyDstByTimeRange', from, to),
     ];
-    const matched = new Set();
-    for (const row of rows) {
-      if (threatIntel?.matchThreatIntel(row.dst, row.dstHost || row.dst)) matched.add(row.dst);
-    }
-    return [...matched].sort();
+    return runtimeProfiler.measureSync('aiNotification.matchThreats', () => {
+      const matched = new Set();
+      for (const row of rows) {
+        if (threatIntel?.matchThreatIntel(row.dst, row.dstHost || row.dst)) matched.add(row.dst);
+      }
+      return [...matched].sort();
+    });
   }
 
   async function run({ triggerType, triggerKey = null, cause = '', consentConfirmed = false } = {}) {
@@ -296,8 +306,8 @@ function createAiNotificationService(deps) {
     const requestId = randomUUID();
     try {
       const routers = getRouters();
-      const facts = buildAiFacts({ history, threatIntel, routers, from, to, serverTime: to });
-      const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus });
+      const facts = await buildAiFactsAsync({ read, threatIntel, routers, from, to, serverTime: to });
+      const context = await buildAiContextAsync({ facts, read, routers, from, to, threatIntel, devices, asus });
       const result = await aiProvider.generateInsight(context, {
         cloudConsentConfirmed: cloud,
         language: getLanguage(),
@@ -373,9 +383,9 @@ function createAiNotificationService(deps) {
     const to = currentTime;
     const from = to - config.rangeHours * 60 * 60_000;
     const routers = getRouters();
-    const facts = buildAiFacts({ history, threatIntel, routers, from, to, serverTime: to });
-    const currentDsts = threatDestinations(from, to);
-    const previousDsts = threatDestinations(from - (to - from), from);
+    const facts = await buildAiFactsAsync({ read, threatIntel, routers, from, to, serverTime: to });
+    const currentDsts = await threatDestinations(from, to);
+    const previousDsts = await threatDestinations(from - (to - from), from);
     const causes = threatCauses(facts, currentDsts, previousDsts, config);
     if (!causes.length) return;
     const cause = causes.sort().join('+');

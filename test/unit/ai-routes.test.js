@@ -66,7 +66,7 @@ describe('AI configuration routes', () => {
     const app = appFor(provider, undefined, {
       aiBudget: { begin: () => { throw exhausted; }, finish: () => true },
       history: {
-        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [],
+        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [], groupSrcByTimeRange: () => [], groupSrcForDstsByTimeRange: () => [],
       },
       routerManager: { list: () => [] },
     });
@@ -101,7 +101,7 @@ describe('AI configuration routes', () => {
       new Response(JSON.stringify({ output_text: 'ok' }), { status: 200 }) });
     const app = appFor(provider, undefined, {
       history: {
-        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [],
+        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [], groupSrcByTimeRange: () => [], groupSrcForDstsByTimeRange: () => [],
       },
       threatIntel: null,
       routerManager: { list: () => [] },
@@ -386,7 +386,7 @@ describe('AI configuration routes', () => {
     provider.configure({ provider: 'ollama', models: { ollama: 'local-model' } });
     const result = await request(appFor(provider, undefined, {
       history: {
-        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [],
+        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [], groupSrcByTimeRange: () => [], groupSrcForDstsByTimeRange: () => [],
         appendAiUsage: row => { usage = row; },
       },
       threatIntel: null,
@@ -449,7 +449,7 @@ describe('AI configuration routes', () => {
     provider.configure({ provider: 'ollama', models: { ollama: 'local-model' } });
     const result = await request(appFor(provider, undefined, {
       history: {
-        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [],
+        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [], groupSrcByTimeRange: () => [], groupSrcForDstsByTimeRange: () => [],
         appendAiUsage: () => { throw new Error('disk full'); },
       },
       threatIntel: null,

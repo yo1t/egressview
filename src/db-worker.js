@@ -59,6 +59,11 @@ const HISTORY_READS = new Set([
   'groupDstByTimeRange',
   'summarizeByTimeRange',
   'countFactsByTimeRange',
+  // The AI context and the AI notifications (P3-190).
+  'groupServiceByTimeRange',
+  'groupSrcForDstsByTimeRange',
+  'groupSrcByTimeRange',
+  'groupAgentOnlyDstByTimeRange',
   'listSourceDeviceKeys',
   'attachAgentAttributions',
   'queryNotificationLog',
