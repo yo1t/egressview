@@ -1510,10 +1510,11 @@ private struct AgentSettingsView: View {
                            extensionCounts.unregisteredClosesRecovered,
                            extensionCounts.unregisteredClosesUnresolved))
                     Text(L("Duplicate close reports set aside: %lld", extensionCounts.duplicateCloses))
-                    Text(L("Unresolved closes by reason: inbound %lld · source not known %lld · destination not known %lld",
+                    Text(L("Unresolved closes by reason: inbound %lld · source not known %lld · destination not known %lld · outbound with bytes %lld",
                            extensionCounts.unresolvedClosesInbound,
                            extensionCounts.unresolvedClosesMissingLocalEndpoint,
-                           extensionCounts.unresolvedClosesMissingRemoteEndpoint))
+                           extensionCounts.unresolvedClosesMissingRemoteEndpoint,
+                           extensionCounts.unresolvedOutboundClosesWithBytes))
                     Text(L("Closed reports: with bytes %lld · zero bytes %lld · zero after sending, recorded as not measured %lld",
                            extensionCounts.closedReportsWithBytes,
                            extensionCounts.closedReportsWithoutBytes,

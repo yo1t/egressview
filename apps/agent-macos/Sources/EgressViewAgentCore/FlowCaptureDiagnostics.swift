@@ -23,6 +23,11 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
     public private(set) var unresolvedClosesInbound: UInt64 = 0
     public private(set) var unresolvedClosesMissingLocalEndpoint: UInt64 = 0
     public private(set) var unresolvedClosesMissingRemoteEndpoint: UInt64 = 0
+    /// Of the outbound closes above that could not be recorded, how many the
+    /// system reported bytes for. A connection attempt that never got through
+    /// closes with nothing sent; one with bytes was real traffic this missed
+    /// (P3-181).
+    public private(set) var unresolvedOutboundClosesWithBytes: UInt64 = 0
     /// What the system's closing reports carried, and how many that said zero
     /// came from a flow seen sending data, and so were recorded as unmeasured.
     public private(set) var closedReportsWithBytes: UInt64 = 0
@@ -43,6 +48,7 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
         case missingLocalEndpoint, missingRemoteEndpoint, registeredFlow
         case outboundCallback, closedReport, unregisteredCloseRecovered, unregisteredCloseUnresolved, duplicateClose
         case unresolvedCloseInbound, unresolvedCloseMissingLocalEndpoint, unresolvedCloseMissingRemoteEndpoint
+        case unresolvedOutboundCloseWithBytes
         case closedWithBytes, closedWithoutBytes, zeroCloseRecordedAsUnmeasured
         case emittedObservation, enqueuedObservation
         case droppedObservation, encodingFailure
@@ -67,6 +73,8 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
             unresolvedClosesMissingLocalEndpoint = Self.increment(unresolvedClosesMissingLocalEndpoint)
         case .unresolvedCloseMissingRemoteEndpoint:
             unresolvedClosesMissingRemoteEndpoint = Self.increment(unresolvedClosesMissingRemoteEndpoint)
+        case .unresolvedOutboundCloseWithBytes:
+            unresolvedOutboundClosesWithBytes = Self.increment(unresolvedOutboundClosesWithBytes)
         case .closedWithBytes: closedReportsWithBytes = Self.increment(closedReportsWithBytes)
         case .closedWithoutBytes: closedReportsWithoutBytes = Self.increment(closedReportsWithoutBytes)
         case .zeroCloseRecordedAsUnmeasured:
