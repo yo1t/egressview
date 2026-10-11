@@ -51,3 +51,17 @@ test('each chart still carries a summary', () => {
     assert.match(src, /accessibilitySummary\(|accessibilityLabel\(summary\)/, `${name} has no summary`);
   }
 });
+
+// On a real Mac with VoiceOver (2026-10-11), the sankey was read as an empty
+// scroll area, "no content" even after interacting with it: the element sat
+// behind the ScrollView, which covered it.
+test('the sankey summary is inside its scroll view and named on the scroll view', () => {
+  const scroll = sankey.indexOf('ScrollView(.vertical)');
+  const element = sankey.indexOf('.background(AgentDrawingAccessibility(label: summary))');
+  const label = sankey.indexOf('.accessibilityLabel(summary)');
+  const minHeight = sankey.indexOf('.frame(minHeight: SankeyViewport.minimumHeight');
+  assert.ok(scroll > 0 && element > scroll && element < label && label < minHeight,
+    'the drawing element must be inside the scrolled content, and the scroll view must carry the summary');
+  assert.equal(sankey.split('AgentDrawingAccessibility(label: summary)').length - 1, 1,
+    'one drawing element, not one inside and one behind');
+});

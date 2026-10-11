@@ -54,20 +54,24 @@ public struct AgentSankeyChart: View {
                         )
                     }
                     .frame(height: contentHeight)
+                    // An NSView carries the element, as on the timeline: the
+                    // SwiftUI modifiers on a Canvas did not reach VoiceOver on a
+                    // real Mac. It sits inside the scrolled content, not behind
+                    // the scroll view: there the scroll view covered it, and
+                    // VoiceOver found only an empty scroll area -- "no content"
+                    // even after interacting with it (P3-101, 2026-10-11).
+                    .background(AgentDrawingAccessibility(label: summary))
                 }
+                // Said on arrival, so the summary does not wait on the reader
+                // knowing to step inside a scroll area. A scroll view is an
+                // AppKit view, unlike the Canvas; whether VoiceOver reads this
+                // is to be heard on a real Mac, not assumed.
+                .accessibilityLabel(summary)
                 // Follows the card, which follows the window: how many names
                 // are on screen is whatever the height allows, and the rest is
                 // a scroll away. The minimum is three rows, so a short window
                 // still shows a diagram rather than a scroll bar.
                 .frame(minHeight: SankeyViewport.minimumHeight, maxHeight: .infinity)
-                // On the whole diagram, not on the ribbons alone, and with a
-                // solid hit area: a Canvas is hit-tested where it drew, so the
-                // space between ribbons belongs to nothing and a pointer lands
-                // on nothing. The globe is an NSView, which gets a solid frame
-                // for free -- that is why it worked and these did not.
-                // As with the timeline: an NSView carries the element,
-                // because the SwiftUI modifiers did not.
-                .background(AgentDrawingAccessibility(label: summary))
             }
             if model.byteCoverageIsPartial {
                 AgentPartialCoverageNote(count: model.observationsWithoutBytes)
