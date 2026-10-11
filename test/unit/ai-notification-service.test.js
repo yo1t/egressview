@@ -54,6 +54,7 @@ function service(overrides = {}) {
       getLanguage: () => 'en',
       now: overrides.now || (() => 1_000),
       emit: () => {},
+      historyReader: overrides.historyReader,
     }),
   };
 }
@@ -185,5 +186,26 @@ describe('AI notification service', () => {
       error => error.code === 'AI_NOTIFICATION_DELIVERY_FAILED');
     assert.equal(history.events[0].status, 'failed');
     assert.equal(history.events[0].errorCode, 'AI_NOTIFICATION_DELIVERY_FAILED');
+  });
+});
+
+// The scheduled notification held the Hub for 0.65-0.71 s every morning at
+// 09:00 by reading a day of history on the request thread (P3-190).
+describe('AI notification reads go through the history reader', () => {
+  it('定時の通知は、集計をすべて読み取り用の経路で読み、本体のhistoryを読まない', async () => {
+    const history = baseHistory();
+    const reads = [];
+    for (const fn of ['countFactsByTimeRange', 'groupDstByTimeRange', 'groupServiceByTimeRange',
+      'groupSrcForDstsByTimeRange', 'groupSrcByTimeRange']) {
+      history[fn] = () => { throw new Error(`${fn} read on the request thread`); };
+    }
+    const fake = baseHistory();
+    const historyReader = { read: async (fn, ...args) => { reads.push(fn); return fake[fn](...args); } };
+    const { instance } = service({ history, historyReader });
+    const event = await instance.run({ triggerType: 'scheduled', triggerKey: 'scheduled:reader' });
+    assert.equal(event.status, 'complete');
+    assert.deepEqual([...new Set(reads)].sort(), [
+      'countFactsByTimeRange', 'groupDstByTimeRange', 'groupServiceByTimeRange', 'groupSrcByTimeRange',
+    ]);
   });
 });

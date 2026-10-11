@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
 const {
-  buildAiContext, MAX_DEVICE_INVENTORY, MAX_NETWORK_NODES, MAX_DEVICES_PER_NODE, MAX_CONTEXT_BYTES,
+  buildAiContext, buildAiContextAsync, MAX_DEVICE_INVENTORY, MAX_NETWORK_NODES, MAX_DEVICES_PER_NODE, MAX_CONTEXT_BYTES,
 } = require('../../src/ai-context');
 
 const baseFacts = {
@@ -266,5 +266,34 @@ describe('AI context', () => {
 
     assert.ok(Buffer.byteLength(JSON.stringify(context)) <= MAX_CONTEXT_BYTES);
     assert.equal(context.limits.serializedBytes, Buffer.byteLength(JSON.stringify(context)));
+  });
+});
+
+describe('AI context through a reader (P3-190)', () => {
+  it('読み取りの経路を通しても、同期版と同じ内容になる', async () => {
+    const threatIntel = {
+      matchThreatIntel: ip => (ip === '203.0.113.9' ? { confidence: 'high', source: 'feodo', tag: 'C2' } : null),
+    };
+    const history = {
+      groupServiceByTimeRange: () => [{ dport: 443, proto: 'tcp', count: 5 }],
+      groupDstByTimeRange: () => [
+        { dst: '203.0.113.9', dstHost: 'evil.example', cnt: 2 },
+        { dst: '203.0.113.34', dstHost: 'example.com', cnt: 9 },
+      ],
+      groupSrcForDstsByTimeRange: (_from, _to, dsts) => dsts.map(dst => ({ dst, src: '192.168.1.10', cnt: 2 })),
+      groupSrcByTimeRange: (_from, _to, limit) => {
+        assert.equal(limit, MAX_DEVICE_INVENTORY);
+        return [{ src: '192.168.1.10', srcMac: 'AA:BB:CC:00:11:22', count: 2 }];
+      },
+    };
+    const calls = [];
+    const read = async (fn, ...args) => { calls.push(fn); return history[fn](...args); };
+    const options = { facts: baseFacts, routers: [], from: 1, to: 2, threatIntel };
+    const sync = buildAiContext({ ...options, history });
+    const viaReader = await buildAiContextAsync({ ...options, read });
+    assert.deepEqual(viaReader, sync);
+    assert.deepEqual(calls, [
+      'groupServiceByTimeRange', 'groupDstByTimeRange', 'groupSrcForDstsByTimeRange', 'groupSrcByTimeRange',
+    ]);
   });
 });

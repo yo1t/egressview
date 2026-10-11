@@ -288,6 +288,17 @@ describe('読み取り用スレッド', () => {
       );
       assert.deepEqual(await reader.read('countFactsByTimeRange', from, null, {}),
         history.countFactsByTimeRange(from, null, {}));
+      // The AI context and notifications (P3-190).
+      assert.deepEqual(await reader.read('groupServiceByTimeRange', from, null, {}),
+        history.groupServiceByTimeRange(from, null, {}));
+      const dsts = ['198.51.100.0', '198.51.100.1'];
+      assert.deepEqual(await reader.read('groupSrcForDstsByTimeRange', from, null, dsts, {}),
+        history.groupSrcForDstsByTimeRange(from, null, dsts, {}));
+      assert.deepEqual(await reader.read('groupSrcByTimeRange', from, null, 30, {}),
+        history.groupSrcByTimeRange(from, null, 30, {}));
+      assert.deepEqual(await reader.read('groupAgentOnlyDstByTimeRange', from, null),
+        history.groupAgentOnlyDstByTimeRange(from, null));
+      assert.ok((await reader.read('groupServiceByTimeRange', from, null, {})).length > 0);
       const routerScope = { sourceKind: 'router', sourceId: 'yamaha1' };
       assert.deepEqual(await reader.read('listSourceDeviceKeys', routerScope),
         history.listSourceDeviceKeys(routerScope));

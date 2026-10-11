@@ -9,6 +9,7 @@ const { parseTimestamp } = require('../utils');
 const { streamConnectionExport } = require('../connection-export');
 const { networkName } = require('../special-use-address');
 const logger = require('../logger');
+const runtimeProfiler = require('../runtime-profiler');
 const {
   sourceScopeShape, validateSourceScopePair, requireKnownSourceScope,
 } = require('../source-scope');
@@ -573,26 +574,31 @@ function connectionsRoutes(ctx) {
     const confidence = ['low', 'high', 'all'].includes(query.confidence) ? query.confidence : 'all';
     const limit = Math.min(parseInt(query.limit, 10) || 50, 200);
     const groups = await reader.read('groupDstByTimeRange', from, to, { sourceScope: scoped.scope });
-    const hits = [];
-    for (const { dst, dstHost, cnt } of groups) {
-      const t = threatIntel?.matchThreatIntel(dst, dstHost || dst);
-      if (!t) continue;
-      if (confidence === 'low'  && t.confidence !== 'low')  continue;
-      if (confidence === 'high' && t.confidence !== 'high') continue;
-      hits.push({
-        dst,
-        host: dstHost || null,
-        sessions: cnt,
-        confidence: t.confidence,
-        source: t.source || null,
-        tag: t.tag || null,
-        matchType: t.matchType || null,
-        matchValue: t.matchValue || null,
-        url: t.url || null,
-        feed: t.feed || t.source || null,
-        category: t.category || t.tag || null,
-      });
-    }
+    // Matched on this thread, one destination at a time; measured so a stall
+    // it causes names itself (P3-190).
+    const hits = runtimeProfiler.measureSync('threatConnections.match', () => {
+      const found = [];
+      for (const { dst, dstHost, cnt } of groups) {
+        const t = threatIntel?.matchThreatIntel(dst, dstHost || dst);
+        if (!t) continue;
+        if (confidence === 'low'  && t.confidence !== 'low')  continue;
+        if (confidence === 'high' && t.confidence !== 'high') continue;
+        found.push({
+          dst,
+          host: dstHost || null,
+          sessions: cnt,
+          confidence: t.confidence,
+          source: t.source || null,
+          tag: t.tag || null,
+          matchType: t.matchType || null,
+          matchValue: t.matchValue || null,
+          url: t.url || null,
+          feed: t.feed || t.source || null,
+          category: t.category || t.tag || null,
+        });
+      }
+      return found;
+    });
     hits.sort((a, b) => b.sessions - a.sessions);
     const paged = hits.slice(0, limit);
     res.json({ count: paged.length, threats: paged, serverTime: Date.now() });
@@ -620,13 +626,17 @@ function connectionsRoutes(ctx) {
       sourceScope: scoped.scope,
     }, () => reader.read('groupDstByTimeRange', from, to, { filters, sourceScope: scoped.scope }),
     { from, to });
-    let safe = 0, warn = 0, danger = 0;
-    for (const { dst, dstHost, cnt } of groups) {
-      const threat = threatIntel?.matchThreatIntel(dst, dstHost || dst);
-      if (!threat)                          safe   += cnt;
-      else if (threat.confidence === 'low') warn   += cnt;
-      else                                  danger += cnt;
-    }
+    // Measured for the same reason as the threat list's matching (P3-190).
+    const { safe, warn, danger } = runtimeProfiler.measureSync('threatCounts.match', () => {
+      let safe = 0, warn = 0, danger = 0;
+      for (const { dst, dstHost, cnt } of groups) {
+        const threat = threatIntel?.matchThreatIntel(dst, dstHost || dst);
+        if (!threat)                          safe   += cnt;
+        else if (threat.confidence === 'low') warn   += cnt;
+        else                                  danger += cnt;
+      }
+      return { safe, warn, danger };
+    });
     res.json({ safe, warn, danger, serverTime: Date.now() });
   });
 

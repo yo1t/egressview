@@ -1,5 +1,7 @@
 'use strict';
 
+const runtimeProfiler = require('./runtime-profiler');
+
 function tallyThreats(groups, threatIntel) {
   let safe = 0;
   let warn = 0;
@@ -70,7 +72,9 @@ function buildAiFacts({ history, threatIntel, routers, from, to, sourceScope = n
 async function periodFactsAsync(read, threatIntel, from, to, sourceScope = null) {
   const counts = await read('countFactsByTimeRange', from, to, { sourceScope });
   const groups = await read('groupDstByTimeRange', from, to, { sourceScope });
-  return { ...counts, ...tallyThreats(groups, threatIntel) };
+  // Measured, because it runs on the request thread over every destination
+  // in the period, and a stall it caused would otherwise name nothing (P3-190).
+  return { ...counts, ...runtimeProfiler.measureSync('aiFacts.tallyThreats', () => tallyThreats(groups, threatIntel)) };
 }
 
 /**
