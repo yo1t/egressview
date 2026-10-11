@@ -274,7 +274,9 @@ describe('backup configuration route', () => {
 
     const result = await requestBytes(app, '/api/backup/upload', sqlite);
     assert.equal(result.status, 200);
-    assert.deepEqual(inspected, { bytes: sqlite.length, mode: 0o600 });
+    assert.equal(inspected.bytes, sqlite.length);
+    // Windows has no POSIX permission bits to set: every file reports 0666 there.
+    if (process.platform !== 'win32') assert.equal(inspected.mode, 0o600);
   });
 
   it('rejects an oversized declared upload before buffering its body', async () => {

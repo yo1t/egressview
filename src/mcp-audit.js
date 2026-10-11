@@ -57,6 +57,9 @@ function setHashKey(value) {
 function initDb(dbPath, options = {}) {
   lastDbPath = dbPath || DEFAULT_DB_PATH;
   if (options.hashKey) setHashKey(options.hashKey);
+  // Opening again would otherwise drop the earlier handle unclosed. Windows
+  // keeps that file locked until the collector happens to run.
+  closeDb();
   db = new Database(lastDbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');

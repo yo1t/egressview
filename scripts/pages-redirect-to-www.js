@@ -55,7 +55,8 @@ function walk(directory, root, found = []) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const full = path.join(directory, entry.name);
     if (entry.isDirectory()) walk(full, root, found);
-    else found.push(path.relative(root, full));
+    // Forward slashes on every platform: these are also the names reported back.
+    else found.push(path.relative(root, full).split(path.sep).join('/'));
   }
   return found;
 }

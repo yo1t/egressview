@@ -41,7 +41,8 @@ describe('loadFileOrThrow', () => {
     assert.throws(() => loadFileOrThrow(tmpFile), SyntaxError);
   });
 
-  it('repairs overly broad permissions before reading credentials', () => {
+  // Windows has no POSIX permission bits to repair.
+  it('repairs overly broad permissions before reading credentials', { skip: process.platform === 'win32' }, () => {
     fs.writeFileSync(tmpFile, JSON.stringify({ ok: true }), { mode: 0o644 });
     fs.chmodSync(tmpFile, 0o644);
     assert.deepEqual(loadFileOrThrow(tmpFile), { ok: true });
@@ -70,7 +71,7 @@ describe('saveFile + loadFile round-trip', () => {
     assert.deepEqual(loaded, data);
   });
 
-  it('writes the final config with owner-only permissions', () => {
+  it('writes the final config with owner-only permissions', { skip: process.platform === 'win32' }, () => {
     saveFile({ ok: true }, tmpFile);
     assert.equal(fs.statSync(tmpFile).mode & 0o777, 0o600);
   });
