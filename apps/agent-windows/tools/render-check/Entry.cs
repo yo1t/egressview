@@ -430,6 +430,7 @@ internal static class Entry
             ((SolidColorBrush)darkChoice.Background).Color != darkSurface ||
             darkChoice.SelectedIndex != 0)
             throw new InvalidOperationException("Input controls lost their dark theme or selection.");
+        VerifyDropDownsOpenAcrossTheirWidth();
         foreach (var width in new[] { 630, 340 })
         {
             var countryDashboard = new MainWindow();
@@ -698,6 +699,106 @@ internal static class Entry
         bitmap.CopyPixels(pixels, width * 4, 0);
         return pixels;
     }
+
+    /// P3-136: a click anywhere across a drop-down must open it.
+    ///
+    /// The defect this guards against passed the build, the tests and every
+    /// picture here: the control was drawn right, and the middle of it was
+    /// dead. Only the toggle opens the list, so each of five points across the
+    /// width is hit-tested and must land inside the toggle. The template that
+    /// shipped with the defect is checked as well, and must fail: an earlier
+    /// attempt at this test passed with the broken template too, and a gate
+    /// that cannot fail is worse than none.
+    private static void VerifyDropDownsOpenAcrossTheirWidth()
+    {
+        var dead = DeadPointsAcrossWidth(new System.Windows.Controls.ComboBox());
+        if (dead.Count > 0)
+            throw new InvalidOperationException(
+                $"A drop-down does not open when pressed at {string.Join(", ", dead)} of its width (P3-136).");
+        var broken = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(BrokenComboTemplate);
+        var brokenDead = DeadPointsAcrossWidth(new System.Windows.Controls.ComboBox { Template = broken });
+        if (brokenDead.Count == 0)
+            throw new InvalidOperationException(
+                "The drop-down check passed the template that shipped with P3-136, so it would not catch it again.");
+        Console.WriteLine($"drop-downs: open at 5 of 5 points; the pre-#529 template does not at {string.Join(", ", brokenDead)}");
+    }
+
+    private static List<string> DeadPointsAcrossWidth(System.Windows.Controls.ComboBox choice)
+    {
+        choice.Width = 350;
+        choice.Height = 36;
+        choice.Items.Add(new ComboBoxItem { Content = "7日以内" });
+        choice.Items.Add(new ComboBoxItem { Content = "30日以内" });
+        choice.SelectedIndex = 0;
+        // A real window: mouse capture and the popup need a presentation source,
+        // and without one the input below would not route the way a click does.
+        var window = new Window
+        {
+            Content = new Grid { Children = { choice } }, Width = 420, Height = 120,
+            WindowStyle = WindowStyle.None, ShowInTaskbar = false, ShowActivated = false,
+            Left = -20000, Top = -20000,
+        };
+        window.Show();
+        try
+        {
+            window.UpdateLayout();
+            // Whether it opened, not whether it is still open: a ComboBox closes
+            // its list again when it loses mouse capture, which the release
+            // below does.
+            var opened = false;
+            choice.DropDownOpened += (_, _) => opened = true;
+            var dead = new List<string>();
+            foreach (var fraction in new[] { 0.1, 0.3, 0.5, 0.7, 0.9 })
+            {
+                choice.IsDropDownOpen = false;
+                opened = false;
+                var point = new System.Windows.Point(choice.ActualWidth * fraction, choice.ActualHeight / 2);
+                var hit = VisualTreeHelper.HitTest(choice, point)?.VisualHit as UIElement
+                    ?? (VisualTreeHelper.HitTest(choice, point)?.VisualHit as DependencyObject is { } d ? FindUiAncestor(d) : null);
+                if (hit is not null) Press(hit);
+                if (!opened) dead.Add($"{fraction:P0}");
+            }
+            choice.IsDropDownOpen = false;
+            return dead;
+        }
+        finally { window.Close(); }
+    }
+
+    private static UIElement? FindUiAncestor(DependencyObject node)
+    {
+        for (var current = node; current is not null; current = VisualTreeHelper.GetParent(current))
+            if (current is UIElement element) return element;
+        return null;
+    }
+
+    /// One left click, routed from the element under the pointer exactly as
+    /// the input system routes it: preview and bubble, down and then up.
+    private static void Press(UIElement target)
+    {
+        foreach (var routed in new[] { UIElement.PreviewMouseDownEvent, UIElement.MouseDownEvent, UIElement.PreviewMouseUpEvent, UIElement.MouseUpEvent })
+        {
+            target.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
+                System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, System.Windows.Input.MouseButton.Left) { RoutedEvent = routed });
+        }
+        System.Windows.Input.Mouse.Capture(null);
+    }
+
+    /// The ComboBox template before PR #529, verbatim in its structure: the
+    /// toggle laid over the surface as a sibling, sized to its arrow.
+    private const string BrokenComboTemplate = """
+        <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="ComboBox">
+          <Grid>
+            <Border x:Name="ComboSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6"/>
+            <ContentPresenter Margin="10,0,27,0" VerticalAlignment="Center" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}"/>
+            <ToggleButton x:Name="DropDownToggle" Background="Transparent" BorderThickness="0" Focusable="False" HorizontalContentAlignment="Right" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+              <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent"><ContentPresenter Content="{TemplateBinding Content}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/></Border></ControlTemplate></ToggleButton.Template>
+              <Path Data="M 0 0 L 4 4 L 8 0" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,0"/>
+            </ToggleButton>
+            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}"><ItemsPresenter/></Popup>
+          </Grid>
+        </ControlTemplate>
+        """;
 
     private static void Save(FrameworkElement element, int width, int height, string path)
     {
