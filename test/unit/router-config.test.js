@@ -33,7 +33,8 @@ describe('legacy router config migration', () => {
     assert.deepEqual(saved.general, { language: 'ja' });
     assert.ok(saved.yamaha && saved.cisco, 'legacy sections remain available for rollback');
     assert.ok(fs.existsSync(`${file}.pre-routers-v1.bak`));
-    assert.equal(fs.statSync(`${file}.pre-routers-v1.bak`).mode & 0o777, 0o600);
+    // Windows has no POSIX permission bits to set: every file reports 0666 there.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(`${file}.pre-routers-v1.bak`).mode & 0o777, 0o600);
   });
 
   it('does not rewrite a config that already has routers', () => {

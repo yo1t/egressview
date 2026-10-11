@@ -590,7 +590,8 @@ describe('MCP publication gate report', () => {
     const file = path.join(dir, 'report.json');
     try {
       writeReport(file, { status: 'ready_for_manual_dns_review' });
-      assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+      // Windows has no POSIX permission bits to set: every file reports 0666 there.
+      if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
       assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {
         status: 'ready_for_manual_dns_review',
       });

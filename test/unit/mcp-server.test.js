@@ -27,6 +27,7 @@ const {
   _startHttp,
 } = require('../../mcp-server');
 const { createMcpScopeMapping } = require('../../src/mcp-scope-mapping');
+const mcpAudit = require('../../src/mcp-audit');
 
 const SERVICE_TOKEN = `egv_${'a'.repeat(64)}`;
 const AUDIT_HASH_KEY = 'test-audit-hmac-key-that-is-independent';
@@ -415,10 +416,14 @@ describe('mcp-server: HTTP auth configuration', () => {
     } finally {
       if (previousAuditPath === undefined) delete process.env.MCP_AUDIT_DB_PATH;
       else process.env.MCP_AUDIT_DB_PATH = previousAuditPath;
-      fs.rmSync(auditDir, { recursive: true, force: true });
+      // Close before removing: Windows will not delete a database that is
+      // still open, and a throw here used to leave the server listening,
+      // which kept the whole file from ever finishing.
       await new Promise((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       });
+      mcpAudit.closeDb();
+      fs.rmSync(auditDir, { recursive: true, force: true });
     }
   });
 });

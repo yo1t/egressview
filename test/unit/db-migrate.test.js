@@ -739,7 +739,8 @@ describe('db-migrate: v5 source contract', () => {
 // ─── P2-33: fail-closed backup ────────────────────────────────────────────────
 
 describe('db-migrate: fail-closed backup (P2-33)', () => {
-  it('aborts migration and leaves the DB unmodified when the backup cannot be written', () => {
+  // chmod cannot make a directory read-only on Windows, so the backup would succeed.
+  it('aborts migration and leaves the DB unmodified when the backup cannot be written', { skip: process.platform === 'win32' }, () => {
     const dir = path.join(TMP, 'readonly-dir');
     fs.mkdirSync(dir, { recursive: true });
     const p = path.join(dir, 'locked.db');

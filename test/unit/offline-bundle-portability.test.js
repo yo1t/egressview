@@ -76,7 +76,8 @@ describe('offline bundle portability', () => {
     }
   });
 
-  it('拡張属性の検出はバンドル内のソース文字列に反応しない', () => {
+  // WindowsのtarはC:をホスト名と読む。オフライン配布物はLinux向け。
+  it('拡張属性の検出はバンドル内のソース文字列に反応しない', { skip: process.platform === 'win32' }, () => {
     // Scanning the whole decompressed stream for the keyword matches the
     // verifier's own source, which ships inside the bundle. Only pax extended
     // headers may be inspected.
