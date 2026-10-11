@@ -42,7 +42,10 @@ describe('BackupPruneRunner', () => {
     const workerFile = path.join(__dirname, '..', 'fixtures', 'blocking-prune-worker.js');
     const runner = new BackupPruneRunner({
       workerFactory: workerData => new Worker(workerFile, { workerData }),
-      timeoutMs: 1000,
+      // Not the subject here: the timeout has its own test below. At 1000ms
+      // the Windows runner timed the worker out before it had finished
+      // starting, and the test failed for being slow, not for blocking.
+      timeoutMs: 10_000,
     });
     const job = runner.start({ operation: 'preview', options: {} });
     let ticks = 0;
@@ -53,7 +56,7 @@ describe('BackupPruneRunner', () => {
     // worker and block for 100 -- so the assertion below fired on a job that
     // was still perfectly healthy. A gate that goes red for being slow teaches
     // people that red means nothing.
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 15_000;
     while (runner.get(job.id).status === 'running' && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
