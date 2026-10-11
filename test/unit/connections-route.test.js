@@ -872,7 +872,7 @@ describe('connections route: GET /connections/threat-counts', () => {
 describe('connections route: GET /connections/new-nodes', () => {
   const connectionsRoutes = require('../../src/routes/connections');
 
-  function callNewNodesRoute(newNodesResult, query = {}) {
+  async function callNewNodesRoute(newNodesResult, query = {}, historyReader = undefined) {
     const history = {
       queryByTimeRangePaged: () => [],
       countByTimeRange:      () => 0,
@@ -883,52 +883,67 @@ describe('connections route: GET /connections/new-nodes', () => {
     const router = connectionsRoutes({
       requireAdmin: (_req, _res, next) => next(),
       history,
+      historyReader,
     });
     const layer = router.stack.find(l => l.route?.path === '/connections/new-nodes' && l.route?.methods?.get);
     const handler = layer.route.stack[layer.route.stack.length - 1].handle;
     const res = { _status: 200, _body: null };
     res.status = (code) => { res._status = code; return res; };
     res.json   = (body) => { res._body  = body; return res; };
-    handler({ query }, res);
+    await handler({ query }, res);
     return res;
   }
 
-  it('returns deviceCount and destinationCount from history', () => {
+  it('returns deviceCount and destinationCount from history', async () => {
     const result = {
       deviceCount:      2,
       destinationCount: 3,
       newDevices:       [{ src: '192.168.1.10', firstSeen: 1000 }],
       newDestinations:  [{ dst: '1.2.3.4', firstSeen: 1000 }],
     };
-    const res = callNewNodesRoute(result, {});
+    const res = await callNewNodesRoute(result, {});
     assert.equal(res._body.deviceCount,      2);
     assert.equal(res._body.destinationCount, 3);
     assert.equal(res._body.newDevices.length,      1);
     assert.equal(res._body.newDestinations.length, 1);
   });
 
-  it('returns zeros when history returns empty result', () => {
+  it('returns zeros when history returns empty result', async () => {
     const result = { deviceCount: 0, destinationCount: 0, newDevices: [], newDestinations: [] };
-    const res = callNewNodesRoute(result, {});
+    const res = await callNewNodesRoute(result, {});
     assert.equal(res._body.deviceCount,      0);
     assert.equal(res._body.destinationCount, 0);
   });
 
-  it('includes serverTime in response', () => {
+  it('includes serverTime in response', async () => {
     const before = Date.now();
     const result = { deviceCount: 0, destinationCount: 0, newDevices: [], newDestinations: [] };
-    const res = callNewNodesRoute(result, {});
+    const res = await callNewNodesRoute(result, {});
     assert.ok(typeof res._body.serverTime === 'number' && res._body.serverTime >= before);
   });
 
-  it('returns 400 for invalid from timestamp', () => {
-    const res = callNewNodesRoute({}, { from: 'not-a-ts' });
+  it('returns 400 for invalid from timestamp', async () => {
+    const res = await callNewNodesRoute({}, { from: 'not-a-ts' });
     assert.equal(res._status, 400);
   });
 
-  it('returns 400 for invalid to timestamp', () => {
-    const res = callNewNodesRoute({}, { to: '-999' });
+  it('returns 400 for invalid to timestamp', async () => {
+    const res = await callNewNodesRoute({}, { to: '-999' });
     assert.equal(res._status, 400);
+  });
+
+  // Two whole-table groupings, 1.7-2.1 s on production (P3-190).
+  it('読み取り用スレッドの経路で読み、本体のhistoryを読まない', async () => {
+    const reads = [];
+    const historyReader = {
+      read: async (fn, ...args) => {
+        reads.push([fn, ...args]);
+        return { deviceCount: 1, destinationCount: 0, newDevices: [], newDestinations: [] };
+      },
+    };
+    const res = await callNewNodesRoute(null, { from: '1000', to: '2000' }, historyReader);
+    assert.deepEqual(reads, [['queryNewNodes', 1000, 2000]]);
+    assert.equal(res._body.deviceCount, 1);
   });
 });
 

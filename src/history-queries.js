@@ -949,6 +949,35 @@ function createHistoryQueries({
     return result;
   }
 
+  // Returns devices/destinations that appeared for the first time during [from, to].
+  // Both queries group the whole connection table (1.7-2.1 s on a Hub with
+  // 627,000 rows), so the route reads this on the read thread (P3-190).
+  // "New" = the global MIN(firstSeen) across all history falls within the window.
+  function queryNewNodes(from, to) {
+    const db = getDb();
+    if (!db) return { deviceCount: 0, destinationCount: 0, newDevices: [], newDestinations: [] };
+    if (from == null || to == null) return { deviceCount: 0, destinationCount: 0, newDevices: [], newDestinations: [] };
+    const newDevices = db.prepare(
+      `SELECT src, srcMac, srcVendor, srcDnsName, srcMdnsName, MIN(firstSeen) as firstSeen
+       FROM connections GROUP BY src
+       HAVING MIN(firstSeen) >= ? AND MIN(firstSeen) <= ?
+       ORDER BY firstSeen DESC`
+    ).all(from, to);
+    const newDestinations = db.prepare(
+      `SELECT dst, MAX(dstHost) as dstHost, MAX(country) as country, MAX(org) as org,
+              MIN(firstSeen) as firstSeen
+       FROM connections GROUP BY dst
+       HAVING MIN(firstSeen) >= ? AND MIN(firstSeen) <= ?
+       ORDER BY firstSeen DESC`
+    ).all(from, to);
+    return {
+      deviceCount: newDevices.length,
+      destinationCount: newDestinations.length,
+      newDevices,
+      newDestinations,
+    };
+  }
+
   return {
     queryByTimeRange,
     queryByTimeRangePaged,
@@ -961,6 +990,7 @@ function createHistoryQueries({
     groupSrcForDstsByTimeRange,
     groupSrcByTimeRange,
     listSourceDeviceKeys,
+    queryNewNodes,
     summarizeByTimeRange,
   };
 }
