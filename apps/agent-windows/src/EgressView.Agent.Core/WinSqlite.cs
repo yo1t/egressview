@@ -48,6 +48,9 @@ internal static partial class WinSqlite
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_clear_bindings")]
     internal static partial int ClearBindings(nint statement);
 
+    [LibraryImport("winsqlite3", EntryPoint = "sqlite3_changes")]
+    internal static partial int Changes(nint db);
+
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_bind_int64")]
     internal static partial int BindInt64(nint statement, int index, long value);
 

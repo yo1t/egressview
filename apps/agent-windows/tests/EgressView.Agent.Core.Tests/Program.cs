@@ -207,6 +207,50 @@ try
             "a scope id does not make the same connection look like two");
     }
 
+    using (var endStore = new ObservationStore(Path.Combine(directory, "connection-ends.db")))
+    {
+        // P3-108: the end of a TCP connection is written onto its row.
+        var t0 = new DateTimeOffset(2026, 10, 12, 0, 0, 0, TimeSpan.Zero);
+        NetworkObservation Traffic(string protocol, int localPort, DateTimeOffset at) =>
+            new(at, 4242, protocol, "192.0.2.10", localPort, "198.51.100.20", 443, 10, 20, ObservationLayer.Logical, null, "etw", "browser");
+        var early = endStore.RecordConnectionEnds([new ConnectionEnd("192.0.2.10", 50000, "198.51.100.20", 443, t0.AddSeconds(2))]);
+        Assert(early.Count == 1, "an end that arrives before its row is handed back to be tried again, not lost");
+        endStore.WriteBatch([Traffic("TCP", 50000, t0), Traffic("TCP", 50001, t0), Traffic("UDP", 50002, t0)]);
+        // Named remote first, as an event for a close the far side began can be.
+        var unmatched = endStore.RecordConnectionEnds([
+            new ConnectionEnd("198.51.100.20", 443, "192.0.2.10", 50000, t0.AddSeconds(2)),
+            new ConnectionEnd("192.0.2.10", 50002, "198.51.100.20", 443, t0.AddSeconds(2))]);
+        Assert(unmatched.Count == 1 && unmatched[0].SourcePort == 50002, "an end closes the TCP row whichever way round it names the endpoints, and never a UDP row");
+        EndedAt(50000, ended => ended == t0.AddSeconds(2), "the ended row carries the time of its end");
+        EndedAt(50001, ended => ended is null, "a TCP row with no end stays without one");
+        EndedAt(50002, ended => ended is null, "a UDP row has no end");
+        endStore.WriteBatch([Traffic("TCP", 50000, t0.AddSeconds(30))]);
+        EndedAt(50000, ended => ended is null, "data after the end opens the row again: the same endpoints in use once more");
+        var csvRow = ObservationCsv.Export(endStore.ReadRecentFlows(50));
+        Assert(csvRow.Split("\r\n")[0].EndsWith(",ended_at", StringComparison.Ordinal), "the CSV carries the end as its last column");
+
+        void EndedAt(int localPort, Func<DateTimeOffset?, bool> expected, string message) =>
+            Assert(expected(endStore.ReadRecentFlows(50).Single(row => row.LocalPort == localPort).EndedAt), message);
+    }
+
+    {
+        var queue = new ConnectionEndQueue();
+        var t0 = new DateTimeOffset(2026, 10, 12, 0, 0, 0, TimeSpan.Zero);
+        queue.Add(new ConnectionEnd("192.0.2.10", 1, "198.51.100.20", 443, t0));
+        var asked = 0;
+        queue.Apply(ends => { asked += ends.Count; return []; }, t0.AddSeconds(1));
+        Assert(asked == 0 && queue.Waiting == 1, "an end is not tried before its traffic has had time to be written");
+        queue.Apply(ends => ends, t0.AddSeconds(5));
+        Assert(queue.Waiting == 1 && queue.Recorded == 0, "an end that found no row waits for another try");
+        queue.Apply(_ => throw new InvalidOperationException("store busy"), t0.AddSeconds(10));
+        Assert(queue.Waiting == 1, "an end is kept when the write fails");
+        queue.Apply(ends => ends, t0.AddMinutes(2));
+        Assert(queue.Waiting == 0 && queue.Dropped == 1, "an end that found no row within a minute is given up on and counted");
+        queue.Add(new ConnectionEnd("192.0.2.10", 2, "198.51.100.20", 443, t0));
+        queue.Apply(_ => [], t0.AddSeconds(5));
+        Assert(queue.Recorded == 1 && queue.Waiting == 0, "an end that found its row is counted as recorded");
+    }
+
     using (var ipcLoopStop = new CancellationTokenSource())
     {
         var attempts = 0;
@@ -1290,7 +1334,7 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 30, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 31, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
@@ -1716,7 +1760,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 30, "v1 database migrates through v2-v30");
+        Assert(migrated.SchemaVersion == 31, "v1 database migrates through v2-v31");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -1768,7 +1812,7 @@ try
     Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v29.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 30, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 31, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -4505,7 +4549,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 30 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 31 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }

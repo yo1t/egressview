@@ -132,6 +132,7 @@ internal sealed class MonitoringController : IAsyncDisposable
                 // (P3-188). Signed: positive means events were stamped late.
                 try { store.SetCounter("etw-clock-drift-ms", (long)collector.EventClockDrift.TotalMilliseconds); } catch { }
                 collector.ReconcileConnectionEnds(now);
+                collector.ConnectionEndsToRecord.Apply(store.RecordConnectionEnds, now);
                 var eventsLost = collector.EventsLost;
                 var pipelineSnapshot = pipeline.Snapshot();
                 var healthy = collector.IsActive && collector.Error is null && pipelineSnapshot.PersistenceFailures == 0;

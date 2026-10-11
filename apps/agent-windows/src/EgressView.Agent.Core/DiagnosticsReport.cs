@@ -234,6 +234,7 @@ public static class DiagnosticsReport
         value.EtwConnectionDisconnected, value.EtwConnectionClosed,
         value.ConnectionsFollowed, value.ConnectionEndsMatched, value.ConnectionEndsWithoutStart,
         value.ConnectionEndsMissed, value.ConnectionsStillOpen, value.ConnectionsNotFollowed, value.ConnectionTableChecks,
+        value.ConnectionEndsRecorded, value.ConnectionEndsDropped, value.ConnectionEndsWaiting,
         value.InterfaceUnresolved, value.InboundMulticastIgnored, value.EtwEventsLost, value.EtwEventsLostAtStart,
         collectorError = SafeCode(value.CollectorError), persistenceError = SafeCode(value.PersistenceError),
         value.NamesFromStartEvents, value.NamesFromCache, value.NamesFromLiveQueries, value.NamesNeverSeen, value.NamesNeverSeenAtStartup,

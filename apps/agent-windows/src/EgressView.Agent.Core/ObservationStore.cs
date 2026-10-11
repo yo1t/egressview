@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 30;
+    private const int CurrentSchemaVersion = 31;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -484,6 +484,19 @@ public sealed partial class ObservationStore : IDisposable
     private const string Version30Schema = """
         ALTER TABLE outbound_traffic_windows ADD COLUMN anomaly_breakdown TEXT;
         """;
+    /// When a TCP connection closed (P3-108). Measured over a night on one PC,
+    /// Windows reported the end of 99.8% of the connections it reported the
+    /// start of, so the log can say when a connection ended instead of only
+    /// when data last crossed it. Empty for UDP, which has no end, and for the
+    /// connections whose end never arrived.
+    ///
+    /// The index holds only TCP rows still waiting for their end, so it is
+    /// the set an arriving end is looked up in, and a row leaves it the moment
+    /// its end is written.
+    private const string Version31Schema = """
+        ALTER TABLE flows ADD COLUMN ended_at TEXT;
+        CREATE INDEX IF NOT EXISTS flows_open_tcp ON flows(remote_address,remote_port,local_port) WHERE protocol='TCP' AND ended_at IS NULL;
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -552,7 +565,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); {Version29Schema} {Version30Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); {Version29Schema} {Version30Schema} {Version31Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -593,7 +606,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 26) { MigrateVersion26To27(); version = 27; }
         if (version == 27) { MigrateVersion27To28(); version = 28; }
         if (version == 28) { MigrateVersion28To29(); version = 29; }
-        if (version == 29) MigrateVersion29To30();
+        if (version == 29) { MigrateVersion29To30(); version = 30; }
+        if (version == 30) MigrateVersion30To31();
         ValidateSchema();
         }
         catch { ReportMigrationFailed(startedAt); throw; }
@@ -992,6 +1006,19 @@ public sealed partial class ObservationStore : IDisposable
         try
         {
             Execute("BEGIN IMMEDIATE; " + Version30Schema + " UPDATE schema_version SET version=30 WHERE version=29; COMMIT;");
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// No backup, as for v30: a column that starts empty, and an index over the
+    /// TCP rows. The index is built from the existing rows inside the same
+    /// transaction; on a table of 350,000 TCP rows that is seconds, not the
+    /// minutes a copy of the database would take.
+    private void MigrateVersion30To31()
+    {
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version31Schema + " UPDATE schema_version SET version=31 WHERE version=30; COMMIT;");
         }
         catch { TryRollback(); throw; }
     }
@@ -1622,7 +1649,11 @@ public sealed partial class ObservationStore : IDisposable
                       layer=excluded.layer,
                       interface_id=COALESCE(excluded.interface_id,flows.interface_id),
                       process_name=COALESCE(excluded.process_name,flows.process_name),
-                      remote_hostname=COALESCE(excluded.remote_hostname,flows.remote_hostname)
+                      remote_hostname=COALESCE(excluded.remote_hostname,flows.remote_hostname),
+                      -- Data after the recorded end means the end did not
+                      -- close this row: the same addresses and ports in use
+                      -- again. It is open until another end says otherwise.
+                      ended_at=CASE WHEN flows.ended_at IS NOT NULL AND excluded.last_seen>flows.ended_at THEN NULL ELSE flows.ended_at END
                     RETURNING rowid
                     """;
                 Check(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
@@ -1780,7 +1811,7 @@ public sealed partial class ObservationStore : IDisposable
         if (offset is < 0 or > 10_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
         lock (gate)
         {
-            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code),f.process_instance_id";
+            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code),f.process_instance_id,f.ended_at";
             var cutoff = before is null ? string.Empty : $"WHERE f.last_seen<'{Sql(before.Value.ToUniversalTime().ToString("O"))}'";
             var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address LEFT JOIN local_country_cache lc ON lc.ip=f.remote_address {cutoff} ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
@@ -2703,13 +2734,68 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// Writes the ends of TCP connections onto their rows, and hands back the
+    /// ones that found no row yet.
+    ///
+    /// An end names the two endpoints but not reliably the process -- the
+    /// event can carry the System process for a close the remote side began --
+    /// so it is matched on the addresses and ports alone, either way round,
+    /// to the most recently active TCP row still waiting for an end. A row
+    /// that had not yet been written when the end arrived is the caller's to
+    /// try again: summed traffic reaches the store a second or two after it
+    /// happened.
+    public IReadOnlyList<ConnectionEnd> RecordConnectionEnds(IReadOnlyList<ConnectionEnd> ends)
+    {
+        if (ends.Count == 0) return [];
+        var unmatched = new List<ConnectionEnd>();
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            const string sql = """
+                UPDATE flows SET ended_at=?1 WHERE rowid=(
+                  SELECT rowid FROM flows WHERE protocol='TCP' AND ended_at IS NULL
+                    AND remote_address=?2 AND remote_port=?3 AND local_port=?4 AND local_address=?5 AND first_seen<=?1
+                  ORDER BY last_seen DESC LIMIT 1)
+                """;
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                Check(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+                try
+                {
+                    foreach (var end in ends)
+                    {
+                        var at = end.At.ToUniversalTime().ToString("O");
+                        if (!Close(statement, at, end.SourceAddress, end.SourcePort, end.DestinationAddress, end.DestinationPort)
+                            && !Close(statement, at, end.DestinationAddress, end.DestinationPort, end.SourceAddress, end.SourcePort))
+                            unmatched.Add(end);
+                    }
+                }
+                finally { WinSqlite.Finalize(statement); }
+                Execute("COMMIT");
+            }
+            catch { TryRollback(); throw; }
+        }
+        return unmatched;
+
+        bool Close(nint statement, string at, string local, int localPort, string remote, int remotePort)
+        {
+            Check(WinSqlite.Reset(statement));
+            Bind(statement, 1, at); Bind(statement, 2, remote);
+            Check(WinSqlite.BindInt64(statement, 3, remotePort)); Check(WinSqlite.BindInt64(statement, 4, localPort));
+            Bind(statement, 5, local);
+            CheckDone(WinSqlite.Step(statement));
+            return WinSqlite.Changes(db) > 0;
+        }
+    }
+
     public IReadOnlyList<RecentFlow> ReadRecentFlows(int limit, int offset = 0)
     {
         if (limit is not (50 or 100 or 200 or 500)) throw new ArgumentOutOfRangeException(nameof(limit));
         if (offset is < 0 or > 1_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
         lock (gate)
         {
-            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code),f.process_instance_id";
+            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code),f.process_instance_id,f.ended_at";
             var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address LEFT JOIN local_country_cache lc ON lc.ip=f.remote_address ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
         }
@@ -2736,7 +2822,7 @@ public sealed partial class ObservationStore : IDisposable
             // No hostname column here -- enrichment lands on the flow, not on
             // the event, so this reads as unresolved rather than as wrong.
             const string columns = "o.observed_at,o.observed_at,fl.protocol,fl.local_address,fl.local_port,o.remote_address," +
-                "fl.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),fl.process_instance_id";
+                "fl.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),fl.process_instance_id,NULL";
             var sql = $"SELECT {columns} FROM observations o JOIN flows fl ON fl.rowid=o.flow_id LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"ORDER BY o.observed_at DESC,o.id DESC LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
@@ -2772,7 +2858,7 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate)
         {
             const string columns = "o.observed_at,o.observed_at,fl.protocol,fl.local_address,fl.local_port,o.remote_address," +
-                "fl.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),fl.process_instance_id";
+                "fl.remote_port,fl.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,fl.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code),fl.process_instance_id,NULL";
             var sql = $"SELECT {columns},o.id FROM observations o JOIN flows fl ON fl.rowid=o.flow_id LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"WHERE o.id>{afterId} ORDER BY o.id LIMIT {limit}";
             var rows = ReadRecentFlowQuery(sql, out var lastId);
@@ -2815,8 +2901,9 @@ public sealed partial class ObservationStore : IDisposable
                     NullableTextValue(statement, 8), NullableInt64(statement, 9), NullableInt64(statement, 10),
                     Text(statement, 11) == "vpn_transport" ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
                     NullableTextValue(statement, 12), Text(statement, 13), NullableTextValue(statement, 14), NullableTextValue(statement, 15),
-                    NullableTextValue(statement, 16)));
-                if (WinSqlite.ColumnCount(statement) > 17) lastId = WinSqlite.ColumnInt64(statement, 17);
+                    NullableTextValue(statement, 16),
+                    WinSqlite.ColumnType(statement, 17) == 5 ? null : Moment(statement, 17)));
+                if (WinSqlite.ColumnCount(statement) > 18) lastId = WinSqlite.ColumnInt64(statement, 18);
             }
         }
         finally { WinSqlite.Finalize(statement); }

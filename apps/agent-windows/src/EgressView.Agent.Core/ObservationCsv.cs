@@ -10,7 +10,11 @@ public static class ObservationCsv
     [
         "first_observed_at", "last_observed_at", "process_name", "process_id",
         "protocol", "local_address", "local_port", "remote_address", "remote_hostname", "remote_port", "country_code",
-        "bytes_in", "bytes_out", "layer", "collector"
+        "bytes_in", "bytes_out", "layer", "collector",
+        // Last, so every column before it keeps its place for anything that
+        // already reads these files. Empty for UDP and for a connection whose
+        // end was not reported.
+        "ended_at"
     ];
 
     public static string Export(IEnumerable<RecentFlow> observations)
@@ -51,6 +55,7 @@ public static class ObservationCsv
                 row.BytesSent?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
                 row.Layer.ToString(),
                 row.Origin,
+                row.EndedAt?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? string.Empty,
             };
             output.AppendJoin(',', fields.Select(Field)).Append("\r\n");
         }
