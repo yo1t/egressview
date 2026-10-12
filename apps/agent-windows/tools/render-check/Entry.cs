@@ -843,28 +843,46 @@ internal static class Entry
             // app shows with; a window that is never shown here keeps 12.
             var window = new MainWindow();
             window.Style ??= (Style)application.Resources[typeof(Window)];
-            foreach (var name in new[] { "MetricChoice", "DestinationChoice", "SpinSpeedChoice", "GlobeViewChoice" })
+            // The globe/countries switch is also laid out as it is on a narrow
+            // card, where it has the card's width and no more: about 300 at the
+            // narrowest. Measured only with all the room it wanted, it passed
+            // while "Destination countries" was cut on the device.
+            foreach (var (name, room) in new[] { ("MetricChoice", double.PositiveInfinity), ("DestinationChoice", double.PositiveInfinity),
+                ("SpinSpeedChoice", double.PositiveInfinity), ("GlobeViewChoice", double.PositiveInfinity), ("GlobeViewChoice", 300d) })
             {
                 var choice = (ListBox)window.FindName(name)!;
                 if (choice.Parent is System.Windows.Controls.Panel holder) holder.Children.Remove(choice);
                 // The window's own font, which the switch inherits in place.
                 // Taken out of the window it would fall back to 12, and
                 // "Connections" fits at 12 where it does not at the app's size.
-                var host = new Grid();
+                var host = new Grid { HorizontalAlignment = System.Windows.HorizontalAlignment.Left };
+                if (!double.IsInfinity(room)) host.Width = room;
                 System.Windows.Documents.TextElement.SetFontSize(host, window.FontSize);
                 System.Windows.Documents.TextElement.SetFontFamily(host, window.FontFamily);
                 host.Children.Add(choice);
-                host.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                host.Measure(new Size(room, double.PositiveInfinity));
                 host.Arrange(new Rect(host.DesiredSize));
                 host.UpdateLayout();
                 foreach (var item in choice.Items.OfType<ListBoxItem>())
                 {
-                    var probe = new TextBlock { Text = item.Content as string ?? string.Empty, FontSize = item.FontSize, FontWeight = item.FontWeight, FontFamily = item.FontFamily };
-                    probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                    // Where the segment wraps its label, each word must fit its
+                    // width and the lines its height; elsewhere, the whole label.
+                    var wraps = FindVisual<TextBlock>(item)?.TextWrapping == TextWrapping.Wrap;
+                    var text = item.Content as string ?? string.Empty;
                     // The segment's border is a pixel each side inside the item.
-                    var room = item.ActualWidth - item.Padding.Left - item.Padding.Right - 2;
-                    if (probe.DesiredSize.Width > room + 0.5)
-                        faults.Add($"{language} {name} \"{probe.Text}\" needs {probe.DesiredSize.Width:F0}px, has {room:F0}px");
+                    var segment = item.ActualWidth - item.Padding.Left - item.Padding.Right - 2;
+                    var lines = item.ActualHeight - item.Padding.Top - item.Padding.Bottom - 2;
+                    Size Needs(string value, double width)
+                    {
+                        var probe = new TextBlock { Text = value, FontSize = item.FontSize, FontWeight = item.FontWeight, FontFamily = item.FontFamily,
+                            TextWrapping = double.IsInfinity(width) ? TextWrapping.NoWrap : TextWrapping.Wrap };
+                        probe.Measure(new Size(width, double.PositiveInfinity));
+                        return probe.DesiredSize;
+                    }
+                    var widest = wraps ? text.Split(' ').Max(word => Needs(word, double.PositiveInfinity).Width) : Needs(text, double.PositiveInfinity).Width;
+                    var tall = wraps ? Needs(text, segment).Height : Needs(text, double.PositiveInfinity).Height;
+                    if (widest > segment + 0.5 || tall > lines + 0.5)
+                        faults.Add($"{language} {name}{(double.IsInfinity(room) ? "" : $" in {room}")} \"{text}\" needs {widest:F0}x{tall:F0}px, has {segment:F0}x{lines:F0}px");
                 }
             }
             foreach (var (legendName, textSample) in new[] { ("SleepLegend", (string?)null), ("MonitoringGapLegend", "MonitoringGapLegend") })
@@ -890,6 +908,17 @@ internal static class Entry
         if (faults.Count > 0)
             throw new InvalidOperationException($"Labels are cut: {string.Join("; ", faults)}");
         Console.WriteLine("labels: switches and timeline legends whole in en and ja");
+    }
+
+    private static T? FindVisual<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T found) return found;
+            if (FindVisual<T>(child) is { } deeper) return deeper;
+        }
+        return null;
     }
 
     private static List<string> DeadPointsAcrossWidth(System.Windows.Controls.ComboBox choice)
