@@ -1,6 +1,7 @@
 'use strict';
 
 const runtimeProfiler = require('./runtime-profiler');
+const { forEachInSlices } = require('./threat-verdicts');
 
 function tallyThreats(groups, threatIntel) {
   let safe = 0;
@@ -12,6 +13,23 @@ function tallyThreats(groups, threatIntel) {
     else if (threat.confidence === 'low') warn += cnt;
     else danger += cnt;
   }
+  return { safe, warn, danger };
+}
+
+/**
+ * tallyThreats a slice at a time, for the reads that may be large (P3-190).
+ * Each slice is measured, so a stall it causes still names itself.
+ */
+async function tallyThreatsInSlices(groups, threatIntel, options = {}) {
+  let safe = 0;
+  let warn = 0;
+  let danger = 0;
+  await forEachInSlices(groups, ({ dst, dstHost, cnt }) => {
+    const threat = threatIntel?.matchThreatIntel(dst, dstHost || dst);
+    if (!threat) safe += cnt;
+    else if (threat.confidence === 'low') warn += cnt;
+    else danger += cnt;
+  }, { measure: fn => runtimeProfiler.measureSync('aiFacts.tallyThreats', fn), ...options });
   return { safe, warn, danger };
 }
 
@@ -72,9 +90,7 @@ function buildAiFacts({ history, threatIntel, routers, from, to, sourceScope = n
 async function periodFactsAsync(read, threatIntel, from, to, sourceScope = null) {
   const counts = await read('countFactsByTimeRange', from, to, { sourceScope });
   const groups = await read('groupDstByTimeRange', from, to, { sourceScope });
-  // Measured, because it runs on the request thread over every destination
-  // in the period, and a stall it caused would otherwise name nothing (P3-190).
-  return { ...counts, ...runtimeProfiler.measureSync('aiFacts.tallyThreats', () => tallyThreats(groups, threatIntel)) };
+  return { ...counts, ...await tallyThreatsInSlices(groups, threatIntel) };
 }
 
 /**
@@ -110,5 +126,5 @@ async function buildAiFactsAsync({
 }
 
 module.exports = {
-  buildAiFacts, buildAiFactsAsync, collectionFacts, countThreats, periodFacts, tallyThreats,
+  buildAiFacts, buildAiFactsAsync, collectionFacts, countThreats, periodFacts, tallyThreats, tallyThreatsInSlices,
 };

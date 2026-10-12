@@ -1029,6 +1029,13 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
   // indefinitely (P2-87). Started after readiness so slow startup/migration
   // work never trips it.
   startEventLoopWatchdog();
+
+  // Load the AI provider's SDK once the startup work is over, instead of inside
+  // the first request or the morning notification that needs it (P3-190).
+  setTimeout(() => {
+    runtimeProfiler.measureAsync('ai.warmUp', () => aiProvider.warmUp())
+      .catch(error => logger.warn('[ai] warm-up failed:', error.message));
+  }, 60 * 1000).unref();
 }).catch(error => {
   logger.error('[startup] Hub could not start:', error.stack || error.message);
   process.exit(1);

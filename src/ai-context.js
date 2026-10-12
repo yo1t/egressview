@@ -9,6 +9,7 @@
 // The consent/privacy UI copy reflects this boundary.
 
 const runtimeProfiler = require('./runtime-profiler');
+const { forEachInSlices } = require('./threat-verdicts');
 
 const MAX_SERVICES = 20;
 const MAX_DESTINATIONS = 15;
@@ -48,27 +49,45 @@ function hostOrNull(dst, dstHost) {
   return host && host !== dst ? host.slice(0, 253) : null;
 }
 
+function threatEntry(dst, dstHost, cnt, match) {
+  return {
+    ip: dst,
+    host: hostOrNull(dst, dstHost),
+    connections: Number(cnt) || 0,
+    level: match.confidence === 'low' ? 'warn' : 'danger',
+    source: match.source ? String(match.source).slice(0, 60) : null,
+    tag: match.tag ? String(match.tag).slice(0, 60) : null,
+    devices: [],
+  };
+}
+
+function topThreats(threats) {
+  threats.sort((a, b) => (a.level === b.level
+    ? b.connections - a.connections
+    : (a.level === 'danger' ? -1 : 1)));
+  return threats.slice(0, MAX_THREATS);
+}
+
 // Classify grouped destinations into prioritized threats (danger before warn).
 function rankThreats(dstGroups, threatIntel) {
   if (!threatIntel?.matchThreatIntel) return [];
   const threats = [];
   for (const { dst, dstHost, cnt } of dstGroups) {
     const match = threatIntel.matchThreatIntel(dst, dstHost || dst);
-    if (!match) continue;
-    threats.push({
-      ip: dst,
-      host: hostOrNull(dst, dstHost),
-      connections: Number(cnt) || 0,
-      level: match.confidence === 'low' ? 'warn' : 'danger',
-      source: match.source ? String(match.source).slice(0, 60) : null,
-      tag: match.tag ? String(match.tag).slice(0, 60) : null,
-      devices: [],
-    });
+    if (match) threats.push(threatEntry(dst, dstHost, cnt, match));
   }
-  threats.sort((a, b) => (a.level === b.level
-    ? b.connections - a.connections
-    : (a.level === 'danger' ? -1 : 1)));
-  return threats.slice(0, MAX_THREATS);
+  return topThreats(threats);
+}
+
+/** rankThreats a slice at a time, each slice measured (P3-190). */
+async function rankThreatsInSlices(dstGroups, threatIntel, options = {}) {
+  if (!threatIntel?.matchThreatIntel) return [];
+  const threats = [];
+  await forEachInSlices(dstGroups, ({ dst, dstHost, cnt }) => {
+    const match = threatIntel.matchThreatIntel(dst, dstHost || dst);
+    if (match) threats.push(threatEntry(dst, dstHost, cnt, match));
+  }, { measure: fn => runtimeProfiler.measureSync('aiContext.rankThreats', fn), ...options });
+  return topThreats(threats);
 }
 
 // Attach the source devices that contacted each threat destination.
@@ -331,7 +350,7 @@ async function buildAiContextAsync({
   const reads = contextReads({ read, from, to, threatIntel, sourceScope });
   const services = await reads.services();
   const dstGroups = await reads.dstGroups();
-  const top = runtimeProfiler.measureSync('aiContext.rankThreats', () => reads.rank(dstGroups));
+  const top = await rankThreatsInSlices(dstGroups, threatIntel);
   const links = await reads.threatLinks(top);
   const activity = await reads.activity();
   return runtimeProfiler.measureSync('aiContext.assemble', () => assembleAiContext({

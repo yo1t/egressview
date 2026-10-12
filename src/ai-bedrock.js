@@ -187,7 +187,26 @@ function createBedrockTransport({ runtime = null, control = null, requireModule 
     }
   }
 
-  return { converse, listModels, listGuardrails };
+  /**
+   * Load the SDK, make the region's client and resolve its credentials now,
+   * rather than inside the first request that needs them. Measured on the
+   * production Hub 2026-10-12: loading the SDK alone is about 82 ms on the
+   * thread that answers every request, and the daily AI notification was the
+   * first Bedrock call after each restart (P3-190). A failure here is not an
+   * error: the request that needs Bedrock will report it.
+   */
+  async function warm({ region }) {
+    if (!region) return false;
+    const client = runtimeClient(region);
+    try {
+      await client.config.credentials();
+    } catch {
+      // Reported by the first real request instead.
+    }
+    return true;
+  }
+
+  return { converse, listModels, listGuardrails, warm };
 }
 
 module.exports = { createBedrockTransport, mapAwsError, extractText, bedrockNotInstalledError, BEDROCK_NOT_INSTALLED };
