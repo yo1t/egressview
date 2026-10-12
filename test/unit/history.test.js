@@ -1308,6 +1308,29 @@ describe('snapshotHistory', () => {
     assert.equal(row.lastSeen, later, '更新後のlastSeenが保存される');
   });
 
+  // P3-190: about 2,500 rows in one transaction held the request thread for
+  // 176-196 ms every ten minutes on production, once 632 ms.
+  it('分けて書くsnapshotは、同じ行を小分けのトランザクションで書き、合間にループを返す', async () => {
+    const now = Date.now();
+    for (let i = 0; i < 7; i += 1) cache(`10.5.4.${i}`, now);
+    const slices = [];
+    let yields = 0;
+    const written = await history.snapshotHistoryInSlices({
+      sliceRows: 3,
+      measure: fn => { const n = fn(); slices.push(n); return n; },
+      yieldToLoop: async () => { yields += 1; },
+    });
+    assert.equal(written, 7);
+    assert.deepEqual(slices, [3, 3, 1], '3行ずつ、最後は残り1行');
+    assert.equal(yields, 2, '最後の小分けの後はループを返さない');
+    assert.deepEqual(persistedDsts().filter(d => d.startsWith('10.5.4.')),
+      ['10.5.4.0', '10.5.4.1', '10.5.4.2', '10.5.4.3', '10.5.4.4', '10.5.4.5', '10.5.4.6']);
+
+    // The same window rule as the whole snapshot: nothing moved, nothing written.
+    for (let i = 0; i < 7; i += 1) history.getConnectionHistory().get(`192.168.5.1|10.5.4.${i}|443|TCP`).lastSeen = now - 60 * 60 * 1000;
+    assert.equal(await history.snapshotHistoryInSlices({ yieldToLoop: async () => {} }), 0);
+  });
+
   it('起動直後のsnapshotは、DBから読んだ分を書き戻さない', () => {
     // loadIntoMemory marks everything as already persisted; without that the
     // first snapshot after startup rewrites the whole cache for nothing.
