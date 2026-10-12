@@ -957,19 +957,29 @@ function createHistoryQueries({
     const db = getDb();
     if (!db) return { deviceCount: 0, destinationCount: 0, newDevices: [], newDestinations: [] };
     if (from == null || to == null) return { deviceCount: 0, destinationCount: 0, newDevices: [], newDestinations: [] };
-    const newDevices = db.prepare(
-      `SELECT src, srcMac, srcVendor, srcDnsName, srcMdnsName, MIN(firstSeen) as firstSeen
-       FROM connections GROUP BY src
+    // Two steps (P3-190). Which sources and destinations first appeared in the
+    // window is answered from (src, firstSeen) / (dst, firstSeen) alone when
+    // those indexes exist (history-indexes.js); the descriptive columns are
+    // then read only for the few that did, instead of for all 627,000 rows.
+    const firstSeen = column => db.prepare(
+      `SELECT ${column} AS key, MIN(firstSeen) AS firstSeen
+       FROM connections GROUP BY ${column}
        HAVING MIN(firstSeen) >= ? AND MIN(firstSeen) <= ?
        ORDER BY firstSeen DESC`
     ).all(from, to);
-    const newDestinations = db.prepare(
-      `SELECT dst, MAX(dstHost) as dstHost, MAX(country) as country, MAX(org) as org,
-              MIN(firstSeen) as firstSeen
-       FROM connections GROUP BY dst
-       HAVING MIN(firstSeen) >= ? AND MIN(firstSeen) <= ?
-       ORDER BY firstSeen DESC`
-    ).all(from, to);
+    // The row the source was first seen on, as the single grouped query
+    // returned it: SQLite takes bare columns from the MIN(firstSeen) row.
+    const deviceRow = db.prepare(
+      `SELECT src, srcMac, srcVendor, srcDnsName, srcMdnsName, firstSeen
+       FROM connections WHERE src = ? ORDER BY firstSeen ASC LIMIT 1`
+    );
+    const destinationRow = db.prepare(
+      `SELECT dst, MAX(dstHost) AS dstHost, MAX(country) AS country, MAX(org) AS org,
+              MIN(firstSeen) AS firstSeen
+       FROM connections WHERE dst = ?`
+    );
+    const newDevices = firstSeen('src').map(({ key }) => deviceRow.get(key));
+    const newDestinations = firstSeen('dst').map(({ key }) => destinationRow.get(key));
     return {
       deviceCount: newDevices.length,
       destinationCount: newDestinations.length,
@@ -977,6 +987,7 @@ function createHistoryQueries({
       newDestinations,
     };
   }
+
 
   return {
     queryByTimeRange,

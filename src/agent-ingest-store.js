@@ -741,6 +741,9 @@ function _dbForTest() {
 
 module.exports = {
   OBSERVATIONS_PER_CHUNK,
+  // The maintenance thread's connection, for work that is not agent ingest
+  // but has to run on that thread (history-indexes.js).
+  currentDb: () => db,
   closeDb,
   listGeoLocations,
   initDb,
