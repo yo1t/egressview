@@ -1104,6 +1104,29 @@ describe('queryNewNodes', () => {
     const newSrcs = result.newDevices.map(d => d.src);
     assert.ok(!newSrcs.includes('192.168.1.10'), 'device with earlier firstSeen should not be classified as new');
   });
+
+  // P3-190: the query became two steps; the answer must be the one the single
+  // grouped query gave -- the device's columns from its first row, the
+  // destination's MAX columns over all its rows, newest first.
+  it('2段に分けても、送信元は最初の行の値、宛先は全行のMAX、新しい順で返す', () => {
+    const now = Date.now();
+    history.appendHistoryLog({ src: '192.168.7.1', dst: '10.7.0.1', dport: 443, proto: 'TCP',
+      srcMac: 'AA:AA:AA:00:00:01', srcDnsName: 'first-row', firstSeen: now - 3000, lastSeen: now - 3000 });
+    history.appendHistoryLog({ src: '192.168.7.1', dst: '10.7.0.2', dport: 443, proto: 'TCP',
+      srcMac: 'AA:AA:AA:00:00:02', srcDnsName: 'later-row', firstSeen: now - 1000, lastSeen: now });
+    history.appendHistoryLog({ src: '192.168.7.2', dst: '10.7.0.1', dport: 80, proto: 'TCP',
+      dstHost: 'b.example', firstSeen: now - 2000, lastSeen: now });
+
+    const result = history.queryNewNodes(now - 5000, now);
+    const device = result.newDevices.find(d => d.src === '192.168.7.1');
+    assert.equal(device.srcDnsName, 'first-row');
+    assert.equal(device.firstSeen, now - 3000);
+    assert.deepEqual(result.newDevices.map(d => d.src).filter(s => s.startsWith('192.168.7.')), ['192.168.7.2', '192.168.7.1']);
+    const destination = result.newDestinations.find(d => d.dst === '10.7.0.1');
+    assert.equal(destination.dstHost, 'b.example');
+    assert.equal(destination.firstSeen, now - 3000);
+    assert.deepEqual(result.newDestinations.map(d => d.dst).filter(d => d.startsWith('10.7.0.')), ['10.7.0.2', '10.7.0.1']);
+  });
 });
 
 describe('bounded hot history cache', () => {

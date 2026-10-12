@@ -17,6 +17,7 @@
 const { parentPort, workerData } = require('node:worker_threads');
 const Database = require('better-sqlite3');
 const agentIngest = require('./agent-ingest-store');
+const { ensureHistoryIndexes } = require('./history-indexes');
 const { createHistoryQueries } = require('./history-queries');
 const { createNotificationLogQuery } = require('./notification-log-query');
 const { createAgentAttribution } = require('./agent-attribution');
@@ -170,6 +171,8 @@ const operations = {
   // reader or a writer, and copies what it can.
   'wal.checkpoint': () => agentIngest.checkpointLog(),
   'history.read': readHistory,
+  // Read-only accelerators, built here so the main thread never waits on them.
+  'history.ensureIndexes': () => ensureHistoryIndexes(agentIngest.currentDb()),
 };
 
 function handle({ id, op, args }) {

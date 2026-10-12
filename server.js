@@ -788,6 +788,19 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
     setTimeout(agentPrunePass, more ? AGENT_PRUNE_FIRST_MS : AGENT_PRUNE_IDLE_MS).unref?.();
   };
   setTimeout(agentPrunePass, AGENT_PRUNE_FIRST_MS).unref?.();
+  // Indexes that only speed up a read (history-indexes.js), built on the
+  // database thread once startup is over. A missing one costs only speed.
+  setTimeout(() => {
+    runtimeProfiler.measureAsync('dbWorker.history.ensureIndexes', () => dbWorker.run('history.ensureIndexes'))
+      .then(result => {
+        if (result?.built?.length) {
+          logger.info(`[history] built ${result.built.map(index => `${index.name} in ${index.ms} ms`).join(', ')}`);
+        }
+      })
+      .catch(error => {
+        if (error.code !== 'DB_WORKER_CLOSED') logger.warn('[history] index build failed:', error.message);
+      });
+  }, 2 * 60 * 1000).unref?.();
   agentCorrelationRunner.init({ agentIngest, logger });
   agentCorrelationRunner.start();
   authAudit.prune();
