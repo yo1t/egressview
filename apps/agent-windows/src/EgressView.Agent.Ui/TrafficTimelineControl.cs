@@ -98,7 +98,7 @@ public sealed class TrafficTimelineControl : FrameworkElement
         // gridlines stay either way -- they cost no room and still say where
         // half is.
         var labelPitch = axisPrototype.Height + 4;
-        var affordable = plotHeight >= labelPitch * 3 ? 3 : plotHeight >= labelPitch * 2 ? 2 : 1;
+        var affordable = LabelEveryTickForTesting ? 3 : plotHeight >= labelPitch * 3 ? 3 : plotHeight >= labelPitch * 2 ? 2 : 1;
         for (var step = 0; step <= 2; step++)
         {
             var fraction = step / 2d;
@@ -190,6 +190,10 @@ public sealed class TrafficTimelineControl : FrameworkElement
         }
         else System.Windows.Automation.AutomationProperties.SetHelpText(this, string.Empty);
     }
+
+    /// Draws all three labels whatever the height, as before P3-104, so the
+    /// render check can prove its overlap detector still finds that.
+    internal static bool LabelEveryTickForTesting { get; set; }
 
     private string FormatAxisValue(double value)
     {
