@@ -226,6 +226,18 @@ try
         EndedAt(50002, ended => ended is null, "a UDP row has no end");
         endStore.WriteBatch([Traffic("TCP", 50000, t0.AddSeconds(30))]);
         EndedAt(50000, ended => ended is null, "data after the end opens the row again: the same endpoints in use once more");
+        // Ports are reused. An end that arrives before its own row is written
+        // must not close an older row with the same endpoints.
+        var reusedAt = t0.AddDays(3);
+        var beforeItsRow = endStore.RecordConnectionEnds([new ConnectionEnd("192.0.2.10", 50001, "198.51.100.20", 443, reusedAt.AddSeconds(1), reusedAt)]);
+        Assert(beforeItsRow.Count == 1, "an end does not close an older row with the same endpoints");
+        EndedAt(50001, ended => ended is null, "the older row keeps having no end");
+        endStore.WriteBatch([Traffic("TCP", 50001, reusedAt) with { ProcessInstanceId = "reused" }]);
+        Assert(endStore.RecordConnectionEnds(beforeItsRow).Count == 0, "tried again once its row exists, the end finds it");
+        var reusedRows = endStore.ReadRecentFlows(50).Where(row => row.LocalPort == 50001).ToList();
+        Assert(reusedRows.Single(row => row.LastSeen == reusedAt).EndedAt == reusedAt.AddSeconds(1)
+               && reusedRows.Single(row => row.LastSeen == t0).EndedAt is null,
+            "the end lands on the connection it belongs to, not on the one before it");
         var csvRow = ObservationCsv.Export(endStore.ReadRecentFlows(50));
         Assert(csvRow.Split("\r\n")[0].EndsWith(",ended_at", StringComparison.Ordinal), "the CSV carries the end as its last column");
 

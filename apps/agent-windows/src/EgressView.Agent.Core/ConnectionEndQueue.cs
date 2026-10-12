@@ -2,7 +2,16 @@ namespace EgressView.Agent.Core;
 
 /// The end of a TCP connection as Windows reported it: the two endpoints as
 /// the event named them, which is not always local first.
-public sealed record ConnectionEnd(string SourceAddress, int SourcePort, string DestinationAddress, int DestinationPort, DateTimeOffset At);
+///
+/// <param name="NotBefore">The earliest a row it closes can have last seen
+/// traffic: when the connection started, if that was seen, or else when the
+/// collector started. Ports are reused, and without this an end that arrived
+/// before its own row was written closed an older row with the same
+/// endpoints instead -- on the first morning, 26 of 341 ends, most of them a
+/// monitoring agent that connects every five seconds, landed on rows from
+/// days before.</param>
+public sealed record ConnectionEnd(string SourceAddress, int SourcePort, string DestinationAddress, int DestinationPort, DateTimeOffset At,
+    DateTimeOffset NotBefore = default);
 
 /// Holds connection ends until the row they close has had time to be written
 /// (P3-108).

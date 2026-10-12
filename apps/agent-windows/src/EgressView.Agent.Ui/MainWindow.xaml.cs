@@ -2920,6 +2920,9 @@ public sealed class FlowRow(RecentFlow value, bool spansTime = true, DateTimeOff
     /// Whether a reader would see any difference between the two rows.
     internal bool LooksSameAs(FlowRow other) =>
         LastSeenText == other.LastSeenText && FirstSeenText == other.FirstSeenText && StateText == other.StateText &&
+        // An end arrives a few seconds after the row's last traffic and
+        // changes nothing else, so without this the row kept its empty cell.
+        EndedText == other.EndedText &&
         BytesSentText == other.BytesSentText && BytesReceivedText == other.BytesReceivedText &&
         Destination == other.Destination && Country == other.Country && ProcessName == other.ProcessName;
 
