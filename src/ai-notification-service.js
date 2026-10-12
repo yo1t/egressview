@@ -5,6 +5,7 @@ const { buildAiFactsAsync } = require('./ai-facts');
 const { buildAiContextAsync } = require('./ai-context');
 const logger = require('./logger');
 const runtimeProfiler = require('./runtime-profiler');
+const { memoThreatIntel } = require('./threat-verdicts');
 
 const CLOUD_PROVIDERS = new Set(['anthropic', 'openai', 'bedrock']);
 const DEFAULT_CONFIG = Object.freeze({
@@ -306,8 +307,13 @@ function createAiNotificationService(deps) {
     const requestId = randomUUID();
     try {
       const routers = getRouters();
-      const facts = await buildAiFactsAsync({ read, threatIntel, routers, from, to, serverTime: to });
-      const context = await buildAiContextAsync({ facts, read, routers, from, to, threatIntel, devices, asus });
+      // One verdict per destination for the whole run: the facts and the
+      // context match the same current period (P3-190).
+      const verdicts = memoThreatIntel(threatIntel);
+      const facts = await buildAiFactsAsync({ read, threatIntel: verdicts, routers, from, to, serverTime: to });
+      const context = await buildAiContextAsync({
+        facts, read, routers, from, to, threatIntel: verdicts, devices, asus,
+      });
       const result = await aiProvider.generateInsight(context, {
         cloudConsentConfirmed: cloud,
         language: getLanguage(),

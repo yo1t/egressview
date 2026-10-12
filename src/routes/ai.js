@@ -6,6 +6,7 @@ const { parseRequest } = require('../http-validation');
 const { buildAiFactsAsync } = require('../ai-facts');
 const { createHistoryReader, createSharedReader } = require('../history-reader');
 const { buildAiContextAsync } = require('../ai-context');
+const { memoThreatIntel } = require('../threat-verdicts');
 const { randomUUID } = require('node:crypto');
 const { monthlyRanges, pricingCoverage, pricingMetadata, pricingStatus } = require('../ai-usage');
 const { AI_PRIOR_ANALYSIS_MAX_CHARS } = require('../ai-limits');
@@ -407,11 +408,13 @@ module.exports = function aiRoutes({
       reservation = aiBudget.begin({ principal: budgetPrincipal(req), provider, kind: 'analysis' });
       const sourceScope = scoped.scope;
       const routers = collectionSources(sourceScope);
+      // One verdict per destination for the facts and the context (P3-190).
+      const verdicts = memoThreatIntel(threatIntel);
       const facts = await readFacts({
-        threatIntel, routers, from, to, openEnded: endsAboutNow(parsed.data.to), sourceScope,
+        threatIntel: verdicts, routers, from, to, openEnded: endsAboutNow(parsed.data.to), sourceScope,
       });
       const context = await buildAiContextAsync({
-        facts, read: reader.read, routers, from, to, threatIntel, devices, asus, sourceScope,
+        facts, read: reader.read, routers, from, to, threatIntel: verdicts, devices, asus, sourceScope,
       });
       const result = await aiProvider.generateInsight(context, {
         signal: controller.signal,
@@ -520,11 +523,13 @@ module.exports = function aiRoutes({
     req.once('aborted', () => controller.abort());
     try {
       const routers = collectionSources(sourceScope);
+      // One verdict per destination for the facts and the context (P3-190).
+      const verdicts = memoThreatIntel(threatIntel);
       const facts = await readFacts({
-        threatIntel, routers, from, to, openEnded: endsAboutNow(parsed.data.to), sourceScope,
+        threatIntel: verdicts, routers, from, to, openEnded: endsAboutNow(parsed.data.to), sourceScope,
       });
       const context = await buildAiContextAsync({
-        facts, read: reader.read, routers, from, to, threatIntel, devices, asus, sourceScope,
+        facts, read: reader.read, routers, from, to, threatIntel: verdicts, devices, asus, sourceScope,
       });
       const response = await aiProvider.generateInsight(context, {
         signal: controller.signal,

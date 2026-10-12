@@ -543,7 +543,19 @@ function createAiProvider({ fetchImpl = globalThis.fetch, endpointFetchImpl = nu
     }
   }
 
-  return { configure, exportConfig, generateInsight, getPublicConfig, listModels, listGuardrails, testConnection };
+  /**
+   * Make the configured cloud provider ready before anything waits on it.
+   * Only Bedrock has work to do: its SDK is loaded the first time it is used,
+   * and that first use was the daily notification (P3-190).
+   */
+  async function warmUp() {
+    if (provider !== 'bedrock' || !region || typeof bedrock?.warm !== 'function') return false;
+    return bedrock.warm({ region });
+  }
+
+  return {
+    configure, exportConfig, generateInsight, getPublicConfig, listModels, listGuardrails, testConnection, warmUp,
+  };
 }
 
 // Lazy Bedrock transport for the shared singleton: the AWS SDK (via
@@ -556,6 +568,7 @@ function defaultBedrockTransport() {
     converse: args => get().converse(args),
     listModels: args => get().listModels(args),
     listGuardrails: args => get().listGuardrails(args),
+    warm: args => get().warm(args),
   };
 }
 
