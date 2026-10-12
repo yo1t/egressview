@@ -966,8 +966,19 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
     deviceId.loadOuiDb();
   }
 
-  setInterval(() => runtimeProfiler.measureSync('history.snapshot', () => history.snapshotHistory()),
-    10 * 60 * 1000);
+  // In slices, each its own transaction, with the loop let go in between
+  // (P3-190). One pass at a time: a pass still writing when the next is due
+  // would choose rows from the same window again.
+  let snapshotRunning = false;
+  setInterval(() => {
+    if (snapshotRunning) return;
+    snapshotRunning = true;
+    runtimeProfiler.measureAsync('history.snapshot', () => history.snapshotHistoryInSlices({
+      measure: fn => runtimeProfiler.measureSync('history.snapshotSlice', fn),
+    }))
+      .catch(error => logger.warn('[history] snapshot failed:', error.message))
+      .finally(() => { snapshotRunning = false; });
+  }, 10 * 60 * 1000);
   setInterval(() => runtimeProfiler.measureSync('history.compact', () => history.compactHistoryLog()),
     30 * 60 * 1000);
   // Each pass deletes what it can inside a time budget and says whether more is

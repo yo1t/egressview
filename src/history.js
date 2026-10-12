@@ -550,6 +550,46 @@ function snapshotHistory() {
   logger.info(`[history] Snapshot ${pending.length}/${connectionHistory.size} entries to SQLite`);
 }
 
+// Rows per transaction for the periodic snapshot. Measured on the production
+// Hub 2026-10-11: about 2,500 rows in one transaction took 176-196 ms every ten
+// minutes, once 632 ms, on the thread that answers every request (P3-190).
+const SNAPSHOT_SLICE_ROWS = 250;
+
+/**
+ * The same snapshot, written a slice at a time with the event loop let go in
+ * between, so requests, agent uploads and /healthz are answered while it runs.
+ *
+ * The rows are chosen once, up front, exactly as snapshotHistory chooses them;
+ * an entry that moves again while the slices are written is picked up by the
+ * next snapshot through the overlap. snapshotHistory stays whole for shutdown,
+ * where there is nothing left to answer and no next snapshot.
+ */
+async function snapshotHistoryInSlices({
+  sliceRows = SNAPSHOT_SLICE_ROWS,
+  measure = fn => fn(),
+  yieldToLoop = () => new Promise(resolve => setImmediate(resolve)),
+} = {}) {
+  if (!db || connectionHistory.size === 0) return 0;
+  const startedAt = Date.now();
+  const since = lastSnapshotAt ? lastSnapshotAt - SNAPSHOT_OVERLAP_MS : 0;
+  const pending = [];
+  for (const entry of connectionHistory.values()) {
+    if ((entry.lastSeen || 0) >= since) pending.push(entry);
+  }
+  lastSnapshotAt = startedAt;
+  if (!pending.length) return 0;
+  let written = 0;
+  for (let offset = 0; offset < pending.length; offset += sliceRows) {
+    // Closed or restored while this was waiting: the rest belongs to whatever
+    // database is open next, which reloads the cache from its own rows.
+    if (!db) break;
+    written += measure(() => appendHistoryLogs(pending.slice(offset, offset + sliceRows)));
+    if (offset + sliceRows < pending.length) await yieldToLoop();
+  }
+  logger.info(`[history] Snapshot ${written}/${connectionHistory.size} entries to SQLite`);
+  return written;
+}
+
 // Delete old entries from SQLite (junction rows go in the same transaction
 // so the two representations can never diverge on a delete)
 function compactHistoryLog() {
@@ -800,6 +840,7 @@ module.exports = {
   appendHistoryLog,
   appendHistoryLogs,
   snapshotHistory,
+  snapshotHistoryInSlices,
   connectionBuckets,
   agentAppDaily,
   compactHistoryLog,
