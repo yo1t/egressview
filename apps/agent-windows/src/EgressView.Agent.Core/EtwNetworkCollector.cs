@@ -96,6 +96,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     /// applies them from its heartbeat, against the store.
     public ConnectionEndQueue ConnectionEndsToRecord { get; } = new();
     private DateTimeOffset lastConnectionReconcile = DateTimeOffset.MinValue;
+    private DateTimeOffset collectingSince = DateTimeOffset.UtcNow;
     private string? error;
     private string? processNameSourceError;
     private string? hostnameSourceError;
@@ -211,6 +212,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             // Read as TraceEvent reads its own clocks for this session: the
             // drift is measured from here (P3-188).
             clock.Anchor();
+            collectingSince = DateTimeOffset.UtcNow;
             session.Source.Dynamic.All += Dispatch;
             processing = Task.Run(() =>
             {
@@ -484,9 +486,10 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         if (started) connectionEnds.Started(source, sourcePort, destination, destinationPort, At(e));
         else
         {
-            connectionEnds.Ended(source, sourcePort, destination, destinationPort);
+            var startedAt = connectionEnds.Ended(source, sourcePort, destination, destinationPort);
             if (source is not null && destination is not null)
-                ConnectionEndsToRecord.Add(new ConnectionEnd(source, sourcePort, destination, destinationPort, At(e)));
+                ConnectionEndsToRecord.Add(new ConnectionEnd(source, sourcePort, destination, destinationPort, At(e),
+                    startedAt ?? collectingSince));
         }
     }
 

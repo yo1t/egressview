@@ -55,13 +55,15 @@ public sealed class ConnectionEndAudit
         }
     }
 
-    public void Ended(string? localAddress, int localPort, string? remoteAddress, int remotePort)
+    /// Returns when the connection started, if its start was seen.
+    public DateTimeOffset? Ended(string? localAddress, int localPort, string? remoteAddress, int remotePort)
     {
-        if (Key(localAddress, localPort, remoteAddress, remotePort) is not { } key) return;
+        if (Key(localAddress, localPort, remoteAddress, remotePort) is not { } key) return null;
         lock (gate)
         {
-            if (open.Remove(key)) endedMatched++;
-            else endedWithoutStart++;
+            if (open.Remove(key, out var startedAt)) { endedMatched++; return startedAt; }
+            endedWithoutStart++;
+            return null;
         }
     }
 

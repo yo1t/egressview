@@ -2755,6 +2755,7 @@ public sealed partial class ObservationStore : IDisposable
                 UPDATE flows SET ended_at=?1 WHERE rowid=(
                   SELECT rowid FROM flows WHERE protocol='TCP' AND ended_at IS NULL
                     AND remote_address=?2 AND remote_port=?3 AND local_port=?4 AND local_address=?5 AND first_seen<=?1
+                    AND last_seen>=?6
                   ORDER BY last_seen DESC LIMIT 1)
                 """;
             Execute("BEGIN IMMEDIATE");
@@ -2766,8 +2767,11 @@ public sealed partial class ObservationStore : IDisposable
                     foreach (var end in ends)
                     {
                         var at = end.At.ToUniversalTime().ToString("O");
-                        if (!Close(statement, at, end.SourceAddress, end.SourcePort, end.DestinationAddress, end.DestinationPort)
-                            && !Close(statement, at, end.DestinationAddress, end.DestinationPort, end.SourceAddress, end.SourcePort))
+                        // A second of slack: the start event and the first
+                        // traffic are stamped by different events.
+                        var notBefore = (end.NotBefore == default ? DateTimeOffset.MinValue : end.NotBefore.AddSeconds(-1)).ToUniversalTime().ToString("O");
+                        if (!Close(statement, at, notBefore, end.SourceAddress, end.SourcePort, end.DestinationAddress, end.DestinationPort)
+                            && !Close(statement, at, notBefore, end.DestinationAddress, end.DestinationPort, end.SourceAddress, end.SourcePort))
                             unmatched.Add(end);
                     }
                 }
@@ -2778,10 +2782,10 @@ public sealed partial class ObservationStore : IDisposable
         }
         return unmatched;
 
-        bool Close(nint statement, string at, string local, int localPort, string remote, int remotePort)
+        bool Close(nint statement, string at, string notBefore, string local, int localPort, string remote, int remotePort)
         {
             Check(WinSqlite.Reset(statement));
-            Bind(statement, 1, at); Bind(statement, 2, remote);
+            Bind(statement, 1, at); Bind(statement, 2, remote); Bind(statement, 6, notBefore);
             Check(WinSqlite.BindInt64(statement, 3, remotePort)); Check(WinSqlite.BindInt64(statement, 4, localPort));
             Bind(statement, 5, local);
             CheckDone(WinSqlite.Step(statement));
