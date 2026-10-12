@@ -241,6 +241,22 @@ public partial class MainWindow : Window
     /// had once seen: "stuck for 7 hours 53 minutes, 47 waiting" while the Hub
     /// had acknowledged a batch seconds earlier. Read it with the tab it is
     /// shown on.
+    /// The globe card's title and its view switch share one line only while
+    /// both fit. The switch is a fixed 240 wide, so on a short window -- where
+    /// the card is narrowed with the globe column -- the title used to be cut
+    /// to "通信の行" and the line under it to half a sentence. Measured, not
+    /// guessed from a breakpoint: the title's length differs by language.
+    private void GlobeCardHeader_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        GlobeCardTitle.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var fits = GlobeCardTitle.DesiredSize.Width + 12 + GlobeViewChoice.Width <= e.NewSize.Width;
+        Grid.SetRow(GlobeViewChoice, fits ? 0 : 1);
+        Grid.SetColumn(GlobeViewChoice, fits ? 1 : 0);
+        Grid.SetColumnSpan(GlobeViewChoice, fits ? 1 : 2);
+        GlobeViewChoice.HorizontalAlignment = fits ? System.Windows.HorizontalAlignment.Stretch : System.Windows.HorizontalAlignment.Left;
+        GlobeViewChoice.Margin = fits ? new Thickness(12, 0, 0, 0) : new Thickness(0, 8, 0, 4);
+    }
+
     private async Task RefreshNetworkAndDeliveryAsync()
     {
         await RefreshDeliveryStatusAsync();

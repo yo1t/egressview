@@ -7,6 +7,7 @@ using System.Windows.Media.Imaging;
 using EgressView.Agent.Core;
 using EgressView.Agent.Ui;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using Application = System.Windows.Application;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
@@ -286,6 +287,8 @@ internal static class Entry
                 Save(chart, w, h, Path.Combine(output, $"timeline-{label}-{w}x{h}.png"));
             }
 
+        VerifyTimelineAxisLabelsApart(timeline, timelineStart);
+
         // An outage far shorter than one bucket must still reach the screen.
         //
         // Six hours over sixty buckets is six minutes a bar, so half a minute
@@ -462,6 +465,24 @@ internal static class Entry
             var footerTop = footer.TransformToAncestor(card).Transform(new System.Windows.Point(0, 0)).Y;
             var footerBottom = footerTop + footer.ActualHeight;
             Console.WriteLine($"country-list-{width}: viewportBottom={viewportBottom:F1} footerTop={footerTop:F1} footerBottom={footerBottom:F1} cardHeight={card.ActualHeight:F1}");
+            // The title and the line under it are read whole at any width the
+            // card takes. On a short window the card narrows with the globe
+            // column, and the fixed-width view switch used to leave the title
+            // as "通信の行" and the line below it as half a sentence.
+            foreach (var name in new[] { "GlobeCardTitle", "GlobeCardSubtitle" })
+            {
+                // A TextBlock keeps its own width when its column is narrower
+                // and simply is not drawn past the column, so its size says
+                // nothing. What it needs is set against the columns it was given.
+                var text = (TextBlock)countryDashboard.FindName(name)!;
+                var header = (Grid)text.Parent;
+                var given = header.ColumnDefinitions.Skip(Grid.GetColumn(text)).Take(Grid.GetColumnSpan(text)).Sum(column => column.ActualWidth);
+                var probe = new TextBlock { Text = text.Text, FontSize = text.FontSize, FontWeight = text.FontWeight, FontFamily = text.FontFamily, TextWrapping = text.TextWrapping };
+                probe.Measure(new Size(text.TextWrapping == TextWrapping.NoWrap ? double.PositiveInfinity : given, double.PositiveInfinity));
+                if (probe.DesiredSize.Width > given + 0.5)
+                    throw new InvalidOperationException($"The globe card's {name} needs {probe.DesiredSize.Width:F0}px and is given {given:F0}px at width {width}.");
+            }
+            Console.WriteLine($"globe-card-header-{width}: title and subtitle whole; switch on row {Grid.GetRow((UIElement)countryDashboard.FindName("GlobeViewChoice")!)}");
             if (viewportBottom > footerTop)
                 throw new InvalidOperationException($"Country list overlaps footer at width {width}: {viewportBottom} > {footerTop}");
             if (footerBottom > card.ActualHeight - 12)
@@ -680,6 +701,83 @@ internal static class Entry
         Console.WriteLine($"{name}: {width}x{height} overflow above={above} below={below} left={left} right={right}");
         if (above != 0 || below != 0 || left != 0 || right != 0)
             throw new InvalidOperationException($"{name} painted outside its {width}x{height} bounds");
+    }
+
+    /// P3-104: the timeline's axis labels never run into each other.
+    ///
+    /// The overflow check only asks whether a label leaves the card, and a
+    /// label that lands on its neighbour stays inside it. So the label band
+    /// -- the strip left of the plot, where nothing but those labels is drawn
+    /// -- is read row by row, the inked rows are joined into blocks, and every
+    /// block must be one label tall with clear space above and below. Heights
+    /// are swept a pixel at a time from where one label fits to well past
+    /// where three do, in both cultures the window is shown in. The drawing
+    /// from before the fix, three labels at every height, must fail the same
+    /// check, or the check is not looking at anything.
+    private static void VerifyTimelineAxisLabelsApart(IReadOnlyList<AppTimelineAggregate> timeline, DateTimeOffset start)
+    {
+        const int width = 420;
+        var original = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            var faults = new List<string>();
+            foreach (var culture in new[] { "ja-JP", "en-US" })
+            {
+                System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo(culture);
+                var oneLabel = Blocks(timeline, start, width, 400).Max(block => block.Height);
+                for (var height = 46; height <= 260; height++)
+                {
+                    var blocks = Blocks(timeline, start, width, height);
+                    if (blocks.Count == 0) { faults.Add($"{culture} {width}x{height}: no axis label at all"); continue; }
+                    for (var index = 0; index < blocks.Count; index++)
+                    {
+                        if (blocks[index].Height > oneLabel + 1)
+                            faults.Add($"{culture} {width}x{height}: labels merged into one {blocks[index].Height}px block (one label is {oneLabel}px)");
+                        if (index > 0 && blocks[index].Top - (blocks[index - 1].Top + blocks[index - 1].Height) < 2)
+                            faults.Add($"{culture} {width}x{height}: labels {blocks[index].Top - (blocks[index - 1].Top + blocks[index - 1].Height)}px apart");
+                    }
+                }
+            }
+            if (faults.Count > 0)
+                throw new InvalidOperationException($"Timeline axis labels collide (P3-104): {string.Join("; ", faults.Take(5))}");
+
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("ja-JP");
+            var single = Blocks(timeline, start, width, 400).Max(block => block.Height);
+            TrafficTimelineControl.LabelEveryTickForTesting = true;
+            var caught = Enumerable.Range(46, 215).Where(height =>
+            {
+                var blocks = Blocks(timeline, start, width, height);
+                return blocks.Any(block => block.Height > single + 1)
+                    || blocks.Zip(blocks.Skip(1)).Any(pair => pair.Second.Top - (pair.First.Top + pair.First.Height) < 2);
+            }).ToList();
+            if (caught.Count == 0)
+                throw new InvalidOperationException("The axis-label check passed three labels at every height, the drawing P3-104 fixed, so it would not catch it again.");
+            Console.WriteLine($"timeline-axis-labels: apart at every height 46-260 in ja-JP and en-US; three labels at every height collide at {caught.Count} heights ({caught.Min()}-{caught.Max()}px)");
+        }
+        finally
+        {
+            TrafficTimelineControl.LabelEveryTickForTesting = false;
+            System.Globalization.CultureInfo.CurrentCulture = original;
+        }
+
+        static List<(int Top, int Height)> Blocks(IReadOnlyList<AppTimelineAggregate> items, DateTimeOffset from, int w, int h)
+        {
+            var chart = new TrafficTimelineControl();
+            chart.SetItems(items, true, from, from.AddHours(6), [], gaps: []);
+            var pixels = RenderPixels(chart, w, h);
+            // Left of the plot, which begins at the smaller of 58px and a
+            // quarter of the width; the labels end seven pixels before it.
+            var band = (int)Math.Min(58, w * 0.24) - 3;
+            var blocks = new List<(int Top, int Height)>();
+            int? top = null;
+            for (var y = 0; y <= h; y++)
+            {
+                var inked = y < h && Enumerable.Range(0, band).Any(x => pixels[(y * w + x) * 4 + 3] > 40);
+                if (inked && top is null) top = y;
+                if (!inked && top is { } t) { blocks.Add((t, y - t)); top = null; }
+            }
+            return blocks;
+        }
     }
 
     /// Renders a control to raw pixels, with no host, frame or bleed.
