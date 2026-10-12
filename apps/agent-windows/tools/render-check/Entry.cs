@@ -434,6 +434,7 @@ internal static class Entry
             darkChoice.SelectedIndex != 0)
             throw new InvalidOperationException("Input controls lost their dark theme or selection.");
         VerifyDropDownsOpenAcrossTheirWidth();
+        VerifyLabelsNotCutInEitherLanguage(application);
         foreach (var width in new[] { 630, 340 })
         {
             var countryDashboard = new MainWindow();
@@ -819,6 +820,76 @@ internal static class Entry
             throw new InvalidOperationException(
                 "The drop-down check passed the template that shipped with P3-136, so it would not catch it again.");
         Console.WriteLine($"drop-downs: open at 5 of 5 points; the pre-#529 template does not at {string.Join(", ", brokenDead)}");
+    }
+
+    /// Segmented switches and chart legends read whole in Japanese and English.
+    ///
+    /// The switches had fixed widths sized to the Japanese words, so English
+    /// showed "Connection:", "Data volum" and "Norm"; the legends under the
+    /// timeline sat in a horizontal stack, which never gives text a width to
+    /// wrap at, and ran off the card. A switch is laid out with all the room it
+    /// wants, and each segment must then hold its label; a legend is laid out
+    /// at 300 wide, and its text must stay inside that.
+    private static void VerifyLabelsNotCutInEitherLanguage(Application application)
+    {
+        var faults = new List<string>();
+        foreach (var language in new[] { "en", "ja" })
+        {
+            var strings = application.Resources.MergedDictionaries.First(dictionary => dictionary.Source?.OriginalString.Contains("Strings.", StringComparison.Ordinal) == true);
+            application.Resources.MergedDictionaries.Remove(strings);
+            application.Resources.MergedDictionaries.Add(new ResourceDictionary
+            { Source = new Uri($"pack://application:,,,/EgressView.Agent.Ui;component/Resources/Strings.{language}.xaml") });
+            // The theme's window style (Segoe UI Variable Text at 14), which the
+            // app shows with; a window that is never shown here keeps 12.
+            var window = new MainWindow();
+            window.Style ??= (Style)application.Resources[typeof(Window)];
+            foreach (var name in new[] { "MetricChoice", "DestinationChoice", "SpinSpeedChoice", "GlobeViewChoice" })
+            {
+                var choice = (ListBox)window.FindName(name)!;
+                if (choice.Parent is System.Windows.Controls.Panel holder) holder.Children.Remove(choice);
+                // The window's own font, which the switch inherits in place.
+                // Taken out of the window it would fall back to 12, and
+                // "Connections" fits at 12 where it does not at the app's size.
+                var host = new Grid();
+                System.Windows.Documents.TextElement.SetFontSize(host, window.FontSize);
+                System.Windows.Documents.TextElement.SetFontFamily(host, window.FontFamily);
+                host.Children.Add(choice);
+                host.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                host.Arrange(new Rect(host.DesiredSize));
+                host.UpdateLayout();
+                foreach (var item in choice.Items.OfType<ListBoxItem>())
+                {
+                    var probe = new TextBlock { Text = item.Content as string ?? string.Empty, FontSize = item.FontSize, FontWeight = item.FontWeight, FontFamily = item.FontFamily };
+                    probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                    // The segment's border is a pixel each side inside the item.
+                    var room = item.ActualWidth - item.Padding.Left - item.Padding.Right - 2;
+                    if (probe.DesiredSize.Width > room + 0.5)
+                        faults.Add($"{language} {name} \"{probe.Text}\" needs {probe.DesiredSize.Width:F0}px, has {room:F0}px");
+                }
+            }
+            foreach (var (legendName, textSample) in new[] { ("SleepLegend", (string?)null), ("MonitoringGapLegend", "MonitoringGapLegend") })
+            {
+                var legend = (FrameworkElement)window.FindName(legendName)!;
+                var text = ((System.Windows.Controls.Panel)legend).Children.OfType<TextBlock>().Single();
+                if (textSample is not null)
+                    text.Text = string.Format(System.Globalization.CultureInfo.CurrentCulture, (string)application.Resources[textSample], "9s");
+                legend.Visibility = Visibility.Visible;
+                if (legend.Parent is System.Windows.Controls.Panel holder) holder.Children.Remove(legend);
+                var card = new Grid { Width = 300 };
+                System.Windows.Documents.TextElement.SetFontSize(card, window.FontSize);
+                System.Windows.Documents.TextElement.SetFontFamily(card, window.FontFamily);
+                card.Children.Add(legend);
+                card.Measure(new Size(300, double.PositiveInfinity));
+                card.Arrange(new Rect(0, 0, 300, card.DesiredSize.Height));
+                card.UpdateLayout();
+                var right = text.TranslatePoint(new System.Windows.Point(text.ActualWidth, 0), card).X;
+                if (right > 300.5)
+                    faults.Add($"{language} {legendName} runs to {right:F0}px in a 300px card");
+            }
+        }
+        if (faults.Count > 0)
+            throw new InvalidOperationException($"Labels are cut: {string.Join("; ", faults)}");
+        Console.WriteLine("labels: switches and timeline legends whole in en and ja");
     }
 
     private static List<string> DeadPointsAcrossWidth(System.Windows.Controls.ComboBox choice)
