@@ -249,7 +249,10 @@ public partial class MainWindow : Window
     private void GlobeCardHeader_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         GlobeCardTitle.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
-        var fits = GlobeCardTitle.DesiredSize.Width + 12 + GlobeViewChoice.Width <= e.NewSize.Width;
+        GlobeViewChoice.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+        // The switch grows past its 240 when its labels are longer, as they
+        // are in English, so it is measured too.
+        var fits = GlobeCardTitle.DesiredSize.Width + 12 + GlobeViewChoice.DesiredSize.Width <= e.NewSize.Width;
         Grid.SetRow(GlobeViewChoice, fits ? 0 : 1);
         Grid.SetColumn(GlobeViewChoice, fits ? 1 : 0);
         Grid.SetColumnSpan(GlobeViewChoice, fits ? 1 : 2);
