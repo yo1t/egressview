@@ -18,6 +18,7 @@ const { parentPort, workerData } = require('node:worker_threads');
 const Database = require('better-sqlite3');
 const agentIngest = require('./agent-ingest-store');
 const { ensureHistoryIndexes } = require('./history-indexes');
+const { buildGeoCacheFromDb } = require('./agent-geo-cache');
 const { createHistoryQueries } = require('./history-queries');
 const { createNotificationLogQuery } = require('./notification-log-query');
 const { createAgentAttribution } = require('./agent-attribution');
@@ -171,6 +172,11 @@ const operations = {
   // reader or a writer, and copies what it can.
   'wal.checkpoint': () => agentIngest.checkpointLog(),
   'history.read': readHistory,
+  // The agents' location cache, read and serialised off the request thread.
+  'agentGeoCache.build': () => {
+    if (!reader) throw new Error('The read thread has no database open');
+    return buildGeoCacheFromDb(reader.db);
+  },
   // Read-only accelerators, built here so the main thread never waits on them.
   'history.ensureIndexes': () => ensureHistoryIndexes(agentIngest.currentDb()),
 };

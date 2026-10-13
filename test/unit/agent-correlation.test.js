@@ -275,3 +275,29 @@ describe('Agent/router correlation read model', () => {
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
   });
 });
+
+// P3-190, measured on production 2026-10-13: with an index on (dst, firstSeen)
+// present, SQLite answered the candidate lookup from it -- every row for that
+// destination -- and 500 lookups took 500 ms instead of about 7 ms.
+describe('agent correlation candidate lookup', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const Database = require('better-sqlite3');
+  const { ensureHistoryIndexes } = require('../../src/history-indexes');
+
+  it('送信元・宛先・ポートの主キーで引き、(dst, firstSeen)の索引を使わない', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'agent-correlation.js'), 'utf8');
+    const sql = /candidateStatement = db\.prepare\(`([\s\S]*?)`\)/.exec(source)[1];
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE connections (
+      src TEXT NOT NULL, dst TEXT NOT NULL, dport INTEGER NOT NULL, proto TEXT NOT NULL,
+      sport INTEGER, firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL,
+      PRIMARY KEY (src, dst, dport, proto));
+      CREATE INDEX idx_src ON connections(src); CREATE INDEX idx_dst ON connections(dst);
+      CREATE INDEX idx_lastSeen ON connections(lastSeen);`);
+    ensureHistoryIndexes(db);
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all('a', 'b', 1, 'tcp', 1, 2).map(row => row.detail).join(' ');
+    assert.match(plan, /sqlite_autoindex_connections_1 \(src=\? AND dst=\? AND dport=\?\)/);
+    assert.doesNotMatch(plan, /firstseen/i);
+  });
+});

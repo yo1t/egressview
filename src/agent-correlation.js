@@ -90,6 +90,12 @@ function createAgentCorrelation({ getDb, windowMs = DEFAULT_CORRELATION_WINDOW_M
     return db;
   }
 
+  // The unary + keeps the time bounds off the index choice. With an index on
+  // (dst, firstSeen) present (history-indexes.js), SQLite took it for
+  // "dst = ? AND firstSeen <= ?" -- every row for that destination -- instead
+  // of the primary key's (src, dst, dport). 500 lookups went from about 7 ms
+  // to 500 ms, and the five-minute reconcile held the Hub for up to a second
+  // (P3-190, measured on production 2026-10-13). Same rows either way.
   // Compiled once per database rather than once per observation. A reconcile
   // pass calls this for every row it examines, and compiling the same statement
   // 500 times cost 30 ms against a real database where the lookups themselves
@@ -105,7 +111,7 @@ function createAgentCorrelation({ getDb, windowMs = DEFAULT_CORRELATION_WINDOW_M
         FROM connections
         WHERE src = ? AND dst = ? AND dport = ?
           AND LOWER(proto) = ?
-          AND lastSeen >= ? AND firstSeen <= ?
+          AND +lastSeen >= ? AND +firstSeen <= ?
       `);
     }
     return candidateStatement;
