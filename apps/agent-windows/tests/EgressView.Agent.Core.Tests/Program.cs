@@ -257,7 +257,9 @@ try
         windowRuns.BeginRun(RunComponent.Service, "test", t0.AddHours(1));
         AgentRun Run(DateTimeOffset startedAt) => windowRuns.ReadRunHistory().Single(run => run.Component == RunComponent.Ui && run.StartedAt == startedAt);
         string Ending(DateTimeOffset startedAt) => Run(startedAt).Ending;
-        Assert(Ending(window) == "unexpected", "a service restart settles a window run it cannot vouch for");
+        Assert(Ending(window) == "running", "a service restart leaves the window's run for the window to claim");
+        windowRuns.SettleWindowRun(windowRuns.OpenWindowRun()!.Value);
+        Assert(Ending(window) == "unexpected", "a window run nobody claims is settled as a crash");
         windowRuns.SettleWindowExit(t0.AddHours(1).AddSeconds(2));
         var settled = Run(window);
         Assert(settled.Ending == "clean" && settled.EndedAt == t0.AddHours(1).AddSeconds(2),
@@ -4545,12 +4547,19 @@ try
         var strandedDatabase = Path.Combine(directory, "stranded-ui-run.db");
         using (var store = new ObservationStore(strandedDatabase))
         {
+            // Since 2026-10-14 the service does not settle it on the spot --
+            // the window may have outlived a service crash -- but hands it to
+            // AgentIpcServer, which settles it if the window stays silent.
             store.BeginRun(RunComponent.Ui, "0.1.0");
             Assert(store.ReadRunHistory()[0].Ending == "running", "the window's run starts open");
             store.BeginRun(RunComponent.Service, "0.1.0");
+            var open = store.OpenWindowRun();
+            Assert(open is not null && store.ReadRunHistory().Single(run => run.Component == RunComponent.Ui).Ending == "running",
+                "a starting service leaves the window's run open for the window to claim");
+            store.SettleWindowRun(open!.Value);
             var rows = store.ReadRunHistory();
             Assert(rows.Single(run => run.Component == RunComponent.Ui).Ending == "unexpected",
-                "a service start settles a window run left open by a restart");
+                "a window run left open by a restart is settled, not left running for ever");
             Assert(rows.Single(run => run.Component == RunComponent.Service).Ending == "running",
                 "settling the window's run does not disturb the service's own");
         }

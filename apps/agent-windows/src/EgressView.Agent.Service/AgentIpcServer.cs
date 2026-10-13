@@ -55,6 +55,16 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         if (ActiveListeners == 1)
             try { store.SetCounter("ipc-single-listener-no-service-sid", 1); } catch { }
         loops = Enumerable.Range(0, ActiveListeners).Select(_ => Task.Run(ServeAsync)).ToArray();
+        // A window run left open by the service before this one: the window
+        // may still be there (the service alone restarted), or gone (a reboot,
+        // an update). Its own requests say which; silence for two minutes
+        // settles it at its last heartbeat.
+        try
+        {
+            lock (uiRunGate) unclaimedUiRunId = store.OpenWindowRun() ?? 0;
+            if (unclaimedUiRunId != 0) _ = SettleUnclaimedWindowRunAsync(stop.Token);
+        }
+        catch { }
     }
 
     /// <param name="server">
@@ -109,6 +119,16 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     private readonly object uiRunGate = new();
 
     private DateTimeOffset uiHeartbeatAt = DateTimeOffset.MinValue;
+    private long unclaimedUiRunId;
+
+    private async Task SettleUnclaimedWindowRunAsync(CancellationToken cancellationToken)
+    {
+        try { await Task.Delay(TimeSpan.FromMinutes(2), cancellationToken); }
+        catch (OperationCanceledException) { return; }
+        long run;
+        lock (uiRunGate) { run = unclaimedUiRunId; unclaimedUiRunId = 0; }
+        if (run != 0) try { store.SettleWindowRun(run); } catch { }
+    }
 
     /// Keeps the window's run alive in the record while it is asking things.
     ///
@@ -124,6 +144,14 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     {
         lock (uiRunGate)
         {
+            // The window that was there before this service started is still
+            // asking: its run carries on rather than being recorded as a crash.
+            if (uiRunId == 0 && unclaimedUiRunId != 0)
+            {
+                uiRunId = unclaimedUiRunId;
+                unclaimedUiRunId = 0;
+                uiHeartbeatAt = DateTimeOffset.MinValue;
+            }
             if (uiRunId == 0 || DateTimeOffset.UtcNow - uiHeartbeatAt < TimeSpan.FromMinutes(1)) return;
             uiHeartbeatAt = DateTimeOffset.UtcNow;
         }
@@ -142,7 +170,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         {
             switch (stage)
             {
-                case "begin": uiRunId = store.BeginRun(RunComponent.Ui, DiagnosticsReport.CurrentVersion); uiHeartbeatAt = DateTimeOffset.UtcNow; break;
+                case "begin": unclaimedUiRunId = 0; uiRunId = store.BeginRun(RunComponent.Ui, DiagnosticsReport.CurrentVersion); uiHeartbeatAt = DateTimeOffset.UtcNow; break;
                 case "end" when uiRunId != 0: store.EndRun(uiRunId); uiRunId = 0; break;
                 case "fault" when uiRunId != 0: store.FaultRun(uiRunId, fault ?? "Unknown"); uiRunId = 0; break;
                 case "previous-exit" when DateTimeOffset.TryParse(fault, System.Globalization.CultureInfo.InvariantCulture,

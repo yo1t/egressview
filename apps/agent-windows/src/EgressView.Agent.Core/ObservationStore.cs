@@ -2106,15 +2106,6 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
                 $"WHERE component='{name}' AND ending='running'");
-            // A window whose run began before this service did is not running:
-            // the service restarting means the machine or the install changed
-            // under it. Only the window can settle its own run, and a window
-            // that never comes back would leave the row marked running for
-            // ever -- saying a dead process is alive, which is worse than
-            // saying nothing.
-            if (component == RunComponent.Service)
-                Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
-                    $"WHERE component='ui' AND ending='running' AND started_at < '{DateTimeOffset.UtcNow:O}'");
             Execute($"INSERT INTO run_history(component,version,started_at,heartbeat_at,ending) " +
                 $"VALUES('{name}','{Sql(Trim(version, 64))}','{began:O}','{DateTimeOffset.UtcNow:O}','running')");
             var id = ScalarInt64("SELECT last_insert_rowid()");
@@ -2181,6 +2172,36 @@ public sealed partial class ObservationStore : IDisposable
     public void Heartbeat(long runId)
     {
         lock (gate) Execute($"UPDATE run_history SET heartbeat_at='{DateTimeOffset.UtcNow:O}' WHERE id={runId} AND ending='running'");
+    }
+
+    /// The window run a starting service finds still open, if any.
+    ///
+    /// A service start used to settle it as a crash on the spot, because a
+    /// window that never comes back would otherwise be marked running for ever.
+    /// But the service can restart under a window that is still there -- a
+    /// service crash, recovered by Windows a minute later -- and the window
+    /// was then recorded as having died at its start while it went on running,
+    /// with no run left to record anything it did after. So the service now
+    /// waits for the window to ask it something before deciding (see
+    /// AgentIpcServer); only the newest open run can be that window, and any
+    /// older one is settled here.
+    public long? OpenWindowRun()
+    {
+        lock (gate)
+        {
+            var newest = ScalarInt64("SELECT COALESCE(MAX(id),0) FROM run_history WHERE component='ui' AND ending='running'");
+            if (newest == 0) return null;
+            Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
+                $"WHERE component='ui' AND ending='running' AND id<{newest}");
+            return newest;
+        }
+    }
+
+    /// Settles a window run nobody claimed: ended at its last sign of life.
+    public void SettleWindowRun(long runId)
+    {
+        lock (gate) Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
+            $"WHERE id={runId} AND component='ui' AND ending='running'");
     }
 
     /// Settles the window's last run as a clean exit at the time the window
