@@ -245,6 +245,38 @@ try
             Assert(expected(endStore.ReadRecentFlows(50).Single(row => row.LocalPort == localPort).EndedAt), message);
     }
 
+    using (var windowRuns = new ObservationStore(Path.Combine(directory, "window-runs.db")))
+    {
+        // P3-102: an update stops the service two seconds before it closes
+        // the window, so the window's "end" reaches nobody. Its next start says
+        // when it closed, and that run is settled as clean instead of a crash.
+        var t0 = DateTimeOffset.UtcNow.AddHours(-2);
+        windowRuns.BeginRun(RunComponent.Service, "test", t0);
+        var window = t0.AddSeconds(5);
+        windowRuns.BeginRun(RunComponent.Ui, "test", window);
+        windowRuns.BeginRun(RunComponent.Service, "test", t0.AddHours(1));
+        AgentRun Run(DateTimeOffset startedAt) => windowRuns.ReadRunHistory().Single(run => run.Component == RunComponent.Ui && run.StartedAt == startedAt);
+        string Ending(DateTimeOffset startedAt) => Run(startedAt).Ending;
+        Assert(Ending(window) == "unexpected", "a service restart settles a window run it cannot vouch for");
+        windowRuns.SettleWindowExit(t0.AddHours(1).AddSeconds(2));
+        var settled = Run(window);
+        Assert(settled.Ending == "clean" && settled.EndedAt == t0.AddHours(1).AddSeconds(2),
+            "the window's own note of an orderly exit settles its run as clean, at that time");
+        var crashed = t0.AddHours(1).AddSeconds(10);
+        windowRuns.FaultRun(windowRuns.BeginRun(RunComponent.Ui, "test", crashed), "System.InvalidOperationException");
+        windowRuns.SettleWindowExit(t0.AddHours(1).AddMinutes(1));
+        Assert(Ending(crashed) == "faulted", "a note never turns a recorded fault into a clean exit");
+        var later = t0.AddHours(1).AddMinutes(5);
+        windowRuns.BeginRun(RunComponent.Ui, "test", later);
+        windowRuns.SettleWindowExit(t0.AddHours(1).AddMinutes(4));
+        Assert(Ending(later) == "running", "an exit from before a run began is not that run's exit");
+        var calls = new List<string>();
+        IpcProtocol.Handle("""{"v":1,"op":"ui-run","stage":"begin","previousExit":"2026-10-12T07:39:16.9810000+00:00"}""",
+            () => "{}", _ => [], recordUiRun: (stage, value) => calls.Add($"{stage}:{value}"));
+        Assert(calls.Count == 2 && calls[0].StartsWith("previous-exit:2026-10-12T07:39:16.981", StringComparison.Ordinal) && calls[1] == "begin:",
+            "the previous exit is settled before the new run opens");
+    }
+
     {
         var queue = new ConnectionEndQueue();
         var t0 = new DateTimeOffset(2026, 10, 12, 0, 0, 0, TimeSpan.Zero);

@@ -108,15 +108,47 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     // arrive on different listeners.
     private readonly object uiRunGate = new();
 
+    private DateTimeOffset uiHeartbeatAt = DateTimeOffset.MinValue;
+
+    /// Keeps the window's run alive in the record while it is asking things.
+    ///
+    /// The window cannot write the store, so its run had a heartbeat only at
+    /// its start. A window that was killed was then recorded as having died
+    /// the moment it opened: one that ran an hour before an update closed it
+    /// read as a crash at 06:35:04, its start. The window asks for its status
+    /// every few seconds, so a request from it is the sign it is still there;
+    /// that is written at most once a minute, the service's own cadence.
+    /// Off the answering path: the store has one connection, and a heartbeat
+    /// queued behind a long read must not hold the answer up.
+    private void NoteUiAlive()
+    {
+        lock (uiRunGate)
+        {
+            if (uiRunId == 0 || DateTimeOffset.UtcNow - uiHeartbeatAt < TimeSpan.FromMinutes(1)) return;
+            uiHeartbeatAt = DateTimeOffset.UtcNow;
+        }
+        _ = Task.Run(() =>
+        {
+            long run;
+            lock (uiRunGate) run = uiRunId;
+            if (run == 0) return;
+            try { store.Heartbeat(run); } catch { }
+        });
+    }
+
     private void RecordUiRun(string stage, string? fault)
     {
         lock (uiRunGate)
         {
             switch (stage)
             {
-                case "begin": uiRunId = store.BeginRun(RunComponent.Ui, DiagnosticsReport.CurrentVersion); break;
+                case "begin": uiRunId = store.BeginRun(RunComponent.Ui, DiagnosticsReport.CurrentVersion); uiHeartbeatAt = DateTimeOffset.UtcNow; break;
                 case "end" when uiRunId != 0: store.EndRun(uiRunId); uiRunId = 0; break;
                 case "fault" when uiRunId != 0: store.FaultRun(uiRunId, fault ?? "Unknown"); uiRunId = 0; break;
+                case "previous-exit" when DateTimeOffset.TryParse(fault, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out var exitedAt):
+                    store.SettleWindowExit(exitedAt);
+                    break;
             }
         }
     }
@@ -130,6 +162,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
         var line = await reader.ReadLineAsync(cancellationToken);
         if (line is null) return;
+        NoteUiAlive();
         var answering = Task.Run(() => Handle(line), CancellationToken.None);
         if (!await AnswerUnlessCallerLeavesAsync(answering, pipe, cancellationToken))
         {

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace EgressView.Agent.Core;
@@ -355,7 +356,18 @@ public static class IpcProtocol
         if (stage is not ("begin" or "end" or "fault")) return Reject("invalid-run-stage");
         var fault = root.TryGetProperty("fault", out var name) && name.ValueKind == JsonValueKind.String
             ? name.GetString() : null;
-        try { record(stage, fault); }
+        // A window that closed cleanly while the service was down -- an
+        // update stops the service two seconds before it closes the window --
+        // says so when it next begins, and its last run is settled with that
+        // before the new one opens.
+        var previousExit = stage == "begin" && root.TryGetProperty("previousExit", out var exit) && exit.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(exit.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var exitedAt)
+            ? exitedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) : null;
+        try
+        {
+            if (previousExit is not null) record("previous-exit", previousExit);
+            record(stage, fault);
+        }
         catch { return Reject("run-record-failed"); }
         return JsonSerializer.Serialize(new { status = "ok", stage });
     }
