@@ -45,6 +45,21 @@ describe('the Windows window run record', () => {
     assert.match(app, /ReportRun\("begin", previousExit: TakeExitNote\(\)\)/, 'the next start does not pass the note on');
   });
 
+  it('lets a window that outlived a service restart carry on its run', () => {
+    // Killing the service on 0.1.156 recorded the still-running window as a
+    // crash at its start, and the new service then recorded nothing it did.
+    const start = server.slice(server.indexOf('public void Start()'));
+    assert.match(start.slice(0, start.indexOf('\n    }')), /unclaimedUiRunId = store\.OpenWindowRun\(\)/,
+      'a starting service does not look for the window run left open');
+    const note = server.slice(server.indexOf('private void NoteUiAlive()'));
+    assert.match(note.slice(0, note.indexOf('private void RecordUiRun')), /uiRunId = unclaimedUiRunId;/,
+      'the window\'s requests do not reclaim its run');
+    const store = fs.readFileSync(path.join(root, 'EgressView.Agent.Core', 'ObservationStore.cs'), 'utf8');
+    const beginRun = store.slice(store.indexOf('public long BeginRun('), store.indexOf('/// Files the service starts'));
+    assert.doesNotMatch(beginRun, /component='ui' AND ending='running' AND started_at/,
+      'a service start still settles the window run on the spot');
+  });
+
   it('keeps the window\'s run alive from its requests, off the answering path', () => {
     const serve = server.slice(server.indexOf('private async Task ServeOneAsync('));
     const alive = serve.indexOf('NoteUiAlive();');
