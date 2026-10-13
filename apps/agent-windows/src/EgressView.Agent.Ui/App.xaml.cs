@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.IO;
 using System.Threading;
 using System.Text.Json;
 using System.Windows;
@@ -46,19 +48,14 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        // Before anything that can throw. A window that dies reports nothing,
-        // so what makes the crash visible is that this run was opened and the
-        // next start finds it still open.
-        ReportRun("begin");
-        DispatcherUnhandledException += (_, args) => ReportRun("fault", args.Exception.GetType().FullName);
-        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
-            ReportRun("fault", (args.ExceptionObject as Exception)?.GetType().FullName);
-        ThemeManager.ApplySystemTheme(Resources);
-        Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
-        LocalizationManager.Apply(Resources);
-        // Off the startup path: registering the sign-in task runs schtasks,
-        // and the window should not wait on it to appear.
-        _ = Task.Run(AgentStartupRegistration.InitializeDefault);
+        // Whether this process is the window at all comes first. A second
+        // launch -- opening the window from the Start menu while it sits in
+        // the tray, or a script's --exit-ui asking it to close -- only
+        // signals the first one and goes. It used to report its own run before
+        // finding that out, which settled the real window's run as a crash and
+        // then, on its way out, closed the run the real window was relying on:
+        // 34 of 49 window runs on one machine read "unexpected", one for nearly
+        // every update.
         activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationName);
         exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitName);
         instanceMutex = new Mutex(true, InstanceName, out var firstInstance);
@@ -75,6 +72,21 @@ public partial class App : System.Windows.Application
             Shutdown();
             return;
         }
+
+        // Before anything else that can throw. A window that dies reports
+        // nothing, so what makes the crash visible is that this run was opened
+        // and the next start finds it still open.
+        runOpened = true;
+        ReportRun("begin", previousExit: TakeExitNote());
+        DispatcherUnhandledException += (_, args) => ReportRun("fault", args.Exception.GetType().FullName);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            ReportRun("fault", (args.ExceptionObject as Exception)?.GetType().FullName);
+        ThemeManager.ApplySystemTheme(Resources);
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
+        LocalizationManager.Apply(Resources);
+        // Off the startup path: registering the sign-in task runs schtasks,
+        // and the window should not wait on it to appear.
+        _ = Task.Run(AgentStartupRegistration.InitializeDefault);
 
         WindowsApplicationRestart.RegisterForInstallerUpdate();
 
@@ -490,9 +502,49 @@ public partial class App : System.Windows.Application
     /// minutes at startup -- migrating a multi-gigabyte database, for one -- so
     /// a wait here is a wait for the whole application. It runs on the thread
     /// pool and is left to finish on its own.
-    private static void ReportRun(string stage, string? fault = null)
+    /// Whether this process opened a run. Only the window that did may end it.
+    private static bool runOpened;
+
+    /// When this window last closed in an orderly way, kept where the window
+    /// itself can write.
+    ///
+    /// An update stops the service and closes the window two seconds later,
+    /// so the window's "end" reaches nobody, and its run was then recorded as
+    /// a crash -- once for every update. The note says otherwise at the next
+    /// start, which is the first moment anyone is listening again.
+    private static readonly string ExitNote = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EgressView", "Agent", "window-last-exit.txt");
+
+    private static void WriteExitNote()
     {
-        var request = System.Text.Json.JsonSerializer.Serialize(new { v = 1, op = "ui-run", stage, fault });
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ExitNote)!);
+            File.WriteAllText(ExitNote, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        }
+        catch { /* A note that cannot be written leaves the old record, not a broken exit. */ }
+    }
+
+    /// Read once and removed, so a note can only ever describe the run just
+    /// before this one.
+    private static string? TakeExitNote()
+    {
+        try
+        {
+            if (!File.Exists(ExitNote)) return null;
+            var text = File.ReadAllText(ExitNote).Trim();
+            File.Delete(ExitNote);
+            return text.Length is > 0 and <= 64 ? text : null;
+        }
+        catch { return null; }
+    }
+
+    private static void ReportRun(string stage, string? fault = null, string? previousExit = null)
+    {
+        if (!runOpened) return;
+        var request = previousExit is null
+            ? System.Text.Json.JsonSerializer.Serialize(new { v = 1, op = "ui-run", stage, fault })
+            : System.Text.Json.JsonSerializer.Serialize(new { v = 1, op = "ui-run", stage, fault, previousExit });
         var reported = Task.Run(async () =>
         {
             // "begin" is retried; "end" and "fault" are not.
@@ -528,6 +580,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
+        if (runOpened) WriteExitNote();
         ReportRun("end");
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged;
         trayRefresh.Stop();

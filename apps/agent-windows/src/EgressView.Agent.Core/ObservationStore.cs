@@ -2183,6 +2183,22 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate) Execute($"UPDATE run_history SET heartbeat_at='{DateTimeOffset.UtcNow:O}' WHERE id={runId} AND ending='running'");
     }
 
+    /// Settles the window's last run as a clean exit at the time the window
+    /// itself recorded, when the service could not take the report.
+    ///
+    /// Only the latest window run, only one with no fault recorded, and only if
+    /// the exit is not before it began: the note is written by a window on its
+    /// orderly way out and read once by the next, so it can only describe the
+    /// run just before -- these conditions keep a stray note from turning a
+    /// real crash into a clean exit.
+    public void SettleWindowExit(DateTimeOffset exitedAt)
+    {
+        var at = exitedAt.ToUniversalTime();
+        lock (gate) Execute($"UPDATE run_history SET ending='clean',ended_at='{at:O}' " +
+            $"WHERE id=(SELECT MAX(id) FROM run_history WHERE component='ui') AND ending IN ('running','unexpected') " +
+            $"AND fault IS NULL AND started_at<='{at:O}'");
+    }
+
     public void EndRun(long runId)
     {
         lock (gate) Execute($"UPDATE run_history SET ending='clean',ended_at='{DateTimeOffset.UtcNow:O}' WHERE id={runId} AND ending='running'");
