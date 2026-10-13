@@ -73,9 +73,16 @@ function takeCleanShutdownMarker(dbPath, { fsImpl = fs } = {}) {
 }
 
 /**
- * @returns {{ mode: 'quick'|'full', reason: string }}
+ * `deferQuick`: where the quick check would do, say "deferred" instead, and
+ * leave it to run after startup (db-background-check.js). On the production
+ * Hub (5.1 GB, 2026-10) quick_check took 6.4 to 121.9 s depending on what the
+ * page cache held -- after every deploy, a minute or two in which the Hub
+ * neither collected nor answered. A start after anything but an orderly stop,
+ * or with no recent full check, is still checked in full before it begins.
+ *
+ * @returns {{ mode: 'quick'|'deferred'|'full', reason: string }}
  */
-function chooseStartupCheck(marker, { now = Date.now(), maxAgeMs = FULL_CHECK_MAX_AGE_MS } = {}) {
+function chooseStartupCheck(marker, { now = Date.now(), maxAgeMs = FULL_CHECK_MAX_AGE_MS, deferQuick = false } = {}) {
   if (!marker?.clean) return { mode: 'full', reason: marker?.reason || 'no record of an orderly stop' };
   if (!Number.isFinite(marker.lastFullCheckAt)) {
     return { mode: 'full', reason: 'no full check on record' };
@@ -83,7 +90,8 @@ function chooseStartupCheck(marker, { now = Date.now(), maxAgeMs = FULL_CHECK_MA
   if (now - marker.lastFullCheckAt > maxAgeMs) {
     return { mode: 'full', reason: 'the last full check is more than a week old' };
   }
-  return { mode: 'quick', reason: 'the last stop was orderly and the last full check is recent' };
+  const reason = 'the last stop was orderly and the last full check is recent';
+  return deferQuick ? { mode: 'deferred', reason } : { mode: 'quick', reason };
 }
 
 /**

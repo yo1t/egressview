@@ -181,7 +181,7 @@ function initDb(dbPath, { sourceRouterMap: mapOverride, onProgress } = {}) {
   let checkPlan = { mode: 'full', reason: 'in-memory database' };
   if (actualPath !== ':memory:') {
     const marker = takeCleanShutdownMarker(actualPath);
-    checkPlan = chooseStartupCheck(marker);
+    checkPlan = chooseStartupCheck(marker, { deferQuick: true });
     lastFullCheckAt = marker.lastFullCheckAt;
   }
 
@@ -201,7 +201,7 @@ function initDb(dbPath, { sourceRouterMap: mapOverride, onProgress } = {}) {
   }
   _secureDbFiles();
   const checkStartedAt = Date.now();
-  if (db) {
+  if (db && checkPlan.mode !== 'deferred') {
     // Followed from outside so the startup page can say how far it has got;
     // the check itself is unchanged (P3-173).
     const outcome = followCheck(
@@ -214,11 +214,15 @@ function initDb(dbPath, { sourceRouterMap: mapOverride, onProgress } = {}) {
   startupCheck = {
     ...checkPlan,
     ms: Date.now() - checkStartedAt,
-    result: damaged ? 'damaged' : 'ok',
+    result: damaged ? 'damaged' : (checkPlan.mode === 'deferred' ? 'deferred' : 'ok'),
   };
   if (!damaged && checkPlan.mode === 'full') lastFullCheckAt = Date.now();
-  logger.info(`[history] Startup check: ${checkPlan.mode === 'quick' ? 'quick_check' : 'integrity_check'} `
-    + `(${checkPlan.reason}) -- ${startupCheck.result} in ${(startupCheck.ms / 1000).toFixed(1)} s`);
+  if (checkPlan.mode === 'deferred' && !damaged) {
+    logger.info(`[history] Startup check: quick_check deferred until after startup (${checkPlan.reason})`);
+  } else {
+    logger.info(`[history] Startup check: ${checkPlan.mode === 'full' ? 'integrity_check' : 'quick_check'} `
+      + `(${checkPlan.reason}) -- ${startupCheck.result} in ${(startupCheck.ms / 1000).toFixed(1)} s`);
+  }
 
   if (damaged) {
     logger.error('[history] Database integrity check failed; looking for a backup that verifies');
@@ -805,6 +809,16 @@ function markCleanShutdown({ openHandles = openHandlesTo } = {}) {
 }
 
 /** What the startup check did: mode, reason, duration, result. */
+/**
+ * The deferred quick check, run after startup, came back (db-background-check).
+ * Anything but "ok" withdraws the recent full check this run would otherwise
+ * vouch for, so the next start checks in full before it begins.
+ */
+function recordBackgroundCheck({ result, ms = null, error = null }) {
+  if (startupCheck) startupCheck = { ...startupCheck, background: { result, ms, error } };
+  if (result !== 'ok') lastFullCheckAt = null;
+}
+
 function getStartupCheck() {
   return startupCheck ? { ...startupCheck, lastFullCheckAt } : null;
 }
@@ -881,6 +895,7 @@ module.exports = {
   closeDb,
   markCleanShutdown,
   getStartupCheck,
+  recordBackgroundCheck,
   checkObservationConsistency,
   // An agent has no router identity, so it contributes no router observation.
   // Without this it fell through to the legacy placeholder and a machine

@@ -29,6 +29,7 @@ const threatIntel     = require('./src/threat-intel');
 const manualThreatModule = require('./src/manual-threat-lookup');
 const { manualThreatLookup } = manualThreatModule;
 const aiProviderModule = require('./src/ai-provider');
+const { runQuickCheckOffThread } = require('./src/db-background-check');
 const { aiProvider }  = aiProviderModule;
 const { createAiNotificationService } = require('./src/ai-notification-service');
 const { createAiBudget } = require('./src/ai-budget');
@@ -1042,6 +1043,25 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
   // indefinitely (P2-87). Started after readiness so slow startup/migration
   // work never trips it.
   startEventLoopWatchdog();
+
+  // The startup quick_check, when it was deferred (db-startup-check.js): run a
+  // minute after the Hub is up, on a thread of its own. A failure is reported
+  // and makes the next start check in full before it begins.
+  if (history.getStartupCheck()?.mode === 'deferred') {
+    setTimeout(() => {
+      runtimeProfiler.measureAsync('history.backgroundQuickCheck', () => runQuickCheckOffThread(runtimeDbPath))
+        .then(outcome => {
+          history.recordBackgroundCheck(outcome);
+          const took = `${(outcome.ms / 1000).toFixed(1)} s`;
+          if (outcome.result === 'ok') {
+            logger.info(`[history] Deferred startup check: quick_check ok in ${took}`);
+          } else {
+            logger.error(`[history] Deferred startup check: quick_check ${outcome.result} in ${took}`
+              + `${outcome.error ? ` (${outcome.error})` : ''}; the next start will run the full integrity_check`);
+          }
+        });
+    }, 60 * 1000).unref();
+  }
 
   // Load the AI provider's SDK once the startup work is over, instead of inside
   // the first request or the morning notification that needs it (P3-190).

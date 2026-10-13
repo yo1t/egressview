@@ -141,14 +141,15 @@ describe('start, stop and start again', () => {
   beforeEach(() => backup._setPathsForTest(db, path.join(dir, 'backups')));
   afterEach(() => history._initForTest());
 
-  it('checks in full the first time, and quickly after an orderly stop', () => {
+  it('checks in full the first time, and defers the quick check after an orderly stop', () => {
     history._initForTest(db);
     assert.equal(history.getStartupCheck().mode, 'full');
     history.closeDb();
     assert.equal(history.markCleanShutdown().written, true);
 
     history._initForTest(db);
-    assert.equal(history.getStartupCheck().mode, 'quick');
+    assert.equal(history.getStartupCheck().mode, 'deferred');
+    assert.equal(history.getStartupCheck().result, 'deferred');
     assert.equal(fs.existsSync(markerPath(db)), false, 'the marker survived the start that used it');
   });
 
@@ -159,7 +160,7 @@ describe('start, stop and start again', () => {
     history.closeDb();
     history.markCleanShutdown();
     history._initForTest(db);            // consumes the marker
-    assert.equal(history.getStartupCheck().mode, 'quick');
+    assert.equal(history.getStartupCheck().mode, 'deferred');
     // ...and this run is killed: no closeDb, no markCleanShutdown.
     history._initForTest(db);
     assert.equal(history.getStartupCheck().mode, 'full');
@@ -171,15 +172,43 @@ describe('start, stop and start again', () => {
     assert.equal(fs.existsSync(markerPath(db)), false);
   });
 
-  it('carries the time of the last full check through a quick start', () => {
+  it('carries the time of the last full check through a deferred start', () => {
     history._initForTest(db);
     const fullAt = history.getStartupCheck().lastFullCheckAt;
     assert.ok(Number.isFinite(fullAt));
     history.closeDb();
     history.markCleanShutdown();
     history._initForTest(db);
-    assert.equal(history.getStartupCheck().mode, 'quick');
-    assert.equal(history.getStartupCheck().lastFullCheckAt, fullAt, 'a quick start pretended to be a full check');
+    assert.equal(history.getStartupCheck().mode, 'deferred');
+    assert.equal(history.getStartupCheck().lastFullCheckAt, fullAt, 'a deferred start pretended to be a full check');
+  });
+
+  // The deferred quick check found damage, or could not run: the next start
+  // must not inherit the recent full check, so it checks in full first.
+  it('後回しの検査が異常を返したら、次の起動は完全な検査になる', () => {
+    history._initForTest(db);
+    history.closeDb();
+    history.markCleanShutdown();
+    history._initForTest(db);
+    assert.equal(history.getStartupCheck().mode, 'deferred');
+    history.recordBackgroundCheck({ result: 'corrupt', ms: 10 });
+    assert.equal(history.getStartupCheck().background.result, 'corrupt');
+    history.closeDb();
+    history.markCleanShutdown();
+    history._initForTest(db);
+    assert.equal(history.getStartupCheck().mode, 'full');
+  });
+
+  it('後回しの検査がokなら、次も後回しのまま', () => {
+    history._initForTest(db);
+    history.closeDb();
+    history.markCleanShutdown();
+    history._initForTest(db);
+    history.recordBackgroundCheck({ result: 'ok', ms: 10 });
+    history.closeDb();
+    history.markCleanShutdown();
+    history._initForTest(db);
+    assert.equal(history.getStartupCheck().mode, 'deferred');
   });
 
   it('checks in full once the last full check is more than a week old', () => {
@@ -246,5 +275,27 @@ describe('handles still open at shutdown', () => {
       assert.equal(result.written, true);
       assert.equal(fs.existsSync(markerPath(db)), true);
     });
+  });
+});
+
+// The thread the deferred check runs on: a real worker against real files.
+describe('deferred quick check off the main thread', () => {
+  const { runQuickCheckOffThread } = require('../../src/db-background-check');
+  const Database = require('better-sqlite3');
+
+  it('健全なDBではokを返す', async () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'qc-')), 'ok.db');
+    const created = new Database(file);
+    created.exec('CREATE TABLE t (a INTEGER PRIMARY KEY, b TEXT); INSERT INTO t (b) VALUES (\'x\'), (\'y\');');
+    created.close();
+    const outcome = await runQuickCheckOffThread(file);
+    assert.equal(outcome.result, 'ok');
+    assert.ok(Number.isFinite(outcome.ms));
+  });
+
+  it('DBが無ければerrorを返し、投げない', async () => {
+    const outcome = await runQuickCheckOffThread(path.join(os.tmpdir(), `missing-${process.pid}-${Date.now()}.db`));
+    assert.equal(outcome.result, 'error');
+    assert.ok(outcome.error);
   });
 });
