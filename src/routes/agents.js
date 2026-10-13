@@ -4,7 +4,9 @@ const { Router } = require('express');
 const runtimeProfiler = require('../runtime-profiler');
 
 // Bumped only when the shape changes in a way an older agent cannot ignore.
-const AGENT_GEO_CACHE_SCHEMA_VERSION = 1;
+const { buildGeoCacheResponse } = require('../agent-geo-cache');
+// How long a built location cache is served before it is built again.
+const GEO_CACHE_TTL_MS = 5 * 60 * 1000;
 const AGENT_THREAT_INTEL_SCHEMA_VERSION = 1;
 const { monitorEventLoopDelay } = require('node:perf_hooks');
 const { createHash } = require('node:crypto');
@@ -106,6 +108,9 @@ module.exports = function agentRoutes({
   // One audit row per agent per hour for successful uploads (P3-175). Absent,
   // every upload is its own row, as before.
   ingestAuditSummary = null,
+  // The read thread, where the location cache is built. Absent in the unit
+  // tests and before the server opens it; the cache is then built here.
+  dbReadWorker = null,
 }) {
   const router = Router();
   const failedEnrollments = new Map();
@@ -595,36 +600,52 @@ module.exports = function agentRoutes({
     return res.json(body);
   });
 
-  router.get('/agent/geo-cache', requireAgent, (req, res) => {
-    const rows = agentIngestStore.listGeoLocations();
+  // Built off this thread and kept for a few minutes (P3-190). Each fetch
+  // used to read, hash and serialise every row here -- 300-400 ms, about 25
+  // times an hour on production -- even when the answer was a 304. Locations
+  // change by a handful of rows a day, so an answer up to GEO_CACHE_TTL_MS old
+  // costs the agents nothing they would notice.
+  let geoCache = null;
+  let geoCacheBuilding = null;
+  function buildGeoCacheHere() {
+    return buildGeoCacheResponse(agentIngestStore.listGeoLocations());
+  }
+  async function currentGeoCache() {
+    if (geoCache && Date.now() - geoCache.builtAt < GEO_CACHE_TTL_MS) return geoCache;
+    if (!geoCacheBuilding) {
+      geoCacheBuilding = (async () => {
+        let built;
+        if (dbReadWorker) {
+          try {
+            built = await dbReadWorker.run('agentGeoCache.build');
+          } catch (error) {
+            if (!['DB_WORKER_CLOSED', 'DB_WORKER_GONE'].includes(error?.code)) throw error;
+            built = buildGeoCacheHere();
+          }
+        } else {
+          built = buildGeoCacheHere();
+        }
+        geoCache = { ...built, builtAt: Date.now() };
+        return geoCache;
+      })().finally(() => { geoCacheBuilding = null; });
+    }
+    return geoCacheBuilding;
+  }
 
-    // Positional entries: repeating five key names across sixty thousand rows
-    // costs more than the coordinates themselves.
-    const entries = rows.map((row) => [
-      row.ip,
-      row.lat,
-      row.lon,
-      row.countryCode || null,
-      row.city || null,
-    ]);
-    const body = {
-      schemaVersion: AGENT_GEO_CACHE_SCHEMA_VERSION,
-      generatedAt: new Date().toISOString(),
-      entries,
-    };
-
-    // The cache changes by a handful of rows a day, so most fetches should cost
-    // a 304 rather than several megabytes.
-    const etag = `W/"geo-${entries.length}-${createHash('sha256')
-      .update(entries.map((entry) => entry.join(',')).join('\n'))
-      .digest('hex')
-      .slice(0, 32)}"`;
-    res.setHeader('ETag', etag);
+  router.get('/agent/geo-cache', requireAgent, async (req, res) => {
+    let cache;
+    try {
+      cache = await currentGeoCache();
+    } catch (error) {
+      logger.warn('[agents] geo-cache could not be built:', error.message);
+      return res.status(500).json({ error: 'Location cache unavailable' });
+    }
+    res.setHeader('ETag', cache.etag);
     res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
-    if (req.headers['if-none-match'] === etag) {
+    if (req.headers['if-none-match'] === cache.etag) {
       return res.status(304).end();
     }
-    return res.json(body);
+    return res.type('application/json').send(cache.json);
   });
 
   router.post('/agent/ingest', requireAgent, async (req, res) => {

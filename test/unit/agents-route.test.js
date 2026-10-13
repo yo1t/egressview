@@ -761,3 +761,37 @@ describe('Agent送信の監査ログ', () => {
   });
 });
 
+
+// P3-190: every fetch read, hashed and serialised all 118,758 rows on the
+// request thread (300-400 ms, about 25 times an hour), even for a 304.
+describe('agent geo-cache is built once and kept', () => {
+  it('数分のあいだは作り直さず、同じETagと中身を返す', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const db = agentIngestStore._dbForTest();
+    db.exec('CREATE TABLE IF NOT EXISTS geo_cache (ip TEXT PRIMARY KEY, lat REAL, lon REAL, city TEXT, countryCode TEXT, expires INTEGER)');
+    const insert = db.prepare('INSERT INTO geo_cache (ip, lat, lon, city, countryCode, expires) VALUES (?,?,?,?,?,?)');
+    insert.run('203.0.113.7', 35.6, 139.7, 'Tokyo', 'JP', Date.now() + 86_400_000);
+    const first = await request(app, 'GET', '/api/agent/geo-cache', { headers: authorization });
+    insert.run('203.0.113.8', 34.7, 135.5, 'Osaka', 'JP', Date.now() + 86_400_000);
+    const second = await request(app, 'GET', '/api/agent/geo-cache', { headers: authorization });
+    assert.equal(second.status, 200);
+    assert.deepEqual(second.body.entries, first.body.entries, 'built once, served again');
+    assert.equal(/^etag: (.+)$/im.exec(second.raw)?.[1], /^etag: (.+)$/im.exec(first.raw)?.[1]);
+  });
+
+  it('読み取り用スレッドで作った応答は、この場で作った応答と同じ', () => {
+    const { buildGeoCacheResponse, buildGeoCacheFromDb } = require('../../src/agent-geo-cache');
+    const Database = require('better-sqlite3');
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE geo_cache (ip TEXT PRIMARY KEY, lat REAL, lon REAL, city TEXT, countryCode TEXT, expires INTEGER)');
+    db.prepare('INSERT INTO geo_cache VALUES (?,?,?,?,?,?)').run('198.51.100.3', 1.5, 2.5, null, 'SG', 0);
+    db.prepare('INSERT INTO geo_cache VALUES (?,?,?,?,?,?)').run('198.51.100.4', null, null, null, null, 0);
+    const built = buildGeoCacheFromDb(db);
+    const here = buildGeoCacheResponse([{ ip: '198.51.100.3', lat: 1.5, lon: 2.5, countryCode: 'SG', city: null }]);
+    assert.equal(built.etag, here.etag);
+    assert.deepEqual(JSON.parse(built.json).entries, [['198.51.100.3', 1.5, 2.5, 'SG', null]]);
+    assert.equal(built.count, 1);
+  });
+});

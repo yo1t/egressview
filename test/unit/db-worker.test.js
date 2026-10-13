@@ -299,6 +299,11 @@ describe('読み取り用スレッド', () => {
       assert.deepEqual(await reader.read('groupAgentOnlyDstByTimeRange', from, null),
         history.groupAgentOnlyDstByTimeRange(from, null));
       // Every destination was first seen within the last half hour.
+      // The agents' location cache is built on this thread too (P3-190).
+      const geo = await host.run('agentGeoCache.build');
+      assert.equal(geo.count, 0);
+      assert.match(geo.etag, /^W\/"geo-0-/);
+      assert.deepEqual(JSON.parse(geo.json).entries, []);
       const newNodes = await reader.read('queryNewNodes', now - 60 * 60_000, now);
       assert.deepEqual(newNodes, history.queryNewNodes(now - 60 * 60_000, now));
       assert.ok(newNodes.newDestinations.length > 0);
