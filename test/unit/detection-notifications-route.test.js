@@ -15,11 +15,14 @@ function makeNotifier() {
   let state = {
     threat:    { slack: true, history: true },
     newDevice: { slack: true, history: true },
+    lanScan:   { slack: true, history: true },
   };
   return {
-    getDetectionConfig: () => ({ threat: { ...state.threat }, newDevice: { ...state.newDevice } }),
+    getDetectionConfig: () => ({
+      threat: { ...state.threat }, newDevice: { ...state.newDevice }, lanScan: { ...state.lanScan },
+    }),
     configureDetection: (input) => {
-      for (const kind of ['threat', 'newDevice']) {
+      for (const kind of ['threat', 'newDevice', 'lanScan']) {
         if (!input?.[kind]) continue;
         if (typeof input[kind].slack === 'boolean') state[kind].slack = input[kind].slack;
         if (typeof input[kind].history === 'boolean') state[kind].history = input[kind].history;
@@ -92,7 +95,18 @@ describe('detection-notifications route: GET', () => {
     assert.deepEqual(body.config, {
       threat:    { slack: true, history: true },
       newDevice: { slack: true, history: true },
+      lanScan:   { slack: true, history: true },
     });
+  });
+
+  // P3-191.
+  it('LAN内の探索の切り替えを保存して返す', async () => {
+    const app = makeApp();
+    const { status, body } = await req(app, 'POST', '/api/config/detection-notifications', {
+      lanScan: { slack: false },
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body.config.lanScan, { slack: false, history: true });
   });
 
   it('未知のクエリを拒否する', async () => {

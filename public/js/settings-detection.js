@@ -2,7 +2,7 @@ import { t } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 
-// Per-detection delivery switches for the two notifications the server raises
+// Per-detection delivery switches for the notifications the server raises
 // directly. The AI event rules live in settings-ai.js and are configured
 // through a different endpoint; keep the two apart in the UI as well.
 export function initDetectionSettings(showStatus) {
@@ -11,6 +11,8 @@ const FIELDS = [
   ['threat', 'history', 'detection-threat-history'],
   ['newDevice', 'slack', 'detection-new-device-slack'],
   ['newDevice', 'history', 'detection-new-device-history'],
+  ['lanScan', 'slack', 'detection-lan-scan-slack'],
+  ['lanScan', 'history', 'detection-lan-scan-history'],
 ];
 
 function applyConfig(config) {
@@ -21,7 +23,7 @@ function applyConfig(config) {
 }
 
 function readConfig() {
-  const config = { threat: {}, newDevice: {} };
+  const config = { threat: {}, newDevice: {}, lanScan: {} };
   for (const [kind, channel, id] of FIELDS) {
     config[kind][channel] = !!document.getElementById(id)?.checked;
   }

@@ -343,6 +343,7 @@ function createRegistry() {
     config: z.strictObject({
       threat: detectionChannels,
       newDevice: detectionChannels,
+      lanScan: detectionChannels,
     }),
   }).loose());
 

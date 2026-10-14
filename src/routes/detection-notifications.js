@@ -1,7 +1,7 @@
 // Routes: per-detection notification delivery switches
 //
-// These cover the detections notifier.js raises directly (threat and new
-// device). The AI event rules are configured separately under
+// These cover the detections notifier.js raises directly (threat, new device
+// and LAN scanning). The AI event rules are configured separately under
 // /api/ai/notification-config; do not merge the two. In particular the AI
 // config's `threat.enabled` gates AI analysis, not the plain threat DM.
 'use strict';
@@ -19,6 +19,7 @@ const channelsSchema = z.object({
 const detectionConfigSchema = z.object({
   threat: channelsSchema.optional(),
   newDevice: channelsSchema.optional(),
+  lanScan: channelsSchema.optional(),
 }).strict();
 
 const emptyQuerySchema = z.object({}).strict();
