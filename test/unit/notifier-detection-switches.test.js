@@ -147,8 +147,8 @@ describe('検出イベント通知の配信スイッチ', () => {
 describe('LAN内の探索の通知', () => {
   const finding = {
     kind: 'sweep', agentId: 'a1', hostName: 'JAMESBOND', processName: 'chrome',
-    localAddress: '192.168.41.50', windowStart: 1700000000000, windowMs: 120000,
-    addresses: 120, ports: 3, target: null, sample: ['192.168.41.1', '192.168.41.2'],
+    localAddress: '192.168.1.50', windowStart: 1700000000000, windowMs: 120000,
+    addresses: 120, ports: 3, target: null, sample: ['192.168.1.1', '192.168.1.2'],
   };
 
   it('Slackに、何が・何件・何を確かめればよいかを送り、履歴に詳細を残す', async () => {
@@ -161,18 +161,18 @@ describe('LAN内の探索の通知', () => {
     assert.match(posts[0].text, /120個のアドレス/);
     assert.match(posts[0].text, /拡張機能/);
     assert.equal(logged[0].type, 'lan_scan');
-    assert.equal(entries[0].src, '192.168.41.50');
+    assert.equal(entries[0].src, '192.168.1.50');
     assert.equal(entries[0].srcDnsName, 'JAMESBOND');
     assert.equal(entries[0].threat.source, 'chrome');
     assert.deepEqual(JSON.parse(entries[0].threat.tag), {
-      kind: 'sweep', addresses: 120, ports: 3, target: null, windowMs: 120000, sample: ['192.168.41.1', '192.168.41.2'],
+      kind: 'sweep', addresses: 120, ports: 3, target: null, windowMs: 120000, sample: ['192.168.1.1', '192.168.1.2'],
     });
   });
 
   it('ポートの探索は、相手のアドレスとポート数を言う', async () => {
     const { posts } = setup();
-    await notifier.notifyLanScan({ ...finding, kind: 'port-probe', target: '192.168.41.1', ports: 25, addresses: 1, sample: [22, 80] });
-    assert.match(posts[0].text, /192\.168\.41\.1の25個のポート/);
+    await notifier.notifyLanScan({ ...finding, kind: 'port-probe', target: '192.168.1.1', ports: 25, addresses: 1, sample: [22, 80] });
+    assert.match(posts[0].text, /192\.168\.1\.1の25個のポート/);
   });
 
   it('lanScan.slackをfalseにすると送らず、履歴には残す', async () => {

@@ -25,7 +25,7 @@ let seq = 0;
 function observe(db, row) {
   db.prepare(`INSERT INTO agent_observations VALUES (@agentId, @id, @processName, @localAddress,
     @remoteAddress, @remotePort, 'tcp', @at, @at, 0, 0)`).run({
-    agentId: 'a1', id: `o${++seq}`, processName: 'chrome', localAddress: '192.168.41.50', remotePort: 80, ...row,
+    agentId: 'a1', id: `o${++seq}`, processName: 'chrome', localAddress: '192.168.1.50', remotePort: 80, ...row,
   });
 }
 
@@ -34,7 +34,7 @@ describe('LAN scan detection', () => {
 
   it('2分間に30以上のLAN内アドレスへ接続したプロセスを掃引として見つける', () => {
     const db = database();
-    for (let i = 1; i <= 40; i += 1) observe(db, { remoteAddress: `192.168.41.${i}`, at: from + i * 1000 });
+    for (let i = 1; i <= 40; i += 1) observe(db, { remoteAddress: `192.168.1.${i}`, at: from + i * 1000 });
     const findings = findLanScans(db, { from });
     assert.equal(findings.length, 1);
     assert.equal(findings[0].kind, 'sweep');
@@ -46,28 +46,28 @@ describe('LAN scan detection', () => {
 
   it('ふだんの範囲（17アドレス）や、マルチキャスト・ブロードキャスト・インターネット宛ては数えない', () => {
     const db = database();
-    for (let i = 1; i <= 17; i += 1) observe(db, { remoteAddress: `192.168.41.${i}`, at: from + i });
+    for (let i = 1; i <= 17; i += 1) observe(db, { remoteAddress: `192.168.1.${i}`, at: from + i });
     for (let i = 1; i <= 40; i += 1) observe(db, { remoteAddress: `198.51.100.${i}`, at: from + i });
     for (let i = 1; i <= 40; i += 1) observe(db, { remoteAddress: `239.255.0.${i}`, at: from + i });
-    observe(db, { remoteAddress: '192.168.41.255', at: from + 1 });
+    observe(db, { remoteAddress: '192.168.1.255', at: from + 1 });
     assert.deepEqual(findLanScans(db, { from }), []);
   });
 
   it('1台の10以上のポートへの接続をポートの探索として見つけ、相手側の一時ポートは数えない', () => {
     const db = database();
-    for (let p = 20; p < 32; p += 1) observe(db, { remoteAddress: '192.168.41.1', remotePort: p, at: from + p });
-    for (let p = 0; p < 500; p += 1) observe(db, { processName: 'zabbix_agent2', remoteAddress: '10.41.128.183', remotePort: 40000 + p, at: from + p });
+    for (let p = 20; p < 32; p += 1) observe(db, { remoteAddress: '192.168.1.1', remotePort: p, at: from + p });
+    for (let p = 0; p < 500; p += 1) observe(db, { processName: 'zabbix_agent2', remoteAddress: '10.0.0.5', remotePort: 40000 + p, at: from + p });
     const findings = findLanScans(db, { from });
     assert.equal(findings.length, 1);
     assert.equal(findings[0].kind, 'port-probe');
-    assert.equal(findings[0].target, '192.168.41.1');
+    assert.equal(findings[0].target, '192.168.1.1');
     assert.equal(findings[0].ports, 12);
     assert.deepEqual(findings[0].sample, [20, 21, 22, 23, 24]);
   });
 
   it('窓の外の観測は数えない', () => {
     const db = database();
-    for (let i = 1; i <= 40; i += 1) observe(db, { remoteAddress: `192.168.41.${i}`, at: from + WINDOW_MS + i });
+    for (let i = 1; i <= 40; i += 1) observe(db, { remoteAddress: `192.168.1.${i}`, at: from + WINDOW_MS + i });
     assert.deepEqual(findLanScans(db, { from }), []);
   });
 
@@ -85,7 +85,7 @@ describe('LAN scan detection', () => {
     const finding = { agentId: 'a1', processName: 'chrome', kind: 'sweep' };
     assert.equal(cooldown.admit(finding, 0), true);
     assert.equal(cooldown.admit(finding, 30 * 60 * 1000), false);
-    assert.equal(cooldown.admit({ ...finding, kind: 'port-probe', target: '192.168.41.1' }, 30 * 60 * 1000), true);
+    assert.equal(cooldown.admit({ ...finding, kind: 'port-probe', target: '192.168.1.1' }, 30 * 60 * 1000), true);
     assert.equal(cooldown.admit(finding, 61 * 60 * 1000), true);
   });
 });
