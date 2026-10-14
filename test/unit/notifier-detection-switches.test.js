@@ -44,6 +44,7 @@ function setup() {
   notifier.configureDetection({
     threat: { slack: true, history: true },
     newDevice: { slack: true, history: true },
+    lanScan: { slack: true, history: true },
   });
   return { posts, logged };
 }
@@ -51,11 +52,12 @@ function setup() {
 describe('検出イベント通知の配信スイッチ', () => {
   beforeEach(() => { setup(); });
 
-  it('既定では脅威・新規デバイスとも Slack と履歴の両方が有効', () => {
+  it('既定では脅威・新規デバイス・LAN内の探索とも Slack と履歴の両方が有効', () => {
     const config = notifier.getDetectionConfig();
     assert.deepEqual(config, {
       threat: { slack: true, history: true },
       newDevice: { slack: true, history: true },
+      lanScan: { slack: true, history: true },
     });
   });
 
@@ -120,6 +122,7 @@ describe('検出イベント通知の配信スイッチ', () => {
     assert.deepEqual(notifier.getDetectionConfig(), {
       threat: { slack: true, history: true },
       newDevice: { slack: true, history: true },
+      lanScan: { slack: true, history: true },
     });
   });
 
@@ -137,5 +140,46 @@ describe('検出イベント通知の配信スイッチ', () => {
     await notifier.notifyNewDevice(newDeviceEntry());
     assert.equal(posts.length, 0);
     notifier.configure({ enabled: true });
+  });
+});
+
+// P3-191: a program on an Agent's computer looking around the LAN.
+describe('LAN内の探索の通知', () => {
+  const finding = {
+    kind: 'sweep', agentId: 'a1', hostName: 'JAMESBOND', processName: 'chrome',
+    localAddress: '192.168.41.50', windowStart: 1700000000000, windowMs: 120000,
+    addresses: 120, ports: 3, target: null, sample: ['192.168.41.1', '192.168.41.2'],
+  };
+
+  it('Slackに、何が・何件・何を確かめればよいかを送り、履歴に詳細を残す', async () => {
+    const { posts, logged } = setup();
+    const entries = [];
+    notifier.setLogCallback((entry, type, slackSent, options) => { entries.push(entry); logged.push({ type, slackSent, options }); });
+    assert.equal(await notifier.notifyLanScan(finding), true);
+    assert.match(posts[0].text, /LAN内の探索/);
+    assert.match(posts[0].text, /chrome/);
+    assert.match(posts[0].text, /120個のアドレス/);
+    assert.match(posts[0].text, /拡張機能/);
+    assert.equal(logged[0].type, 'lan_scan');
+    assert.equal(entries[0].src, '192.168.41.50');
+    assert.equal(entries[0].srcDnsName, 'JAMESBOND');
+    assert.equal(entries[0].threat.source, 'chrome');
+    assert.deepEqual(JSON.parse(entries[0].threat.tag), {
+      kind: 'sweep', addresses: 120, ports: 3, target: null, windowMs: 120000, sample: ['192.168.41.1', '192.168.41.2'],
+    });
+  });
+
+  it('ポートの探索は、相手のアドレスとポート数を言う', async () => {
+    const { posts } = setup();
+    await notifier.notifyLanScan({ ...finding, kind: 'port-probe', target: '192.168.41.1', ports: 25, addresses: 1, sample: [22, 80] });
+    assert.match(posts[0].text, /192\.168\.41\.1の25個のポート/);
+  });
+
+  it('lanScan.slackをfalseにすると送らず、履歴には残す', async () => {
+    const { posts, logged } = setup();
+    notifier.configureDetection({ lanScan: { slack: false } });
+    assert.equal(await notifier.notifyLanScan(finding), false);
+    assert.equal(posts.length, 0);
+    assert.equal(logged[0].options.record, true);
   });
 });

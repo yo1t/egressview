@@ -61,8 +61,9 @@ describe('shared i18n catalog', () => {
     // Grew by 2 on 2026-09-19: the connection log's new-rows badge (P3-141).
     // Grew by 9 on 2026-09-21: discrete timeline modes, basis badges and tooltip labels (P3-159).
     // Grew by 2 on 2026-09-22: the timeline's "no record" band and its legend (P3-157).
-    assert.equal(jaKeys.size, 945);
-    assert.equal(enKeys.size, 945);
+    // Grew by 10 on 2026-10-14: LAN-scan detection setting and notification log (P3-191).
+    assert.equal(jaKeys.size, 955);
+    assert.equal(enKeys.size, 955);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 

@@ -11,6 +11,31 @@ var nlSortState = { col: 'detectedAt', dir: 'desc' };
 var nlFilters = {}; // col → { mode, value }
 var nlActiveFilterCol = null;
 
+
+function nlTypeLabel(type) {
+  if (type === 'threat') return t('notif-log.type.threat');
+  if (type === 'lan_scan') return t('notif-log.type.lan_scan');
+  return t('notif-log.type.new_device');
+}
+
+// A LAN-scan row keeps its details as JSON in threatTag (notifier.js); the
+// words are put together here, in the reader's language.
+function nlLanScan(row) {
+  let detail;
+  try { detail = JSON.parse(row.threatTag || ''); } catch { detail = null; }
+  if (!detail || typeof detail !== 'object') return { summary: row.threatTag || '—', sample: '' };
+  const vars = {
+    program: row.threatSource || '?',
+    minutes: Math.max(1, Math.round((Number(detail.windowMs) || 120000) / 60000)),
+    n: detail.kind === 'port-probe' ? detail.ports : detail.addresses,
+    target: detail.target || '',
+  };
+  return {
+    summary: tVars(detail.kind === 'port-probe' ? 'notif-log.lanScan.probe' : 'notif-log.lanScan.sweep', vars),
+    sample: Array.isArray(detail.sample) ? detail.sample.join(', ') : '',
+  };
+}
+
 function nlTextElement(tagName, text, { className = '', id = '' } = {}) {
   const el = document.createElement(tagName);
   if (className) el.className = className;
@@ -137,8 +162,8 @@ function nlRender() {
     const typeCell = document.createElement('td');
     typeCell.appendChild(nlTextElement(
       'span',
-      row.type === 'threat' ? t('notif-log.type.threat') : t('notif-log.type.new_device'),
-      { className: row.type === 'threat' ? 'notif-log-type-threat' : 'notif-log-type-device' }
+      nlTypeLabel(row.type),
+      { className: row.type === 'device' || row.type === 'new_device' ? 'notif-log-type-device' : 'notif-log-type-threat' }
     ));
     tr.appendChild(typeCell);
 
@@ -161,8 +186,9 @@ function nlRender() {
       dstCell.appendChild(document.createElement('br'));
       dstCell.appendChild(nlTextElement('span', `${row.dport}/${row.proto || ''}`, { className: 'notif-log-subtext' }));
     }
-    const threatText = row.threatTag || row.threatSource || '—';
-    nlAppendCell(tr, threatText, row.threatTag ? 'notif-log-threat-text' : 'notif-log-subtle-text');
+    const lanScan = row.type === 'lan_scan' ? nlLanScan(row) : null;
+    const threatText = lanScan ? lanScan.summary : (row.threatTag || row.threatSource || '—');
+    nlAppendCell(tr, threatText, lanScan || row.threatTag ? 'notif-log-threat-text' : 'notif-log-subtle-text');
     nlAppendCell(tr, row.org || '—', 'notif-log-org-cell');
     nlAppendCell(
       tr,
@@ -225,7 +251,7 @@ function nlShowDetail(row) {
   }
 
   const table = document.createElement('table');
-  appendDetailRow(table, t('notif-log.detail.type'), row.type === 'threat' ? t('notif-log.type.threat') : t('notif-log.type.new_device'));
+  appendDetailRow(table, t('notif-log.detail.type'), nlTypeLabel(row.type));
   appendDetailRow(table, t('notif-log.detail.time'), timeStr);
   appendDetailRow(table, t('notif-log.detail.slack'), row.slackSent ? t('notif-log.slack.sent') : t('notif-log.slack.none'));
   appendDetailSection(table, t('notif-log.detail.sec.src'));
@@ -242,7 +268,14 @@ function nlShowDetail(row) {
     appendDetailRow(table, t('notif-log.detail.city'), row.city);
     appendDetailRow(table, t('notif-log.detail.org'), row.org);
   }
-  if (row.threatTag || row.threatSource) {
+  const lanScan = row.type === 'lan_scan' ? nlLanScan(row) : null;
+  if (lanScan) {
+    appendDetailSection(table, t('notif-log.detail.sec.lanScan'));
+    appendDetailRow(table, t('notif-log.detail.lanScan.program'), row.threatSource);
+    appendDetailRow(table, t('notif-log.detail.lanScan.what'), lanScan.summary);
+    appendDetailRow(table, t('notif-log.detail.lanScan.sample'), lanScan.sample);
+    appendDetailRow(table, t('notif-log.detail.lanScan.advice'), t('notif-log.lanScan.advice'));
+  } else if (row.threatTag || row.threatSource) {
     appendDetailSection(table, t('notif-log.detail.sec.threat'));
     appendDetailRow(table, t('notif-log.detail.threatSource'), row.threatSource);
     appendDetailRow(table, t('notif-log.detail.threatTag'), row.threatTag);

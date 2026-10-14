@@ -19,10 +19,12 @@ let _language = 'ja';
 // network is worth recording even when the operator does not want a DM for it.
 // Defaults are true so that an upgrade never silently drops a notification the
 // operator was already receiving.
-const DETECTION_KINDS = ['threat', 'newDevice'];
+const DETECTION_KINDS = ['threat', 'newDevice', 'lanScan'];
 const _detection = {
   threat:    { slack: true, history: true },
   newDevice: { slack: true, history: true },
+  // A program on an Agent's computer looking around the LAN (P3-191).
+  lanScan:   { slack: true, history: true },
 };
 
 function configureDetection(input = {}) {
@@ -38,6 +40,7 @@ function getDetectionConfig() {
   return {
     threat:    { ..._detection.threat },
     newDevice: { ..._detection.newDevice },
+    lanScan:   { ..._detection.lanScan },
   };
 }
 
@@ -257,6 +260,77 @@ async function notifyNewDevice(entry) {
   return slackSent;
 }
 
+const _LAN_SCAN_MSG = {
+  ja: {
+    title:   host => `🔎 *LAN内の探索を検出* — ${host}`,
+    program: name => `*プログラム:* ${name}`,
+    sweep:   (n, min, sample) => `*内容:* ${min}分間にLAN内の${n}個のアドレスへ接続しました（例: ${sample}）`,
+    probe:   (target, n, min, sample) => `*内容:* ${min}分間に${target}の${n}個のポートへ接続しました（例: ${sample}）`,
+    advice:  '*確認すること:* ブラウザの拡張機能や、最近入れたプログラムに心当たりが無いかを確認してください。',
+    time:    ts => `*検出時刻:* ${new Date(ts).toLocaleString('ja-JP')}`,
+  },
+  en: {
+    title:   host => `🔎 *LAN scanning detected* — ${host}`,
+    program: name => `*Program:* ${name}`,
+    sweep:   (n, min, sample) => `*What happened:* connected to ${n} LAN addresses in ${min} minutes (e.g. ${sample})`,
+    probe:   (target, n, min, sample) => `*What happened:* connected to ${n} ports on ${target} in ${min} minutes (e.g. ${sample})`,
+    advice:  '*What to check:* browser extensions, and any program installed recently.',
+    time:    ts => `*Detected at:* ${new Date(ts).toLocaleString('en-US')}`,
+  },
+};
+
+function lanScanSummary(finding) {
+  return JSON.stringify({
+    kind: finding.kind,
+    addresses: finding.addresses,
+    ports: finding.ports,
+    target: finding.target || null,
+    windowMs: finding.windowMs,
+    sample: finding.sample || [],
+  });
+}
+
+/**
+ * A program on an Agent's computer probing the LAN (lan-scan-detector.js).
+ * The history row keeps the computer as the source and the details as a small
+ * JSON summary in threatTag, which the notification log renders per language.
+ */
+async function notifyLanScan(finding) {
+  let slackSent = false;
+  const minutes = Math.max(1, Math.round((finding.windowMs || 120000) / 60000));
+  const detectedAt = (finding.windowStart || Date.now()) + (finding.windowMs || 0);
+  if (_enabled && _token && _userId && _detection.lanScan.slack) {
+    const L = _LAN_SCAN_MSG[_language] || _LAN_SCAN_MSG.ja;
+    const sample = (finding.sample || []).join(', ');
+    const lines = [
+      L.title(finding.hostName || finding.localAddress || '?'),
+      L.program(finding.processName || '?'),
+      finding.kind === 'port-probe'
+        ? L.probe(finding.target, finding.ports, minutes, sample)
+        : L.sweep(finding.addresses, minutes, sample),
+      L.advice,
+      L.time(detectedAt),
+    ].join('\n');
+    try {
+      const result = await _httpPost({ channel: _userId, text: lines }, _token);
+      if (!result.ok) logger.error('[notifier] lan-scan Slack error:', result.error);
+      else slackSent = true;
+    } catch (err) {
+      logger.error('[notifier] notifyLanScan failed:', err.message);
+    }
+  }
+  if (_logCallback) {
+    _logCallback({
+      src: finding.localAddress || null,
+      srcDnsName: finding.hostName || null,
+      dst: finding.kind === 'port-probe' ? finding.target : null,
+      threat: { source: finding.processName || null, tag: lanScanSummary(finding), confidence: null },
+      lastSeen: detectedAt,
+    }, 'lan_scan', slackSent, { record: _detection.lanScan.history });
+  }
+  return slackSent;
+}
+
 async function test() {
   if (!_token || !_userId) return { ok: false, error: 'token_or_userid_missing' };
   try {
@@ -350,6 +424,7 @@ async function lookupUser(username, token) {
 }
 
 module.exports = {
+  notifyLanScan,
   configure,
   getConfig,
   notify,

@@ -30,6 +30,7 @@ const manualThreatModule = require('./src/manual-threat-lookup');
 const { manualThreatLookup } = manualThreatModule;
 const aiProviderModule = require('./src/ai-provider');
 const { runQuickCheckOffThread } = require('./src/db-background-check');
+const { windowsToCheck, createLanScanCooldown } = require('./src/lan-scan-detector');
 const { aiProvider }  = aiProviderModule;
 const { createAiNotificationService } = require('./src/ai-notification-service');
 const { createAiBudget } = require('./src/ai-budget');
@@ -789,6 +790,36 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
     setTimeout(agentPrunePass, more ? AGENT_PRUNE_FIRST_MS : AGENT_PRUNE_IDLE_MS).unref?.();
   };
   setTimeout(agentPrunePass, AGENT_PRUNE_FIRST_MS).unref?.();
+  // A program on an Agent's computer looking around the LAN (P3-191): each
+  // finished two-minute window is read once, on the read thread, a minute
+  // after it ends so the Agents' uploads have landed. One notification per
+  // program and kind an hour.
+  const lanScanCooldown = createLanScanCooldown();
+  let lanScanChecked = null;
+  let lanScanRunning = false;
+  setInterval(() => {
+    if (lanScanRunning) return;
+    const windows = windowsToCheck({ now: Date.now(), lastChecked: lanScanChecked });
+    if (!windows.length) return;
+    lanScanRunning = true;
+    (async () => {
+      for (const from of windows) {
+        const findings = await runtimeProfiler.measureAsync('dbRead.lanScan', () => dbReadWorker.run('lanScan.find', { from }));
+        lanScanChecked = from;
+        for (const finding of findings || []) {
+          if (!lanScanCooldown.admit(finding)) continue;
+          logger.warn(`[lan-scan] ${finding.hostName} ${finding.processName}: ${finding.kind} `
+            + `${finding.kind === 'sweep' ? `${finding.addresses} addresses` : `${finding.ports} ports on ${finding.target}`}`);
+          await notifier.notifyLanScan(finding);
+        }
+      }
+    })()
+      .catch(error => {
+        if (error.code !== 'DB_WORKER_CLOSED') logger.warn('[lan-scan] check failed:', error.message);
+      })
+      .finally(() => { lanScanRunning = false; });
+  }, 60 * 1000).unref();
+
   // Indexes that only speed up a read (history-indexes.js), built on the
   // database thread once startup is over. A missing one costs only speed.
   setTimeout(() => {

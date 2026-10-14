@@ -7164,11 +7164,24 @@
                             }
                           },
                           "additionalProperties": false
+                        },
+                        "lanScan": {
+                          "type": "object",
+                          "properties": {
+                            "slack": {
+                              "type": "boolean"
+                            },
+                            "history": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "threat",
-                        "newDevice"
+                        "newDevice",
+                        "lanScan"
                       ],
                       "additionalProperties": false
                     }
