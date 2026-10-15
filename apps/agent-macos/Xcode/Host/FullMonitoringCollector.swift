@@ -11,6 +11,12 @@ final class FullMonitoringCollector {
     private let recoveryHandler: () -> Void
     private let diagnosticsHandler: (QUICFeasibilityDiagnostics) -> Void
     private let flowDiagnosticsHandler: (FlowCaptureDiagnostics, FlowPersistenceDiagnostics) -> Void
+    private let inboundProbeHandler: ([InboundProbeSummary]) -> Void
+    /// Polls since the last time inbound-probe summaries were collected.
+    private var pollsSinceProbeDrain = 0
+    /// Collected every this many polls: a window is two minutes long, so
+    /// thirty seconds is soon enough and costs nothing between.
+    private static let probeDrainEvery = 30
     private let queue = DispatchQueue(label: "com.egressview.agent.full-monitoring")
     private var connection: NSXPCConnection?
     private var diagnosticsConnection: NSXPCConnection?
@@ -48,8 +54,10 @@ final class FullMonitoringCollector {
         recoveryHandler: @escaping () -> Void = {},
         readsServerName: Bool = false,
         diagnosticsHandler: @escaping (QUICFeasibilityDiagnostics) -> Void = { _ in },
-        flowDiagnosticsHandler: @escaping (FlowCaptureDiagnostics, FlowPersistenceDiagnostics) -> Void = { _, _ in }
+        flowDiagnosticsHandler: @escaping (FlowCaptureDiagnostics, FlowPersistenceDiagnostics) -> Void = { _, _ in },
+        inboundProbeHandler: @escaping ([InboundProbeSummary]) -> Void = { _ in }
     ) {
+        self.inboundProbeHandler = inboundProbeHandler
         self.store = store
         self.observationHandler = observationHandler
         self.statusHandler = statusHandler
@@ -144,6 +152,16 @@ final class FullMonitoringCollector {
             return
         }
         syncServerNamePolicyIfNeeded(proxy)
+        pollsSinceProbeDrain += 1
+        if pollsSinceProbeDrain >= Self.probeDrainEvery {
+            pollsSinceProbeDrain = 0
+            proxy.drainInboundProbes? { [weak self] data in
+                guard !data.isEmpty,
+                      let probes = try? FullMonitoringXPC.decoder().decode([InboundProbeSummary].self, from: data),
+                      !probes.isEmpty else { return }
+                self?.inboundProbeHandler(probes)
+            }
+        }
         proxy.drainObservations?(acknowledging: handoff.acknowledgement) { [weak self] batchID, data in
             self?.queue.async {
                 guard let self, generation == self.drainRequestGeneration else { return }

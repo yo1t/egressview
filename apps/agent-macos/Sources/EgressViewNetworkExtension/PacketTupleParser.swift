@@ -32,6 +32,10 @@ public struct PacketHeader: Equatable, Sendable {
     /// The bytes after the IP and transport headers -- what a flow's own byte
     /// count measures, as opposed to the packet's length on the wire.
     public let payloadLength: Int
+    /// TCP's flag byte (SYN 0x02, ACK 0x10, ...), nil for UDP. Read so the
+    /// counting of LAN senders probing this Mac can tell a connection request
+    /// from the rest of a connection (P3-191).
+    public var tcpFlags: UInt8? = nil
 }
 
 /// Reads only IP and transport headers. Unsupported headers fail closed rather
@@ -115,7 +119,8 @@ public enum PacketTupleParser {
                 destinationAddress: "\(bytes[16]).\(bytes[17]).\(bytes[18]).\(bytes[19])",
                 destinationPort: word(bytes, at: headerLength + 2)
             ),
-            payloadLength: totalLength - headerLength - transportLength
+            payloadLength: totalLength - headerLength - transportLength,
+            tcpFlags: networkProtocol == .tcp ? bytes[headerLength + 13] : nil
         )
     }
 
@@ -138,7 +143,8 @@ public enum PacketTupleParser {
                 destinationAddress: destination,
                 destinationPort: word(bytes, at: 42)
             ),
-            payloadLength: payloadLength - transportLength
+            payloadLength: payloadLength - transportLength,
+            tcpFlags: networkProtocol == .tcp ? bytes[40 + 13] : nil
         )
     }
 

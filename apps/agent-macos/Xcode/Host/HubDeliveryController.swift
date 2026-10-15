@@ -69,6 +69,11 @@ final class HubDeliveryController: ObservableObject {
         Task { await sender?.enqueue(sampled) }
     }
 
+    func enqueueInboundProbes(_ probes: [InboundProbeSummary]) {
+        guard preferences.isEnabled, !probes.isEmpty else { return }
+        Task { await sender?.enqueueInboundProbes(probes) }
+    }
+
     func requestAccess() {
         guard consentConfirmed else {
             errorMessage = L("Review the data summary and confirm consent before enrolling.")
@@ -1392,7 +1397,7 @@ private struct AgentSettingsView: View {
                     Text(L("Count them from packet headers"))
                     // The cost is stated with the number it was measured at,
                     // because that is what the person is deciding about.
-                    Text(L("Reads the IP and TCP/UDP header of each packet — protocol, addresses, ports and lengths — and counts the bytes of connections macOS reports as zero. Contents are not read, nothing new leaves this Mac, and every packet passes unchanged. Uses more CPU: on a test Mac the monitor went from about 0.1% to about 1.2% of one core, and more on heavy traffic. Off unless you turn it on. Applies to connections started after the change."))
+                    Text(L("Reads the IP and TCP/UDP header of each packet — protocol, addresses, ports and lengths — and counts the bytes of connections macOS reports as zero. It also counts how many of this Mac's ports each device on the LAN tries, and sends those counts to your Hub. Contents are not read, and every packet passes unchanged. Uses more CPU: on a test Mac the monitor went from about 0.1% to about 1.2% of one core, and more on heavy traffic. Off unless you turn it on. Applies to connections started after the change."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

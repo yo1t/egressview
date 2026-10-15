@@ -115,6 +115,15 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 self?.currentFlowPersistenceDiagnostics = hostDiagnostics
                 self?.settingsWindow?.updateFlowDiagnostics(extensionDiagnostics, hostDiagnostics: hostDiagnostics)
             }
+        },
+        // LAN senders probing this Mac, counted by the packet filter when the
+        // user has turned packet counting on (P3-191). Delivered to the Hub
+        // with the next uploads; nothing is shown here yet.
+        inboundProbeHandler: { [weak self] probes in
+            DispatchQueue.main.async {
+                guard self?.isPreparedForRemoval == false else { return }
+                self?.hubDelivery.enqueueInboundProbes(probes)
+            }
         }
     )
 

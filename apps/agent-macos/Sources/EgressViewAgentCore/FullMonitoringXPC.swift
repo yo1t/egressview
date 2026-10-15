@@ -15,6 +15,10 @@ import Foundation
     /// Optional so a new Host can keep collecting from the previous extension
     /// while macOS is still completing an update.
     @objc optional func readQUICFeasibilityDiagnostics(withReply reply: @escaping (Data) -> Void)
+    /// Summaries of LAN senders probing this Mac, for windows that have ended
+    /// (P3-191). Each is handed over once. Optional, so a Host can talk to an
+    /// extension built before it.
+    @objc optional func drainInboundProbes(withReply reply: @escaping (Data) -> Void)
     /// Aggregate capture counts for diagnosing missing short-lived flows.
     @objc optional func readFlowCaptureDiagnostics(withReply reply: @escaping (Data) -> Void)
     /// Synchronizes the explicit user opt-in without relying on preferences

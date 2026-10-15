@@ -132,9 +132,18 @@ What it does, and what it does not:
 - **It is used only where macOS has no number.** The count replaces the
   report only when macOS says zero both ways. A connection macOS counts keeps
   macOS's number.
-- **Nothing new leaves the Mac.** The result is the same `bytesIn` /
-  `bytesOut` fields the agent already records and, if you enrol, sends to your
-  Hub. No packet, header or address list is written to disk, logged or sent.
+- **Byte counts go where they always went.** The result is the same
+  `bytesIn` / `bytesOut` fields the agent already records and, if you enrol,
+  sends to your Hub. No packet or header is written to disk, logged or sent.
+- **It also counts how a LAN device probes this Mac.** For incoming
+  connection requests (TCP SYN) and UDP datagrams to ports below this Mac's
+  ephemeral range (49152), it counts, per LAN sender, how many distinct ports
+  were reached in two minutes. Multicast and broadcast are not counted. A
+  sender that reached five ports or more is sent to your Hub (only if the Hub
+  says it accepts it) as: the sender's address, this Mac's address, TCP or
+  UDP, the number of ports and packets, and up to ten of the port numbers.
+  No packet content is read. This is how a phone probing devices on the LAN
+  is noticed.
 - **Every packet passes.** The filter never blocks, delays or changes a
   packet; it allows each one after reading its headers.
 

@@ -27,6 +27,9 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
     /// counts left empty (P3-177). Absent, such a report is dropped as a
     /// duplicate, so it is sent under its own id instead.
     public let unmeasuredClosings: Bool?
+    /// Whether this Hub stores summaries of LAN senders probing this Mac
+    /// (P3-191). Absent, they are not sent.
+    public let inboundProbes: Bool?
 
     public init(
         schemaVersions: [Int],
@@ -36,7 +39,8 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
         compression: [String]? = nil,
         observationFields: [String]? = nil,
         observationUpdates: Bool? = nil,
-        unmeasuredClosings: Bool? = nil
+        unmeasuredClosings: Bool? = nil,
+        inboundProbes: Bool? = nil
     ) {
         self.schemaVersions = schemaVersions
         self.maxObservationsPerBatch = maxObservationsPerBatch
@@ -46,6 +50,7 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
         self.observationFields = observationFields
         self.observationUpdates = observationUpdates
         self.unmeasuredClosings = unmeasuredClosings
+        self.inboundProbes = inboundProbes
     }
 }
 
@@ -82,6 +87,10 @@ public enum AgentCapabilityNegotiation {
     /// completing without counts.
     public static func completesUnmeasuredClosings(capabilities: AgentHubCapabilities?) -> Bool {
         completesObservations(capabilities: capabilities) && capabilities?.unmeasuredClosings == true
+    }
+
+    public static func acceptsInboundProbes(capabilities: AgentHubCapabilities?) -> Bool {
+        capabilities?.inboundProbes == true
     }
 
     public static func acceptsRemoteHostname(capabilities: AgentHubCapabilities?) -> Bool {
