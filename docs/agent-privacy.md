@@ -138,7 +138,11 @@ What it does, and what it does not:
 - **It also counts how a LAN device probes this Mac.** For incoming
   connection requests (TCP SYN) and UDP datagrams to ports below this Mac's
   ephemeral range (49152), it counts, per LAN sender, how many distinct ports
-  were reached in two minutes. Multicast and broadcast are not counted. A
+  were reached in two minutes. Answers to UDP this Mac sent (DNS replies,
+  device discovery) are not counted: for that, the filter remembers in memory,
+  for two minutes, which LAN address and port this Mac sent UDP to and from
+  which local port. That list is never written to disk or sent.
+  Multicast and broadcast are not counted. A
   sender that reached five ports or more is sent to your Hub (only if the Hub
   says it accepts it) as: the sender's address, this Mac's address, TCP or
   UDP, the number of ports and packets, and up to ten of the port numbers.

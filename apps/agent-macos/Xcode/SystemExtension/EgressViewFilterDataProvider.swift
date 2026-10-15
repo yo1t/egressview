@@ -29,8 +29,25 @@ final class InboundProbeRecorder: @unchecked Sendable {
         lock.withLock {
             counter.record(
                 networkProtocol: tuple.networkProtocol, sourceAddress: tuple.sourceAddress,
+                sourcePort: tuple.sourcePort,
                 destinationAddress: tuple.destinationAddress, destinationPort: tuple.destinationPort,
                 tcpFlags: header.tcpFlags, at: now
+            )
+        }
+    }
+
+    /// A datagram this Mac sends, so the answers to it are not counted.
+    func noteOutbound(_ bytes: UnsafeRawBufferPointer, packetLength: Int) {
+        guard let header = PacketTupleParser.header(bytes, packetLength: packetLength) else { return }
+        let tuple = header.tuple
+        guard InboundProbeCounter.remembersOutbound(
+            networkProtocol: tuple.networkProtocol, sourcePort: tuple.sourcePort
+        ) else { return }
+        let now = Date()
+        lock.withLock {
+            counter.noteOutbound(
+                networkProtocol: tuple.networkProtocol, sourcePort: tuple.sourcePort,
+                destinationAddress: tuple.destinationAddress, destinationPort: tuple.destinationPort, at: now
             )
         }
     }
@@ -56,6 +73,8 @@ final class EgressViewFilterPacketProvider: NEFilterPacketProvider {
             PacketCounting.ledger.record(headerBytes, packetLength: length, outbound: direction == .outbound)
             if direction == .inbound {
                 PacketCounting.probes.record(headerBytes, packetLength: length)
+            } else {
+                PacketCounting.probes.noteOutbound(headerBytes, packetLength: length)
             }
             return .allow
         }
