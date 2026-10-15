@@ -83,6 +83,21 @@ const agentObservationSchema = z.object({
   }
 });
 
+// One sender reaching many ports of this computer in one window, counted by
+// the Mac Agent from packet headers (P3-191). Optional; an Agent sends it only
+// when the capabilities say `inboundProbes: true`.
+const AGENT_INGEST_MAX_INBOUND_PROBES = 50;
+const agentInboundProbeSchema = z.object({
+  windowStart: isoTimestamp,
+  windowSeconds: z.number().int().min(1).max(3600),
+  localAddress: ipLiteral,
+  sourceAddress: ipLiteral,
+  networkProtocol: z.enum(['tcp', 'udp']),
+  distinctPorts: z.number().int().min(1).max(65535),
+  packets: z.number().int().min(1).max(100_000_000),
+  samplePorts: z.array(port).max(10),
+}).strict();
+
 function supportedSchemaVersionSchema() {
   const options = AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS.map(version => z.literal(version));
   return options.length === 1 ? options[0] : z.union(options);
@@ -97,6 +112,8 @@ const agentIngestEnvelopeSchema = z.object({
   sentAt: isoTimestamp,
   agent: agentMetadataSchema,
   observations: z.array(agentObservationSchema).min(1).max(AGENT_INGEST_MAX_OBSERVATIONS),
+  // Sent along with observations, never on their own.
+  inboundProbes: z.array(agentInboundProbeSchema).max(AGENT_INGEST_MAX_INBOUND_PROBES).optional(),
 }).strict();
 
 function validateAgentObservationWindow(envelope, {
@@ -132,5 +149,7 @@ module.exports = {
   agentMetadataSchema,
   agentObservationSchema,
   agentIngestEnvelopeSchema,
+  agentInboundProbeSchema,
+  AGENT_INGEST_MAX_INBOUND_PROBES,
   validateAgentObservationWindow,
 };

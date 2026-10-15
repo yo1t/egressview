@@ -262,7 +262,7 @@ describe('Agent ingest store', () => {
     await store.storeBatch(agentId, copy(), { receivedAt });
     const result = store.pruneObservations({ before: receivedAt + 1 });
     const { timings, ...counts } = result;
-    assert.deepEqual(counts, { correlations: 0, observations: 1, hourly: 1, batches: 1, more: false });
+    assert.deepEqual(counts, { correlations: 0, observations: 1, hourly: 1, batches: 1, more: false, inboundProbes: 0 });
     assert.deepEqual(Object.keys(timings).sort(),
       ['hourlyMs', 'observationsMs', 'receiptsMs', 'slowestTransactionMs']);
     assert.ok(timings.slowestTransactionMs <= timings.observationsMs + timings.hourlyMs + timings.receiptsMs);

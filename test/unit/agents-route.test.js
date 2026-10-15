@@ -41,6 +41,7 @@ function makeApp({
   queueConnectionEnrichment = null,
   threatIntel = null,
   ingestAuditSummary = null,
+  onInboundProbes = null,
 } = {}) {
   const audits = [];
   const app = express();
@@ -73,6 +74,7 @@ function makeApp({
     isPlaintextAllowed: () => allowPlaintext,
     authAudit: { append: event => audits.push(event) },
     ingestAuditSummary,
+    onInboundProbes,
   }));
   return { app, audits };
 }
@@ -793,5 +795,63 @@ describe('agent geo-cache is built once and kept', () => {
     assert.equal(built.etag, here.etag);
     assert.deepEqual(JSON.parse(built.json).entries, [['198.51.100.3', 1.5, 2.5, 'SG', null]]);
     assert.equal(built.count, 1);
+  });
+});
+
+// P3-191: a device on the LAN probing a computer with an Agent. The summaries
+// ride along with an upload, are stored, and the new ones go to the callback.
+describe('inbound probe summaries', () => {
+  function probe(overrides = {}) {
+    const windowStart = new Date(Math.floor(Date.now() / 120000) * 120000).toISOString();
+    return {
+      windowStart, windowSeconds: 120, localAddress: '192.168.1.53', sourceAddress: '192.168.1.77',
+      networkProtocol: 'tcp', distinctPorts: 25, packets: 60, samplePorts: [21, 22, 23, 80, 443], ...overrides,
+    };
+  }
+
+  it('Hubは受け取れることを伝える', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const response = await request(app, 'GET', '/api/agent/capabilities', {
+      headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    assert.equal(response.body.inboundProbes, true);
+  });
+
+  it('観測と一緒に届いた記録を保存し、新しいものだけ知らせる。再送では知らせない', async () => {
+    const told = [];
+    const { app } = makeApp({ onInboundProbes: report => told.push(report) });
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const envelope = ingestEnvelope();
+    envelope.inboundProbes = [probe(), probe({ networkProtocol: 'udp', distinctPorts: 6, samplePorts: [53, 137] })];
+    const first = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers: authorization });
+    assert.equal(first.status, 200);
+    assert.equal(told.length, 1);
+    assert.equal(told[0].probes.length, 2);
+    assert.equal(told[0].probes[0].sourceAddress, '192.168.1.77');
+    const rows = agentIngestStore._dbForTest().prepare('SELECT * FROM agent_inbound_probes ORDER BY networkProtocol').all();
+    assert.equal(rows.length, 2);
+    assert.deepEqual(JSON.parse(rows[0].samplePorts), [21, 22, 23, 80, 443]);
+
+    const again = ingestEnvelope();
+    again.batchId = '00000000-0000-4000-8000-0000000000aa';
+    again.observations[0].observationId = '00000000-0000-4000-8000-0000000000ab';
+    again.inboundProbes = [probe({ distinctPorts: 30 })];
+    const second = await request(app, 'POST', '/api/agent/ingest', { body: again, headers: authorization });
+    assert.equal(second.status, 200);
+    assert.equal(told.length, 1, 'the same window counted further is stored, not reported again');
+    assert.equal(agentIngestStore._dbForTest().prepare("SELECT distinctPorts FROM agent_inbound_probes WHERE networkProtocol = 'tcp'").get().distinctPorts, 30);
+  });
+
+  it('形の合わない記録は受け取らない', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    envelope.inboundProbes = [probe({ networkProtocol: 'icmp' })];
+    const response = await request(app, 'POST', '/api/agent/ingest', {
+      body: envelope, headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    assert.equal(response.status, 400);
   });
 });
