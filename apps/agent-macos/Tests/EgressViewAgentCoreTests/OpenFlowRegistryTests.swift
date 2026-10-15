@@ -356,4 +356,32 @@ final class OpenFlowServerNameTests: XCTestCase {
         )
         XCTAssertEqual(closed?.remoteHostname, "example.test")
     }
+
+    /// P3-191: an attempt that failed at once closes without a local endpoint
+    /// and was never registered. Given the close's metadata with the local
+    /// side unspecified, it is recorded rather than dropped.
+    func test送信元が決まらないまま終わった接続も記録する() throws {
+        var registry = OpenFlowRegistry()
+        let failed = SocketFlowMetadata(
+            networkProtocol: .tcp,
+            localAddress: NetworkExtensionFlowAdapter.unspecifiedAddress(like: "192.0.2.77"),
+            localPort: 0,
+            remoteAddress: "192.0.2.77",
+            remotePort: 80,
+            processID: 501,
+            processName: "curl"
+        )
+        let observation = try XCTUnwrap(registry.complete(
+            flowID: UUID(), kind: .flowClosed, bytesIn: 0, bytesOut: 0,
+            metadata: failed, reportedAt: start
+        ))
+        XCTAssertEqual(observation.localAddress, "0.0.0.0")
+        XCTAssertEqual(observation.localPort, 0)
+        XCTAssertEqual(observation.remoteAddress, "192.0.2.77")
+        XCTAssertEqual(observation.remotePort, 80)
+        XCTAssertEqual(observation.processName, "curl")
+        XCTAssertFalse(observation.hasLocalEndpoint)
+        XCTAssertEqual(NetworkExtensionFlowAdapter.unspecifiedAddress(like: "2001:db8::7"), "::")
+    }
+
 }
