@@ -254,6 +254,12 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         let described = adapter.metadataResult(from: socketFlow)
         var metadata: SocketFlowMetadata?
         if case let .success(value) = described { metadata = value }
+        // A close the system never gave a local endpoint: an attempt that
+        // failed at once. Recorded with the local side as not known, so a
+        // program probing addresses that do not answer is counted (P3-191).
+        if kind == .flowClosed, case .missingLocalEndpoint = described {
+            metadata = adapter.metadataWithoutLocalEndpoint(from: socketFlow)
+        }
         let reportedIn = UInt64(max(0, report.bytesInboundCount))
         let reportedOut = UInt64(max(0, report.bytesOutboundCount))
         let reportedZero = reportedIn == 0 && reportedOut == 0
