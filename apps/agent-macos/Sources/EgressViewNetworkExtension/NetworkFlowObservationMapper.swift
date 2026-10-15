@@ -128,6 +128,40 @@ public struct NetworkExtensionFlowAdapter {
         ))
     }
 
+    /// The same metadata for an outbound flow whose local endpoint the system
+    /// never chose, with the local side written as unspecified (0.0.0.0:0 or
+    /// [::]:0) -- for a closing report only.
+    ///
+    /// A connection attempt that fails at once (nothing listening, no route)
+    /// ends before it is given a local port, and its close used to be dropped
+    /// as "source not known". On 2026-10-15, 18 of 40 such attempts to LAN
+    /// addresses left no record at all, so a program probing the LAN was
+    /// counted at half its size (P3-191). Destination, port and program are
+    /// known; only the local side is not, and it is recorded as not known.
+    public func metadataWithoutLocalEndpoint(from flow: NEFilterSocketFlow) -> SocketFlowMetadata? {
+        guard flow.direction == .outbound,
+              let networkProtocol = InternetProtocol(socketProtocol: flow.socketProtocol),
+              endpointParts(flow.localEndpoint) == nil,
+              let remote = endpointParts(flow.remoteEndpoint)
+        else { return nil }
+        let processID = processID(from: flow.sourceProcessAuditToken ?? flow.sourceAppAuditToken)
+        return SocketFlowMetadata(
+            networkProtocol: networkProtocol,
+            localAddress: Self.unspecifiedAddress(like: remote.address),
+            localPort: 0,
+            remoteAddress: remote.address,
+            remotePort: remote.port,
+            processID: processID,
+            processName: processName(for: processID),
+            remoteHostname: normalizedHostname(flow.remoteHostname)
+        )
+    }
+
+    /// The unspecified address of the same family as `address`.
+    static func unspecifiedAddress(like address: String) -> String {
+        address.contains(":") ? "::" : "0.0.0.0"
+    }
+
     /// Keeps only a plain host name. An empty or oversized value is dropped
     /// rather than stored: a name nobody can read is not better than the IP
     /// address the screen already shows.
