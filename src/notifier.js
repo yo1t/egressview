@@ -267,6 +267,9 @@ const _LAN_SCAN_MSG = {
     sweep:   (n, min, sample) => `*内容:* ${min}分間にLAN内の${n}個のアドレスへ接続しました（例: ${sample}）`,
     probe:   (target, n, min, sample) => `*内容:* ${min}分間に${target}の${n}個のポートへ接続しました（例: ${sample}）`,
     advice:  '*確認すること:* ブラウザの拡張機能や、最近入れたプログラムに心当たりが無いかを確認してください。',
+    probedTitle: (source, host) => `🔎 *LAN内からの探索を検出* — ${source} → ${host}`,
+    probed:  (source, host, n, proto, min, sample) => `*内容:* ${source}が${min}分間に、${host}の${proto.toUpperCase()}の${n}個のポートへ接続を試みました（例: ${sample}）`,
+    probedAdvice: '*確認すること:* 送り元の機器（スマホなど）に、心当たりの無いアプリや設定が無いかを確認してください。',
     time:    ts => `*検出時刻:* ${new Date(ts).toLocaleString('ja-JP')}`,
   },
   en: {
@@ -275,6 +278,9 @@ const _LAN_SCAN_MSG = {
     sweep:   (n, min, sample) => `*What happened:* connected to ${n} LAN addresses in ${min} minutes (e.g. ${sample})`,
     probe:   (target, n, min, sample) => `*What happened:* connected to ${n} ports on ${target} in ${min} minutes (e.g. ${sample})`,
     advice:  '*What to check:* browser extensions, and any program installed recently.',
+    probedTitle: (source, host) => `🔎 *Probing from the LAN detected* — ${source} → ${host}`,
+    probed:  (source, host, n, proto, min, sample) => `*What happened:* ${source} tried ${n} ${proto.toUpperCase()} ports on ${host} in ${min} minutes (e.g. ${sample})`,
+    probedAdvice: '*What to check:* the sending device (a phone, say) for apps or settings you do not recognise.',
     time:    ts => `*Detected at:* ${new Date(ts).toLocaleString('en-US')}`,
   },
 };
@@ -282,6 +288,8 @@ const _LAN_SCAN_MSG = {
 function lanScanSummary(finding) {
   return JSON.stringify({
     kind: finding.kind,
+    protocol: finding.networkProtocol || null,
+    host: finding.hostName || null,
     addresses: finding.addresses,
     ports: finding.ports,
     target: finding.target || null,
@@ -302,15 +310,21 @@ async function notifyLanScan(finding) {
   if (_enabled && _token && _userId && _detection.lanScan.slack) {
     const L = _LAN_SCAN_MSG[_language] || _LAN_SCAN_MSG.ja;
     const sample = (finding.sample || []).join(', ');
-    const lines = [
-      L.title(finding.hostName || finding.localAddress || '?'),
+    const host = finding.hostName || finding.localAddress || '?';
+    const lines = (finding.kind === 'probed' ? [
+      L.probedTitle(finding.sourceAddress, host),
+      L.probed(finding.sourceAddress, host, finding.ports, finding.networkProtocol || 'tcp', minutes, sample),
+      L.probedAdvice,
+      L.time(detectedAt),
+    ] : [
+      L.title(host),
       L.program(finding.processName || '?'),
       finding.kind === 'port-probe'
         ? L.probe(finding.target, finding.ports, minutes, sample)
         : L.sweep(finding.addresses, minutes, sample),
       L.advice,
       L.time(detectedAt),
-    ].join('\n');
+    ]).join('\n');
     try {
       const result = await _httpPost({ channel: _userId, text: lines }, _token);
       if (!result.ok) logger.error('[notifier] lan-scan Slack error:', result.error);
@@ -320,10 +334,15 @@ async function notifyLanScan(finding) {
     }
   }
   if (_logCallback) {
+    // Probed: the sender is the source and the probed computer the
+    // destination, so the history row names the device to look at.
+    const probed = finding.kind === 'probed';
     _logCallback({
-      src: finding.localAddress || null,
-      srcDnsName: finding.hostName || null,
-      dst: finding.kind === 'port-probe' ? finding.target : null,
+      src: probed ? finding.sourceAddress : (finding.localAddress || null),
+      srcDnsName: probed ? null : (finding.hostName || null),
+      dst: probed || finding.kind === 'port-probe' ? finding.target : null,
+      dstHost: probed ? (finding.hostName || null) : null,
+      proto: probed ? (finding.networkProtocol || null) : null,
       threat: { source: finding.processName || null, tag: lanScanSummary(finding), confidence: null },
       lastSeen: detectedAt,
     }, 'lan_scan', slackSent, { record: _detection.lanScan.history });

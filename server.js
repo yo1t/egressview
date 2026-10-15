@@ -31,6 +31,7 @@ const { manualThreatLookup } = manualThreatModule;
 const aiProviderModule = require('./src/ai-provider');
 const { runDatabaseCheck, msUntilNextHour } = require('./src/db-background-check');
 const { windowsToCheck, createLanScanCooldown } = require('./src/lan-scan-detector');
+const { PROBE_NOTIFY_MIN_PORTS } = require('./src/agent-inbound-probes');
 const { aiProvider }  = aiProviderModule;
 const { createAiNotificationService } = require('./src/ai-notification-service');
 const { createAiBudget } = require('./src/ai-budget');
@@ -439,6 +440,38 @@ async function reMatchAndNotify() {
 // Successful agent uploads, one audit row per agent per hour (P3-175).
 const ingestAuditSummary = createIngestAuditSummary({ append: event => authAudit.append(event) });
 
+// A device on the LAN probing a computer with an Agent (P3-191): summaries at
+// or above PROBE_NOTIFY_MIN_PORTS are reported, once an hour per computer,
+// sender and protocol.
+const inboundProbeCooldown = new Map();
+function reportInboundProbes({ agentId, hostName, probes }) {
+  const now = Date.now();
+  for (const [key, at] of inboundProbeCooldown) if (now - at >= 60 * 60 * 1000) inboundProbeCooldown.delete(key);
+  for (const probe of probes) {
+    if (probe.distinctPorts < PROBE_NOTIFY_MIN_PORTS) continue;
+    const key = `${agentId}|${probe.sourceAddress}|${probe.networkProtocol}`;
+    if (inboundProbeCooldown.has(key)) continue;
+    inboundProbeCooldown.set(key, now);
+    logger.warn(`[lan-scan] ${probe.sourceAddress} probed ${hostName} (${probe.localAddress}): `
+      + `${probe.distinctPorts} ${probe.networkProtocol} ports`);
+    notifier.notifyLanScan({
+      kind: 'probed',
+      agentId,
+      hostName,
+      processName: null,
+      localAddress: probe.localAddress,
+      sourceAddress: probe.sourceAddress,
+      networkProtocol: probe.networkProtocol,
+      windowStart: probe.windowStartMs,
+      windowMs: probe.windowSeconds * 1000,
+      addresses: 1,
+      ports: probe.distinctPorts,
+      target: probe.localAddress,
+      sample: probe.samplePorts || [],
+    }).catch(error => logger.error('[lan-scan] notify failed:', error.message));
+  }
+}
+
 const routeCtx = {
   requireAdmin,
   ingestAuditSummary,
@@ -448,6 +481,7 @@ const routeCtx = {
   runtime, notes, io, beacons, sessions, authPassword,
   authAudit, authCookies, oidc, apiIdentities,
   agentIdentities, agentIngest, requireAgent, dbWorker, dbReadWorker, historyReader,
+  onInboundProbes: reportInboundProbes,
   // Agent flows go through the same recording path as a router poll, so they
   // are enriched, threat-matched, and counted as device activity rather than
   // sitting in a table nothing checks.
