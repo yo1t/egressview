@@ -181,7 +181,7 @@ function initDb(dbPath, { sourceRouterMap: mapOverride, onProgress } = {}) {
   let checkPlan = { mode: 'full', reason: 'in-memory database' };
   if (actualPath !== ':memory:') {
     const marker = takeCleanShutdownMarker(actualPath);
-    checkPlan = chooseStartupCheck(marker, { deferQuick: true });
+    checkPlan = chooseStartupCheck(marker, { deferQuick: true, deferFull: true });
     lastFullCheckAt = marker.lastFullCheckAt;
   }
 
@@ -201,7 +201,8 @@ function initDb(dbPath, { sourceRouterMap: mapOverride, onProgress } = {}) {
   }
   _secureDbFiles();
   const checkStartedAt = Date.now();
-  if (db && checkPlan.mode !== 'deferred') {
+  const deferred = checkPlan.mode === 'deferred' || checkPlan.mode === 'deferred-full';
+  if (db && !deferred) {
     // Followed from outside so the startup page can say how far it has got;
     // the check itself is unchanged (P3-173).
     const outcome = followCheck(
@@ -214,11 +215,12 @@ function initDb(dbPath, { sourceRouterMap: mapOverride, onProgress } = {}) {
   startupCheck = {
     ...checkPlan,
     ms: Date.now() - checkStartedAt,
-    result: damaged ? 'damaged' : (checkPlan.mode === 'deferred' ? 'deferred' : 'ok'),
+    result: damaged ? 'damaged' : (deferred ? 'deferred' : 'ok'),
   };
   if (!damaged && checkPlan.mode === 'full') lastFullCheckAt = Date.now();
-  if (checkPlan.mode === 'deferred' && !damaged) {
-    logger.info(`[history] Startup check: quick_check deferred until after startup (${checkPlan.reason})`);
+  if (deferred && !damaged) {
+    logger.info(`[history] Startup check: ${checkPlan.mode === 'deferred-full' ? 'integrity_check' : 'quick_check'} `
+      + `deferred until after startup (${checkPlan.reason})`);
   } else {
     logger.info(`[history] Startup check: ${checkPlan.mode === 'full' ? 'integrity_check' : 'quick_check'} `
       + `(${checkPlan.reason}) -- ${startupCheck.result} in ${(startupCheck.ms / 1000).toFixed(1)} s`);
@@ -810,13 +812,17 @@ function markCleanShutdown({ openHandles = openHandlesTo } = {}) {
 
 /** What the startup check did: mode, reason, duration, result. */
 /**
- * The deferred quick check, run after startup, came back (db-background-check).
- * Anything but "ok" withdraws the recent full check this run would otherwise
- * vouch for, so the next start checks in full before it begins.
+ * A check run while the Hub kept working came back (db-background-check): the
+ * deferred startup check or the daily full check. Anything but "ok" withdraws
+ * the recent full check this run would otherwise vouch for, so the next start
+ * checks in full before it begins.
  */
-function recordBackgroundCheck({ result, ms = null, error = null }) {
-  if (startupCheck) startupCheck = { ...startupCheck, background: { result, ms, error } };
+function recordBackgroundCheck({ result, ms = null, error = null, mode = 'quick', at = Date.now() }) {
+  if (startupCheck) startupCheck = { ...startupCheck, background: { result, ms, error, mode } };
   if (result !== 'ok') lastFullCheckAt = null;
+  // A full check that passed is as good as one run at startup: the next
+  // orderly start carries it in its marker (db-startup-check.js).
+  else if (mode === 'full') lastFullCheckAt = at;
 }
 
 function getStartupCheck() {

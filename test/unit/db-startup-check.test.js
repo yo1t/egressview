@@ -99,6 +99,15 @@ describe('choosing the startup check', () => {
     assert.equal(chooseStartupCheck(marker, { now }).mode, 'full');
   });
 
+  // 269 s on production (2026-10-15): after an orderly stop, a full check that
+  // is due only because of its age follows startup instead.
+  it('defers a week-old full check after an orderly stop when asked to', () => {
+    const marker = { clean: true, lastFullCheckAt: now - FULL_CHECK_MAX_AGE_MS - 1 };
+    assert.equal(chooseStartupCheck(marker, { now, deferFull: true }).mode, 'deferred-full');
+    assert.equal(chooseStartupCheck({ clean: false }, { now, deferFull: true }).mode, 'full', 'never after an unorderly stop');
+    assert.equal(chooseStartupCheck({ clean: true, lastFullCheckAt: null }, { now, deferFull: true }).mode, 'full', 'nor with no full check on record');
+  });
+
   it('uses the quick check after an orderly stop with a recent full check', () => {
     assert.equal(chooseStartupCheck({ clean: true, lastFullCheckAt: now - DAY }, { now }).mode, 'quick');
     assert.equal(chooseStartupCheck({ clean: true, lastFullCheckAt: now - FULL_CHECK_MAX_AGE_MS }, { now }).mode, 'quick');
@@ -211,12 +220,29 @@ describe('start, stop and start again', () => {
     assert.equal(history.getStartupCheck().mode, 'deferred');
   });
 
-  it('checks in full once the last full check is more than a week old', () => {
+  it('defers the full check after an orderly stop once the last one is more than a week old', () => {
     history._initForTest(db);
     history.closeDb();
     writeCleanShutdownMarker(db, { lastFullCheckAt: Date.now() - FULL_CHECK_MAX_AGE_MS - DAY });
     history._initForTest(db);
-    assert.equal(history.getStartupCheck().mode, 'full');
+    assert.equal(history.getStartupCheck().mode, 'deferred-full');
+    assert.equal(history.getStartupCheck().result, 'deferred');
+  });
+
+  // The daily full check (or a deferred one) that passed counts as the last
+  // full check, so the next orderly start does not find it a week old.
+  it('裏で通った完全な検査は、次の起動の「最後の完全な検査」になる', () => {
+    history._initForTest(db);
+    history.closeDb();
+    writeCleanShutdownMarker(db, { lastFullCheckAt: Date.now() - FULL_CHECK_MAX_AGE_MS - DAY });
+    history._initForTest(db);
+    const at = Date.now();
+    history.recordBackgroundCheck({ result: 'ok', mode: 'full', ms: 5, at });
+    assert.equal(history.getStartupCheck().lastFullCheckAt, at);
+    history.closeDb();
+    history.markCleanShutdown();
+    history._initForTest(db);
+    assert.equal(history.getStartupCheck().mode, 'deferred');
   });
 });
 
@@ -278,24 +304,47 @@ describe('handles still open at shutdown', () => {
   });
 });
 
-// The thread the deferred check runs on: a real worker against real files.
-describe('deferred quick check off the main thread', () => {
-  const { runQuickCheckOffThread } = require('../../src/db-background-check');
+// The process the background checks run in: a real child against real files.
+describe('database checks while the Hub keeps working', () => {
+  const { runDatabaseCheck, lowPriorityCommand, msUntilNextHour } = require('../../src/db-background-check');
   const Database = require('better-sqlite3');
 
-  it('健全なDBではokを返す', async () => {
+  function soundDb() {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'qc-')), 'ok.db');
     const created = new Database(file);
-    created.exec('CREATE TABLE t (a INTEGER PRIMARY KEY, b TEXT); INSERT INTO t (b) VALUES (\'x\'), (\'y\');');
+    created.exec('CREATE TABLE t (a INTEGER PRIMARY KEY, b TEXT); CREATE INDEX t_b ON t(b); INSERT INTO t (b) VALUES (\'x\'), (\'y\');');
     created.close();
-    const outcome = await runQuickCheckOffThread(file);
-    assert.equal(outcome.result, 'ok');
-    assert.ok(Number.isFinite(outcome.ms));
+    return file;
+  }
+
+  it('健全なDBでは、軽い検査も完全な検査もokを返す', async () => {
+    const file = soundDb();
+    for (const mode of ['quick', 'full']) {
+      const outcome = await runDatabaseCheck(file, mode);
+      assert.equal(outcome.result, 'ok', mode);
+      assert.equal(outcome.mode, mode);
+      assert.ok(Number.isFinite(outcome.ms));
+    }
   });
 
   it('DBが無ければerrorを返し、投げない', async () => {
-    const outcome = await runQuickCheckOffThread(path.join(os.tmpdir(), `missing-${process.pid}-${Date.now()}.db`));
+    const outcome = await runDatabaseCheck(path.join(os.tmpdir(), `missing-${process.pid}-${Date.now()}.db`), 'full');
     assert.equal(outcome.result, 'error');
     assert.ok(outcome.error);
+  });
+
+  it('Linuxでは、CPUとディスクの優先度を最低にして動かす', () => {
+    const linux = lowPriorityCommand(['x.js'], { platform: 'linux', exists: () => true });
+    assert.equal(linux.command, '/usr/bin/nice');
+    assert.deepEqual(linux.args.slice(0, 5), ['-n', '19', '/usr/bin/ionice', '-c', '3']);
+    const elsewhere = lowPriorityCommand(['x.js'], { platform: 'darwin', exists: () => true });
+    assert.equal(elsewhere.command, process.execPath);
+  });
+
+  it('次の04:00までの時間を、今日が過ぎていれば明日で数える', () => {
+    const before = new Date(2026, 9, 15, 3, 30, 0);
+    assert.equal(msUntilNextHour(4, before), 30 * 60 * 1000);
+    const after = new Date(2026, 9, 15, 11, 0, 0);
+    assert.equal(msUntilNextHour(4, after), 17 * 60 * 60 * 1000);
   });
 });
