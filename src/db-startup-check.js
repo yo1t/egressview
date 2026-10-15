@@ -80,15 +80,24 @@ function takeCleanShutdownMarker(dbPath, { fsImpl = fs } = {}) {
  * neither collected nor answered. A start after anything but an orderly stop,
  * or with no recent full check, is still checked in full before it begins.
  *
- * @returns {{ mode: 'quick'|'deferred'|'full', reason: string }}
+ * `deferFull`: the same for a full check that is due only because the last
+ * one is more than a week old.
+ *
+ * @returns {{ mode: 'quick'|'deferred'|'deferred-full'|'full', reason: string }}
  */
-function chooseStartupCheck(marker, { now = Date.now(), maxAgeMs = FULL_CHECK_MAX_AGE_MS, deferQuick = false } = {}) {
+function chooseStartupCheck(marker, {
+  now = Date.now(), maxAgeMs = FULL_CHECK_MAX_AGE_MS, deferQuick = false, deferFull = false,
+} = {}) {
   if (!marker?.clean) return { mode: 'full', reason: marker?.reason || 'no record of an orderly stop' };
   if (!Number.isFinite(marker.lastFullCheckAt)) {
     return { mode: 'full', reason: 'no full check on record' };
   }
   if (now - marker.lastFullCheckAt > maxAgeMs) {
-    return { mode: 'full', reason: 'the last full check is more than a week old' };
+    // After an orderly stop only. The daily full check normally keeps this
+    // from arising; when it has not run, the full check follows startup too
+    // instead of holding it for minutes (269 s on production, 2026-10-15).
+    const reason = 'the last full check is more than a week old';
+    return deferFull ? { mode: 'deferred-full', reason } : { mode: 'full', reason };
   }
   const reason = 'the last stop was orderly and the last full check is recent';
   return deferQuick ? { mode: 'deferred', reason } : { mode: 'quick', reason };

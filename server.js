@@ -29,7 +29,7 @@ const threatIntel     = require('./src/threat-intel');
 const manualThreatModule = require('./src/manual-threat-lookup');
 const { manualThreatLookup } = manualThreatModule;
 const aiProviderModule = require('./src/ai-provider');
-const { runQuickCheckOffThread } = require('./src/db-background-check');
+const { runDatabaseCheck, msUntilNextHour } = require('./src/db-background-check');
 const { windowsToCheck, createLanScanCooldown } = require('./src/lan-scan-detector');
 const { aiProvider }  = aiProviderModule;
 const { createAiNotificationService } = require('./src/ai-notification-service');
@@ -1075,24 +1075,43 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
   // work never trips it.
   startEventLoopWatchdog();
 
-  // The startup quick_check, when it was deferred (db-startup-check.js): run a
-  // minute after the Hub is up, on a thread of its own. A failure is reported
-  // and makes the next start check in full before it begins.
-  if (history.getStartupCheck()?.mode === 'deferred') {
+  // Database checks while the Hub keeps working (db-background-check.js), in a
+  // child process at the lowest CPU and disk priority. The deferred startup
+  // check runs a minute after the Hub is up; the full check runs every day at
+  // 04:00, so a start never has to wait minutes for it. Anything but "ok" is
+  // reported and makes the next start run the full integrity_check first.
+  let databaseCheckRunning = false;
+  const runBackgroundDatabaseCheck = (mode, why) => {
+    if (databaseCheckRunning) return Promise.resolve(null);
+    databaseCheckRunning = true;
+    return runtimeProfiler.measureAsync(`history.backgroundCheck.${mode}`, () => runDatabaseCheck(runtimeDbPath, mode))
+      .then(outcome => {
+        history.recordBackgroundCheck(outcome);
+        const name = mode === 'full' ? 'integrity_check' : 'quick_check';
+        const took = `${(outcome.ms / 1000).toFixed(1)} s`;
+        if (outcome.result === 'ok') {
+          logger.info(`[history] ${why}: ${name} ok in ${took}`);
+        } else {
+          logger.error(`[history] ${why}: ${name} ${outcome.result} in ${took}`
+            + `${outcome.error ? ` (${outcome.error})` : ''}; the next start will run the full integrity_check`);
+        }
+        return outcome;
+      })
+      .finally(() => { databaseCheckRunning = false; });
+  };
+  const startupMode = history.getStartupCheck()?.mode;
+  if (startupMode === 'deferred' || startupMode === 'deferred-full') {
     setTimeout(() => {
-      runtimeProfiler.measureAsync('history.backgroundQuickCheck', () => runQuickCheckOffThread(runtimeDbPath))
-        .then(outcome => {
-          history.recordBackgroundCheck(outcome);
-          const took = `${(outcome.ms / 1000).toFixed(1)} s`;
-          if (outcome.result === 'ok') {
-            logger.info(`[history] Deferred startup check: quick_check ok in ${took}`);
-          } else {
-            logger.error(`[history] Deferred startup check: quick_check ${outcome.result} in ${took}`
-              + `${outcome.error ? ` (${outcome.error})` : ''}; the next start will run the full integrity_check`);
-          }
-        });
+      runBackgroundDatabaseCheck(startupMode === 'deferred-full' ? 'full' : 'quick', 'Deferred startup check');
     }, 60 * 1000).unref();
   }
+  const DAILY_FULL_CHECK_HOUR = 4;
+  const scheduleDailyFullCheck = () => {
+    setTimeout(() => {
+      runBackgroundDatabaseCheck('full', 'Daily database check').finally(scheduleDailyFullCheck);
+    }, msUntilNextHour(DAILY_FULL_CHECK_HOUR)).unref();
+  };
+  scheduleDailyFullCheck();
 
   // Load the AI provider's SDK once the startup work is over, instead of inside
   // the first request or the morning notification that needs it (P3-190).
