@@ -241,6 +241,59 @@ final class AgentDeliveryQueueTests: XCTestCase {
         }
     }
 
+    // P3-191: summaries of LAN senders probing this Mac ride with uploads.
+    private func probe(_ source: String = "192.168.1.77") -> InboundProbeSummary {
+        InboundProbeSummary(windowStart: Date(timeIntervalSince1970: 1_800_000_040), windowSeconds: 120,
+                            localAddress: "192.168.1.53", sourceAddress: source, networkProtocol: .tcp,
+                            distinctPorts: 25, packets: 30, samplePorts: [21, 22, 23])
+    }
+
+    func test探られた記録はHubが受け取るときだけ次の送信に乗り_再起動しても残る() throws {
+        let url = temporaryURL()
+        let queue = try AgentDeliveryQueue(fileURL: url)
+        try queue.enqueue([observation(remotePort: 443)])
+        try queue.enqueueInboundProbes([probe()])
+
+        let without = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: Date(), metadata: metadata()))
+        XCTAssertNil(without.inboundProbes, "Hubが受け取ると言っていなければ送らない")
+        try queue.acknowledge(batchID: without.batchId)
+        XCTAssertEqual(queue.pendingInboundProbeCount, 1)
+
+        let restarted = try AgentDeliveryQueue(fileURL: url)
+        try restarted.enqueue([observation(remotePort: 8443)])
+        let with = try XCTUnwrap(restarted.prepareBatch(
+            limit: 200, sentAt: Date(), metadata: metadata(), includeInboundProbes: true
+        ))
+        XCTAssertEqual(with.inboundProbes, [probe()])
+        try restarted.acknowledge(batchID: with.batchId)
+        XCTAssertEqual(restarted.pendingInboundProbeCount, 0)
+    }
+
+    func test断られたバッチに乗っていた探られた記録は送り直さない() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        try queue.enqueue([observation(remotePort: 443), observation(remotePort: 8443)])
+        try queue.enqueueInboundProbes([probe()])
+        let batch = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: Date(), metadata: metadata(), includeInboundProbes: true))
+        XCTAssertEqual(batch.inboundProbes?.count, 1)
+        _ = try queue.recordRejection(batchID: batch.batchId)
+        let next = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: Date(), metadata: metadata(), includeInboundProbes: true))
+        XCTAssertNil(next.inboundProbes)
+    }
+
+    func test待っている探られた記録は上限を超えると古いものから捨てる() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        try queue.enqueueInboundProbes((0..<520).map { probe("192.168.1.\($0 % 250)") })
+        XCTAssertEqual(queue.pendingInboundProbeCount, 500)
+    }
+
+    func test探られた記録が無い送信では_項目そのものを書かない() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        try queue.enqueue([observation(remotePort: 443)])
+        let batch = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: Date(), metadata: metadata(), includeInboundProbes: true))
+        let json = String(decoding: try JSONEncoder().encode(batch), as: UTF8.self)
+        XCTAssertFalse(json.contains("inboundProbes"))
+    }
+
     private func temporaryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("egressview-agent-queue-\(UUID().uuidString).json")

@@ -69,6 +69,11 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
         }
     }
 
+    func drainInboundProbes(withReply reply: @escaping (Data) -> Void) {
+        let probes = PacketCounting.probes.takeCompleted()
+        reply(probes.isEmpty ? Data() : ((try? FullMonitoringXPC.encoder().encode(probes)) ?? Data()))
+    }
+
     func recordFlowCapture(_ stage: FlowCaptureDiagnostics.Stage) {
         lock.withLock { flowDiagnostics.record(stage) }
     }

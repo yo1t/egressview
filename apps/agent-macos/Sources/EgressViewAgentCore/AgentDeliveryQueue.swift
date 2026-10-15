@@ -73,10 +73,16 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     private struct ActiveBatch: Codable {
         let batchID: UUID
         let observationIDs: [UUID]
+        /// Inbound-probe summaries travelling with this batch (P3-191). Absent
+        /// in a state file written before them.
+        var inboundProbes: [InboundProbeSummary]? = nil
     }
 
     private struct State: Codable {
         var pending: [PendingObservation] = []
+        /// Inbound-probe summaries waiting for an upload to ride with (P3-191).
+        var pendingInboundProbes: [InboundProbeSummary]?
+        var droppedInboundProbes: Int?
         var activeBatch: ActiveBatch?
         // Written by Agent 0.2.0 and earlier. Its two causes cannot be safely
         // reconstructed, so preserve it as an explicitly unclassified total.
@@ -266,7 +272,9 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         schemaVersion: Int = AgentIngestEnvelope.currentSchemaVersion,
         // Defaults to false so a caller that has not negotiated cannot send
         // the field by omission (P3-14 stage 2).
-        includeHostname: Bool = false
+        includeHostname: Bool = false,
+        // Only after the Hub has said `inboundProbes: true` (P3-191).
+        includeInboundProbes: Bool = false
     ) throws -> AgentIngestEnvelope? {
         try lock.withLock {
             guard !state.pending.isEmpty else { return nil }
@@ -274,9 +282,15 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             if let existing = state.activeBatch {
                 active = existing
             } else {
+                var probes: [InboundProbeSummary]?
+                if includeInboundProbes, let waiting = state.pendingInboundProbes, !waiting.isEmpty {
+                    probes = Array(waiting.prefix(Self.inboundProbesPerBatch))
+                    state.pendingInboundProbes = Array(waiting.dropFirst(Self.inboundProbesPerBatch))
+                }
                 active = ActiveBatch(
                     batchID: UUID(),
-                    observationIDs: state.pending.prefix(max(1, min(200, limit))).map(\.observationID)
+                    observationIDs: state.pending.prefix(max(1, min(200, limit))).map(\.observationID),
+                    inboundProbes: probes
                 )
                 state.activeBatch = active
                 try persist()
@@ -297,7 +311,9 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 batchId: active.batchID,
                 sentAt: sentAt,
                 agent: metadata,
-                observations: observations
+                observations: observations,
+                inboundProbes: includeInboundProbes && active.inboundProbes?.isEmpty == false
+                    ? active.inboundProbes : nil
             )
         }
     }
@@ -335,6 +351,12 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             guard let active = state.activeBatch, active.batchID == batchID else {
                 return .ignored
             }
+            // Summaries that travelled with a refused batch are not sent again:
+            // they are best-effort, and one the Hub cannot read must not keep
+            // costing the observations it is attached to (P3-191).
+            if let probes = active.inboundProbes, !probes.isEmpty {
+                state.droppedInboundProbes = (state.droppedInboundProbes ?? 0) + probes.count
+            }
             guard active.observationIDs.count > 1 else {
                 let abandoned = active.observationIDs
                 state.pending.removeAll { abandoned.contains($0.observationID) }
@@ -354,6 +376,31 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             try persist()
             return .split(remaining: keep.count)
         }
+    }
+
+    /// How many inbound-probe summaries ride with one upload; the Hub accepts 50.
+    static let inboundProbesPerBatch = 50
+    /// How many wait for an upload at most; the oldest go first.
+    static let maximumPendingInboundProbes = 500
+
+    /// Summaries of LAN senders probing this Mac, to go with the next uploads
+    /// to a Hub that accepts them (P3-191).
+    public func enqueueInboundProbes(_ probes: [InboundProbeSummary]) throws {
+        guard !probes.isEmpty else { return }
+        try lock.withLock {
+            var waiting = (state.pendingInboundProbes ?? []) + probes
+            if waiting.count > Self.maximumPendingInboundProbes {
+                let excess = waiting.count - Self.maximumPendingInboundProbes
+                waiting.removeFirst(excess)
+                state.droppedInboundProbes = (state.droppedInboundProbes ?? 0) + excess
+            }
+            state.pendingInboundProbes = waiting
+            try persist()
+        }
+    }
+
+    public var pendingInboundProbeCount: Int {
+        lock.withLock { (state.pendingInboundProbes?.count ?? 0) + (state.activeBatch?.inboundProbes?.count ?? 0) }
     }
 
     public func acknowledge(batchID: UUID, at date: Date = Date()) throws {

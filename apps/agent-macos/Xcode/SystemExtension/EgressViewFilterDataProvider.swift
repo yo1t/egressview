@@ -1,3 +1,4 @@
+import Foundation
 import EgressViewAgentCore
 import EgressViewNetworkExtension
 import NetworkExtension
@@ -6,6 +7,37 @@ import NetworkExtension
 /// process: the packet filter records, a closing flow settles (P3-183).
 enum PacketCounting {
     static let ledger = PacketByteLedger()
+    /// LAN senders reaching many of this Mac's ports (P3-191).
+    static let probes = InboundProbeRecorder()
+}
+
+/// The packet filter's inbound probe counts, behind a lock: the packet handler
+/// records on its queue and the XPC server takes completed windows on another.
+final class InboundProbeRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counter = InboundProbeCounter()
+
+    func record(_ bytes: UnsafeRawBufferPointer, packetLength: Int) {
+        guard let header = PacketTupleParser.header(bytes, packetLength: packetLength) else { return }
+        let tuple = header.tuple
+        // The cheap test first, outside the lock: most inbound packets are
+        // replies and stop here.
+        guard InboundProbeCounter.counts(
+            networkProtocol: tuple.networkProtocol, destinationPort: tuple.destinationPort, tcpFlags: header.tcpFlags
+        ) else { return }
+        let now = Date()
+        lock.withLock {
+            counter.record(
+                networkProtocol: tuple.networkProtocol, sourceAddress: tuple.sourceAddress,
+                destinationAddress: tuple.destinationAddress, destinationPort: tuple.destinationPort,
+                tcpFlags: header.tcpFlags, at: now
+            )
+        }
+    }
+
+    func takeCompleted(now: Date = Date()) -> [InboundProbeSummary] {
+        lock.withLock { counter.takeCompleted(now: now) }
+    }
 }
 
 /// Counts packet headers for the flow filter in this same extension, so that
@@ -20,11 +52,11 @@ final class EgressViewFilterPacketProvider: NEFilterPacketProvider {
             guard direction == .outbound || direction == .inbound else { return .allow }
             // The headers fit in the first 128 bytes: Ethernet with a VLAN tag
             // is 18, IPv6 40, TCP at most 60. The bytes are read in place.
-            PacketCounting.ledger.record(
-                UnsafeRawBufferPointer(start: packetBytes, count: min(length, 128)),
-                packetLength: length,
-                outbound: direction == .outbound
-            )
+            let headerBytes = UnsafeRawBufferPointer(start: packetBytes, count: min(length, 128))
+            PacketCounting.ledger.record(headerBytes, packetLength: length, outbound: direction == .outbound)
+            if direction == .inbound {
+                PacketCounting.probes.record(headerBytes, packetLength: length)
+            }
             return .allow
         }
         completionHandler(nil)

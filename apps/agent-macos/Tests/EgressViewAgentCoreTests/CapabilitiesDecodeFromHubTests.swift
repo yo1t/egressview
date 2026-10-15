@@ -12,4 +12,19 @@ final class CapabilitiesDecodeFromHubTests: XCTestCase {
         XCTAssertEqual(caps.observationFields, ["remoteHostname"])
         XCTAssertTrue(AgentCapabilityNegotiation.acceptsRemoteHostname(capabilities: caps))
     }
+
+    /// P3-191: a Hub that stores inbound-probe summaries says so; one that
+    /// does not say so is not sent them.
+    func testInboundProbesOnlyWhenTheHubSaysSo() throws {
+        let json = """
+        {"schemaVersions":[1],"compression":[],"observationUpdates":true,"unmeasuredClosings":true,"inboundProbes":true}
+        """
+        let caps = try JSONDecoder().decode(AgentHubCapabilities.self, from: Data(json.utf8))
+        XCTAssertTrue(AgentCapabilityNegotiation.acceptsInboundProbes(capabilities: caps))
+        let older = try JSONDecoder().decode(
+            AgentHubCapabilities.self, from: Data(#"{"schemaVersions":[1],"compression":[]}"#.utf8)
+        )
+        XCTAssertFalse(AgentCapabilityNegotiation.acceptsInboundProbes(capabilities: older))
+        XCTAssertFalse(AgentCapabilityNegotiation.acceptsInboundProbes(capabilities: nil))
+    }
 }

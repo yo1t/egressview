@@ -168,6 +168,17 @@ public actor AgentIngestSender {
         publish(.paused)
     }
 
+    /// LAN senders probing this Mac, to ride with the next uploads to a Hub
+    /// that accepts them (P3-191). Never triggers a send of its own.
+    public func enqueueInboundProbes(_ probes: [InboundProbeSummary]) {
+        guard !probes.isEmpty else { return }
+        do {
+            try queue.enqueueInboundProbes(probes)
+        } catch {
+            logger.error("Could not queue inbound probes: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     public func enqueue(_ observations: [ConnectionObservation]) {
         do {
             try queue.enqueue(observations, queuedAt: now())
@@ -288,7 +299,8 @@ public actor AgentIngestSender {
             logger.notice("hub-capabilities: includeHostname=\(includeHostname, privacy: .public)")
             guard let envelope = try queue.prepareBatch(
                 limit: limit, sentAt: now(), metadata: metadata, schemaVersion: schemaVersion,
-                includeHostname: includeHostname
+                includeHostname: includeHostname,
+                includeInboundProbes: AgentCapabilityNegotiation.acceptsInboundProbes(capabilities: hubCapabilities)
             ) else {
                 sendTask = nil
                 publish(.idle)

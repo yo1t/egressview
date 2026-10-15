@@ -196,7 +196,8 @@ final class AgentMonitoringController {
         observationHandler: @escaping ([ConnectionObservation]) -> Void,
         storageErrorHandler: @escaping (Error) -> Void,
         diagnosticsHandler: @escaping (QUICFeasibilityDiagnostics) -> Void = { _ in },
-        flowDiagnosticsHandler: @escaping (FlowCaptureDiagnostics, FlowPersistenceDiagnostics) -> Void = { _, _ in }
+        flowDiagnosticsHandler: @escaping (FlowCaptureDiagnostics, FlowPersistenceDiagnostics) -> Void = { _, _ in },
+        inboundProbeHandler: @escaping ([InboundProbeSummary]) -> Void = { _ in }
     ) {
         let gateState = MonitoringGateState()
         // While an update is stalled, nothing is being recorded, so the
@@ -286,7 +287,8 @@ final class AgentMonitoringController {
                 },
                 readsServerName: ServerNamePreferences().isEnabled,
                 diagnosticsHandler: diagnosticsHandler,
-                flowDiagnosticsHandler: flowDiagnosticsHandler
+                flowDiagnosticsHandler: flowDiagnosticsHandler,
+                inboundProbeHandler: inboundProbeHandler
             )
         }
     }

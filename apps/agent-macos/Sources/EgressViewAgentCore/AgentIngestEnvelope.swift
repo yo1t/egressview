@@ -162,18 +162,23 @@ public struct AgentIngestEnvelope: Codable, Equatable, Sendable {
     public let sentAt: Date
     public let agent: AgentIngestMetadata
     public let observations: [AgentIngestObservation]
+    /// LAN senders probing this Mac (P3-191). Encoded only when present, so a
+    /// Hub that has not said it accepts them never receives the field.
+    public let inboundProbes: [InboundProbeSummary]?
 
     public init(
         schemaVersion: Int = currentSchemaVersion,
         batchId: UUID,
         sentAt: Date,
         agent: AgentIngestMetadata,
-        observations: [AgentIngestObservation]
+        observations: [AgentIngestObservation],
+        inboundProbes: [InboundProbeSummary]? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.batchId = batchId
         self.sentAt = sentAt
         self.agent = agent
         self.observations = observations
+        self.inboundProbes = inboundProbes
     }
 }
