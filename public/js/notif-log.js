@@ -23,16 +23,25 @@ function nlTypeLabel(type) {
 function nlLanScan(row) {
   let detail;
   try { detail = JSON.parse(row.threatTag || ''); } catch { detail = null; }
-  if (!detail || typeof detail !== 'object') return { summary: row.threatTag || '—', sample: '' };
+  if (!detail || typeof detail !== 'object') {
+    return { summary: row.threatTag || '—', sample: '', advice: t('notif-log.lanScan.advice'), probed: false };
+  }
   const vars = {
     program: row.threatSource || '?',
     minutes: Math.max(1, Math.round((Number(detail.windowMs) || 120000) / 60000)),
-    n: detail.kind === 'port-probe' ? detail.ports : detail.addresses,
+    n: detail.kind === 'sweep' ? detail.addresses : detail.ports,
     target: detail.target || '',
+    source: row.src || '?',
+    host: detail.host || row.dstHost || row.dst || '?',
+    protocol: String(detail.protocol || 'tcp').toUpperCase(),
   };
+  const key = detail.kind === 'probed' ? 'notif-log.lanScan.probed'
+    : detail.kind === 'port-probe' ? 'notif-log.lanScan.probe' : 'notif-log.lanScan.sweep';
   return {
-    summary: tVars(detail.kind === 'port-probe' ? 'notif-log.lanScan.probe' : 'notif-log.lanScan.sweep', vars),
+    summary: tVars(key, vars),
     sample: Array.isArray(detail.sample) ? detail.sample.join(', ') : '',
+    advice: t(detail.kind === 'probed' ? 'notif-log.lanScan.probedAdvice' : 'notif-log.lanScan.advice'),
+    probed: detail.kind === 'probed',
   };
 }
 
@@ -271,10 +280,10 @@ function nlShowDetail(row) {
   const lanScan = row.type === 'lan_scan' ? nlLanScan(row) : null;
   if (lanScan) {
     appendDetailSection(table, t('notif-log.detail.sec.lanScan'));
-    appendDetailRow(table, t('notif-log.detail.lanScan.program'), row.threatSource);
+    if (!lanScan.probed) appendDetailRow(table, t('notif-log.detail.lanScan.program'), row.threatSource);
     appendDetailRow(table, t('notif-log.detail.lanScan.what'), lanScan.summary);
     appendDetailRow(table, t('notif-log.detail.lanScan.sample'), lanScan.sample);
-    appendDetailRow(table, t('notif-log.detail.lanScan.advice'), t('notif-log.lanScan.advice'));
+    appendDetailRow(table, t('notif-log.detail.lanScan.advice'), lanScan.advice);
   } else if (row.threatTag || row.threatSource) {
     appendDetailSection(table, t('notif-log.detail.sec.threat'));
     appendDetailRow(table, t('notif-log.detail.threatSource'), row.threatSource);

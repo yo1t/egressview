@@ -1,5 +1,6 @@
 'use strict';
 const { readGeoLocations } = require('./agent-geo-cache');
+const { ensureInboundProbesTable, storeInboundProbes, pruneInboundProbes } = require('./agent-inbound-probes');
 
 const runtimeProfiler = require('./runtime-profiler');
 
@@ -36,6 +37,7 @@ function initDb(dbPath) {
   db = new Database(lastDbPath);
   applyWalPragmas(db);
   db.pragma('busy_timeout = 5000');
+  ensureInboundProbesTable(db);
 }
 
 function closeDb() {
@@ -108,7 +110,7 @@ function requireDb() {
   return db;
 }
 
-function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0, relocated = []) {
+function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0, relocated = [], freshInboundProbes = []) {
   const ack = {
     batchId: row.batchId,
     accepted: row.acceptedCount,
@@ -131,6 +133,9 @@ function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0
   // not (P3-185). The connection row built from the opening report is keyed on
   // 0.0.0.0 or ::, and the route moves it to the real address.
   Object.defineProperty(ack, 'relocated', { value: Object.freeze([...relocated]), enumerable: false });
+  // Inbound-probe summaries this Hub had not stored before (P3-191), for the
+  // route to decide whether to notify.
+  Object.defineProperty(ack, 'freshInboundProbes', { value: Object.freeze([...freshInboundProbes]), enumerable: false });
   return Object.freeze(ack);
 }
 
@@ -427,13 +432,20 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
   // whole server stalled behind an agent's routine upload -- /healthz included.
   // The ACK only promises durability, and the periodic runner reconciles on its
   // own schedule, so this side effect never belonged in the response path.
+  // Inbound-probe summaries ride along with an upload (P3-191). Stored after
+  // the observations and outside their accounting; the ones not seen before
+  // go back to the route for notification.
+  const freshInboundProbes = envelope.inboundProbes?.length
+    ? runtimeProfiler.measureSync('agentIngest.inboundProbes',
+      () => storeInboundProbes(database, agentId, envelope.inboundProbes, { receivedAt }))
+    : [];
   return batchAck({
     batchId: envelope.batchId,
     acceptedCount,
     duplicateCount,
     rejectedCount,
     receivedAt,
-  }, false, acceptedObservationIds, completedCount, relocated);
+  }, false, acceptedObservationIds, completedCount, relocated, freshInboundProbes);
 }
 
 // How much one call deletes: rows per transaction, and how long it may keep
@@ -594,6 +606,9 @@ function pruneObservations({
     cursor = agentId;
     if (outOfTime()) { result.more = true; return result; }
   }
+  // Inbound-probe summaries (P3-191): a few rows a day, kept as long as the
+  // observations they sit beside.
+  result.inboundProbes = timed('receiptsMs', () => pruneInboundProbes(database, before));
   return result;
 }
 
@@ -715,6 +730,7 @@ function _initForTest(dbPath = ':memory:') {
     CREATE INDEX idx_connection_agent_connection
       ON connection_agent_observations(src, dst, dport, proto);
   `);
+  ensureInboundProbesTable(db);
 }
 
 /// Locations for destinations, as stored by enrichment (agent-geo-cache.js).

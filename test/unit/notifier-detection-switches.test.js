@@ -165,7 +165,8 @@ describe('LAN内の探索の通知', () => {
     assert.equal(entries[0].srcDnsName, 'JAMESBOND');
     assert.equal(entries[0].threat.source, 'chrome');
     assert.deepEqual(JSON.parse(entries[0].threat.tag), {
-      kind: 'sweep', addresses: 120, ports: 3, target: null, windowMs: 120000, sample: ['192.168.1.1', '192.168.1.2'],
+      kind: 'sweep', protocol: null, host: 'JAMESBOND', addresses: 120, ports: 3, target: null,
+      windowMs: 120000, sample: ['192.168.1.1', '192.168.1.2'],
     });
   });
 
@@ -181,5 +182,26 @@ describe('LAN内の探索の通知', () => {
     assert.equal(await notifier.notifyLanScan(finding), false);
     assert.equal(posts.length, 0);
     assert.equal(logged[0].options.record, true);
+  });
+});
+
+// P3-191: probed from the LAN. The history row names the sender as the source.
+describe('LAN内からの探索の通知', () => {
+  it('送り元と探られた機器、プロトコル、ポートの数を伝え、履歴の送信元は送り元にする', async () => {
+    const { posts } = setup();
+    const entries = [];
+    notifier.setLogCallback((entry, type) => entries.push({ entry, type }));
+    await notifier.notifyLanScan({
+      kind: 'probed', agentId: 'a1', hostName: 'Quartermaster', localAddress: '192.168.1.53',
+      sourceAddress: '192.168.1.77', networkProtocol: 'udp', windowStart: 1700000000000, windowMs: 120000,
+      ports: 18, target: '192.168.1.53', sample: [53, 137, 161],
+    });
+    assert.match(posts[0].text, /LAN内からの探索/);
+    assert.match(posts[0].text, /192\.168\.1\.77/);
+    assert.match(posts[0].text, /UDPの18個のポート/);
+    assert.equal(entries[0].type, 'lan_scan');
+    assert.equal(entries[0].entry.src, '192.168.1.77');
+    assert.equal(entries[0].entry.dst, '192.168.1.53');
+    assert.equal(JSON.parse(entries[0].entry.threat.tag).kind, 'probed');
   });
 });
