@@ -111,6 +111,9 @@ module.exports = function agentRoutes({
   // The read thread, where the location cache is built. Absent in the unit
   // tests and before the server opens it; the cache is then built here.
   dbReadWorker = null,
+  // Told about inbound-probe summaries this Hub had not seen before (P3-191),
+  // to decide whether to notify. Absent in the unit tests.
+  onInboundProbes = null,
 }) {
   const router = Router();
   const failedEnrollments = new Map();
@@ -543,6 +546,10 @@ module.exports = function agentRoutes({
       // report was sent under a new id and the Hub stored one flow as two
       // rows: 1.1-2.1% of a Mac's rows from 2026-10-04 on.
       unmeasuredClosings: true,
+      // Summaries of one sender reaching many of this computer's ports,
+      // counted by the Agent from packet headers (P3-191). Stored and
+      // reported; an Agent sends them only when this says true.
+      inboundProbes: true,
     });
   });
 
@@ -751,6 +758,17 @@ module.exports = function agentRoutes({
               acceptedIds.has(observation.observationId)
             )),
           }));
+        }
+        if (ack.freshInboundProbes?.length && typeof onInboundProbes === 'function') {
+          try {
+            onInboundProbes({
+              agentId: req.agentIdentity.agentId,
+              hostName: parsed.data.agent?.hostName || null,
+              probes: ack.freshInboundProbes,
+            });
+          } catch (error) {
+            logger.error('[agents] Reporting inbound probes failed:', error.message);
+          }
         }
         // A closing report that named the local address the opening one did
         // not: the connection row is still keyed on the wildcard (P3-185).
