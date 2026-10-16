@@ -55,6 +55,10 @@ final class InboundProbeRecorder: @unchecked Sendable {
     func takeCompleted(now: Date = Date()) -> [InboundProbeSummary] {
         lock.withLock { counter.takeCompleted(now: now) }
     }
+
+    func stats() -> InboundProbeCounter.Stats {
+        lock.withLock { counter.stats }
+    }
 }
 
 /// Counts packet headers for the flow filter in this same extension, so that

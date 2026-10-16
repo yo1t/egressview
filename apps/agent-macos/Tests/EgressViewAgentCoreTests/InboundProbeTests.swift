@@ -137,6 +137,33 @@ final class InboundProbeCounterTests: XCTestCase {
         XCTAssertEqual(counter.takeCompleted(now: windowStart.addingTimeInterval(121)).map(\.distinctPorts), [30])
     }
 
+    func test診断用に_数えた数と除いた返事と報告した送り元を数える() {
+        var counter = InboundProbeCounter()
+        for port in UInt16(20)..<UInt16(30) { syn(&counter, to: port) }
+        counter.noteOutbound(networkProtocol: .udp, sourcePort: 5000, destinationAddress: "192.168.1.1",
+                             destinationPort: 53, at: windowStart.addingTimeInterval(1))
+        udp(&counter, to: 5000)
+        XCTAssertEqual(counter.stats.countedPackets, 10)
+        XCTAssertEqual(counter.stats.repliesSetAside, 1)
+        XCTAssertEqual(counter.stats.sendersReported, 0)
+        XCTAssertNil(counter.stats.lastReportAt)
+        let now = windowStart.addingTimeInterval(121)
+        XCTAssertEqual(counter.takeCompleted(now: now).count, 1)
+        XCTAssertEqual(counter.stats.sendersReported, 1)
+        XCTAssertEqual(counter.stats.lastReportAt, now)
+    }
+
+    func test古い拡張機能の診断にも読める() throws {
+        // A snapshot from an extension without the probe totals still decodes.
+        let old = try JSONEncoder().encode(FlowCaptureDiagnostics(startedAt: Date(timeIntervalSince1970: 0)))
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: old) as? [String: Any])
+        json["inboundProbes"] = nil
+        let decoded = try JSONDecoder().decode(
+            FlowCaptureDiagnostics.self, from: JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertNil(decoded.inboundProbes)
+    }
+
     func testTCPのフラグをヘッダーから読む() {
         var bytes = [UInt8](repeating: 0, count: 40)
         bytes[0] = 0x45; bytes[3] = 40; bytes[8] = 64; bytes[9] = 6

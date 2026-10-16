@@ -23,6 +23,11 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
     /// Whatever it held never reached the Hub, so this has to be visible: the
     /// symptom is otherwise missing data with no error anywhere.
     public let unreadableStateResetAt: Date?
+    /// LAN-probe summaries waiting for an upload, acknowledged by the Hub, and
+    /// given up on (P3-191).
+    public let inboundProbesPending: Int
+    public let inboundProbesSent: Int
+    public let inboundProbesDropped: Int
 
     public init(
         pendingCount: Int,
@@ -34,7 +39,10 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
         legacyUnclassifiedCount: Int,
         oldestPendingAt: Date?,
         lastAcknowledgedAt: Date?,
-        unreadableStateResetAt: Date? = nil
+        unreadableStateResetAt: Date? = nil,
+        inboundProbesPending: Int = 0,
+        inboundProbesSent: Int = 0,
+        inboundProbesDropped: Int = 0
     ) {
         self.pendingCount = pendingCount
         self.contractRejectedCount = contractRejectedCount
@@ -46,6 +54,9 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
         self.oldestPendingAt = oldestPendingAt
         self.lastAcknowledgedAt = lastAcknowledgedAt
         self.unreadableStateResetAt = unreadableStateResetAt
+        self.inboundProbesPending = inboundProbesPending
+        self.inboundProbesSent = inboundProbesSent
+        self.inboundProbesDropped = inboundProbesDropped
     }
 
     public var droppedCount: Int {
@@ -83,6 +94,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         /// Inbound-probe summaries waiting for an upload to ride with (P3-191).
         var pendingInboundProbes: [InboundProbeSummary]?
         var droppedInboundProbes: Int?
+        var sentInboundProbes: Int?
         var activeBatch: ActiveBatch?
         // Written by Agent 0.2.0 and earlier. Its two causes cannot be safely
         // reconstructed, so preserve it as an explicitly unclassified total.
@@ -409,6 +421,9 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 throw AgentDeliveryQueueError.unexpectedAcknowledgement
             }
             let acknowledged = Set(active.observationIDs)
+            if let probes = active.inboundProbes, !probes.isEmpty {
+                state.sentInboundProbes = (state.sentInboundProbes ?? 0) + probes.count
+            }
             rememberOpenings(state.pending.filter { acknowledged.contains($0.observationID) })
             state.pending.removeAll { acknowledged.contains($0.observationID) }
             state.activeBatch = nil
@@ -494,7 +509,11 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 legacyUnclassifiedCount: state.droppedCount,
                 oldestPendingAt: state.pending.map(\.queuedAt).min(),
                 lastAcknowledgedAt: state.lastAcknowledgedAt,
-                unreadableStateResetAt: unreadableStateResetAt
+                unreadableStateResetAt: unreadableStateResetAt,
+                inboundProbesPending: (state.pendingInboundProbes?.count ?? 0)
+                    + (state.activeBatch?.inboundProbes?.count ?? 0),
+                inboundProbesSent: state.sentInboundProbes ?? 0,
+                inboundProbesDropped: state.droppedInboundProbes ?? 0
             )
         }
     }
