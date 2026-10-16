@@ -325,6 +325,18 @@
   }
   #disconnected-banner button:hover { background: rgba(239,68,68,0.2); }
   #disconnected-banner.is-visible { display: block; }
+  #update-banner {
+    display: none; padding: 8px 20px; background: rgba(59,130,246,0.12);
+    border-bottom: 1px solid rgba(59,130,246,0.3); color: var(--accent);
+    font-size: 12px; text-align: center; flex-shrink: 0;
+  }
+  #update-banner button {
+    background: transparent; border: 1px solid var(--accent); border-radius: 4px;
+    color: var(--accent); font-family: inherit; font-size: 11px; padding: 2px 8px;
+    cursor: pointer; margin-left: 8px; transition: background 0.15s;
+  }
+  #update-banner button:hover { background: rgba(59,130,246,0.2); }
+  #update-banner.is-visible { display: block; }
 
   /* ── Header ─────────────────────────────────────── */
   header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }

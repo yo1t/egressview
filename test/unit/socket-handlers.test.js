@@ -66,6 +66,7 @@ describe('buildClientConfig', () => {
       notes: { getAll: () => ({ '1.1.1.1': 'Printer' }) },
       defaultRouterIp: '192.168.1.1',
       routers: [{ id: 'cisco1', kind: 'cisco', enabled: true, ready: true }],
+      assetVersion: '0123456789abcdef',
     });
 
     assert.equal(config.routerIp, '192.168.1.1');
@@ -73,6 +74,7 @@ describe('buildClientConfig', () => {
     assert.deepEqual(config.notes, { '1.1.1.1': 'Printer' });
     assert.equal(config.ciscoReady, true);
     assert.equal(config.routers[0].id, 'cisco1');
+    assert.equal(config.assetVersion, '0123456789abcdef', 'the page compares it to offer a reload');
   });
 });
 
