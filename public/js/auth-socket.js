@@ -399,7 +399,22 @@ function updateConnBadge(key) {
   }
 }
 
+// The version this page's scripts were served with; the server substitutes it.
+const PAGE_ASSET_VERSION = '__ASSET_VERSION__';
+
+// A page left open across a Hub update keeps running the old scripts while the
+// socket reconnects to the new server, so new kinds of data show up wrongly.
+// Offer a reload rather than reloading: a half-filled form would be lost.
+function checkAssetVersion(serverVersion) {
+  if (!serverVersion || PAGE_ASSET_VERSION.startsWith('__')) return;
+  if (serverVersion === PAGE_ASSET_VERSION) return;
+  document.getElementById('update-banner')?.classList.add('is-visible');
+}
+
+document.getElementById('update-banner-reload')?.addEventListener('click', () => window.location.reload());
+
 socket.on('config', cfg => {
+  checkAssetVersion(cfg.assetVersion);
   if (Array.isArray(cfg.routers)) setRouterList(cfg.routers);
   if (cfg.routerIp)   document.getElementById('s-asus-ip').value       = cfg.routerIp;
   if (cfg.asusUser)   document.getElementById('s-asus-user').value     = cfg.asusUser;

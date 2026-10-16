@@ -11,8 +11,12 @@ function buildClientConfig({
   notes,
   defaultRouterIp,
   routers = [],
+  assetVersion = '',
 }) {
   return {
+    // The page compares this with the version it was loaded with, and offers
+    // a reload when the Hub has been updated underneath it.
+    assetVersion,
     routerIp:        asus.getRouterIp() || defaultRouterIp,
     asusUser:        asus.getUser(),
     asusPassSet:     asus.hasPass(),
@@ -56,6 +60,7 @@ function registerSocketHandlers({
   history,
   threatIntel,
   defaultRouterIp,
+  assetVersion = '',
   logger = console,
   now = () => Date.now(),
   getRouters = () => [],
@@ -110,6 +115,7 @@ function registerSocketHandlers({
       notes,
       defaultRouterIp,
       routers: getRouters(),
+      assetVersion,
     }));
 
     if (asus.isEnabled() && !asus.isAuthenticated()) {

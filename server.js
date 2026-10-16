@@ -21,6 +21,7 @@ const utils           = require('./src/utils');
 const { htmlEscape }  = utils;
 const logger          = require('./src/logger');
 const runtimeProfiler = require('./src/runtime-profiler');
+const { computeAssetVersion } = require('./src/asset-version');
 const { resolvePollInterval } = require('./src/runtime-settings');
 const enrichment      = require('./src/enrichment');
 const history         = require('./src/history');
@@ -121,8 +122,13 @@ const DEMO_RUNTIME_DB_PATH = path.join(DEMO_RUNTIME_DIR, 'runtime.db');
 const DEMO_BACKUP_DIR      = path.join(DEMO_RUNTIME_DIR, 'backups');
 const _rawAssetVersion = process.env.EGRESSVIEW_ASSET_VERSION || '';
 const ASSET_VERSION    = /^[A-Za-z0-9._-]+$/.test(_rawAssetVersion) ? _rawAssetVersion : (() => {
-  if (_rawAssetVersion) console.warn(`[server] EGRESSVIEW_ASSET_VERSION contains invalid characters ('${_rawAssetVersion}'); falling back to timestamp.`);
-  return String(Date.now());
+  if (_rawAssetVersion) console.warn(`[server] EGRESSVIEW_ASSET_VERSION contains invalid characters ('${_rawAssetVersion}'); falling back to the assets' content.`);
+  try {
+    return computeAssetVersion(__dirname);
+  } catch (error) {
+    console.warn(`[server] Could not hash the browser assets (${error.message}); falling back to timestamp.`);
+    return String(Date.now());
+  }
 })();
 
 
@@ -544,6 +550,7 @@ registerSocketHandlers({
   threatIntel,
   authAudit,
   defaultRouterIp: DEFAULT_ROUTER_IP,
+  assetVersion: ASSET_VERSION,
   logger,
   getRouters: () => routerManagerApi.list(),
 });
