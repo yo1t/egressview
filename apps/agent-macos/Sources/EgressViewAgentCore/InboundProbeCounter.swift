@@ -35,19 +35,27 @@ public struct InboundProbeSummary: Codable, Equatable, Sendable {
 ///
 /// The Network Extension sees sockets, so a probe of a port nothing listens on
 /// never reaches it; only the packet filter (the optional "count from packet
-/// headers", P3-183) sees those packets. Replies to this Mac's own traffic
-/// arrive at its ephemeral ports (49152 and up) or carry ACK, and are not
-/// counted. Multicast and broadcast are discovery, not probing, and are not
-/// counted either. Only addresses and port numbers are kept, never content.
+/// headers", P3-183) sees those packets. A TCP reply carries ACK and is not
+/// counted. A UDP reply carries nothing that says so: macOS picks the source
+/// port of a DNS query anywhere from 1024 up, so the router's answers land on
+/// low ports too. A UDP datagram is therefore a reply when this Mac sent one
+/// to that sender and port from that local port shortly before, or sent one
+/// from that local port to a multicast or broadcast address (SSDP, mDNS
+/// discovery). Multicast and broadcast are discovery, not probing, and are
+/// not counted either. Only addresses and port numbers are kept, never content.
 public struct InboundProbeCounter: Sendable {
     public static let windowSeconds = 120
     /// A sender is reported from this many distinct ports. The Hub notifies
     /// from 10; sending from 5 keeps the near misses for whoever reads the
     /// stored rows later.
     public static let reportMinPorts = 5
-    /// macOS's ephemeral port range starts here: replies to this Mac's own
-    /// connections arrive at ports at or above it.
+    /// UDP to ports at or above this is not counted. It does not separate
+    /// replies from probes (see above); it keeps the busiest traffic, most of
+    /// which lands there, away from the lock in the packet handler.
     public static let ephemeralFloor: UInt16 = 49152
+    /// How long a datagram this Mac sent makes the answers to it replies.
+    public static let replySeconds = 120
+    static let maxOutbound = 16384
     static let maxSenders = 4096
     static let maxPortsPerSender = 4096
     static let sampleSize = 10
@@ -64,8 +72,19 @@ public struct InboundProbeCounter: Sendable {
         var packets = 0
     }
 
+    /// A datagram this Mac sent: the local port it left from, and where to.
+    /// A nil remote stands for a multicast or broadcast destination, answered
+    /// by whoever hears it.
+    private struct Outbound: Hashable {
+        let localPort: UInt16
+        let remoteAddress: String?
+        let remotePort: UInt16
+    }
+
     private var tallies: [Key: Tally] = [:]
     private var lanSources: [String: Bool] = [:]
+    /// Seconds since 1970 that each datagram was last sent.
+    private var outbound: [Outbound: Int] = [:]
 
     public init() {}
 
@@ -83,14 +102,46 @@ public struct InboundProbeCounter: Sendable {
         }
     }
 
+    /// Whether an outbound packet could be asked about by a reply that
+    /// `counts` would otherwise take for a probe.
+    public static func remembersOutbound(networkProtocol: InternetProtocol, sourcePort: UInt16) -> Bool {
+        networkProtocol == .udp && sourcePort < ephemeralFloor
+    }
+
+    /// Remembers a datagram this Mac sent, so the answers to it are not
+    /// counted as probes.
+    public mutating func noteOutbound(
+        networkProtocol: InternetProtocol, sourcePort: UInt16,
+        destinationAddress: String, destinationPort: UInt16, at time: Date
+    ) {
+        guard Self.remembersOutbound(networkProtocol: networkProtocol, sourcePort: sourcePort) else { return }
+        let key: Outbound
+        if Self.isMulticastOrBroadcast(destinationAddress) {
+            key = Outbound(localPort: sourcePort, remoteAddress: nil, remotePort: 0)
+        } else if isLANSender(destinationAddress) {
+            key = Outbound(localPort: sourcePort, remoteAddress: destinationAddress, remotePort: destinationPort)
+        } else {
+            return
+        }
+        let now = Int(time.timeIntervalSince1970)
+        if outbound[key] == nil, outbound.count >= Self.maxOutbound {
+            forgetOutbound(before: now - Self.replySeconds)
+            if outbound.count >= Self.maxOutbound { return }
+        }
+        outbound[key] = now
+    }
+
     public mutating func record(
-        networkProtocol: InternetProtocol, sourceAddress: String,
+        networkProtocol: InternetProtocol, sourceAddress: String, sourcePort: UInt16,
         destinationAddress: String, destinationPort: UInt16, tcpFlags: UInt8?, at time: Date
     ) {
         guard Self.counts(networkProtocol: networkProtocol, destinationPort: destinationPort, tcpFlags: tcpFlags),
               sourceAddress != destinationAddress,
               !Self.isMulticastOrBroadcast(destinationAddress),
               isLANSender(sourceAddress) else { return }
+        if networkProtocol == .udp, isReply(from: sourceAddress, port: sourcePort, to: destinationPort, at: time) {
+            return
+        }
         let window = Int(time.timeIntervalSince1970) / Self.windowSeconds * Self.windowSeconds
         let key = Key(windowStart: window, localAddress: destinationAddress,
                       sourceAddress: sourceAddress, networkProtocol: networkProtocol)
@@ -120,7 +171,21 @@ public struct InboundProbeCounter: Sendable {
             ))
         }
         if lanSources.count > Self.maxSenders { lanSources.removeAll() }
+        forgetOutbound(before: Int(now.timeIntervalSince1970) - Self.replySeconds)
         return summaries.sorted { ($0.windowStart, $0.sourceAddress) < ($1.windowStart, $1.sourceAddress) }
+    }
+
+    private func isReply(from address: String, port: UInt16, to localPort: UInt16, at time: Date) -> Bool {
+        let since = Int(time.timeIntervalSince1970) - Self.replySeconds
+        for key in [Outbound(localPort: localPort, remoteAddress: address, remotePort: port),
+                    Outbound(localPort: localPort, remoteAddress: nil, remotePort: 0)] {
+            if let sent = outbound[key], sent >= since { return true }
+        }
+        return false
+    }
+
+    private mutating func forgetOutbound(before cutoff: Int) {
+        outbound = outbound.filter { $0.value >= cutoff }
     }
 
     private mutating func isLANSender(_ address: String) -> Bool {
