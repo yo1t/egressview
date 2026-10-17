@@ -34,6 +34,10 @@ final class InboundProbeCounterTests: XCTestCase {
         XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 80, tcpFlags: 0x12), "SYN-ACK")
         XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 80, tcpFlags: 0x10), "ACK")
         XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 80, tcpFlags: nil))
+        XCTAssertTrue(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 49151, tcpFlags: 0x02))
+        // Continuity and AirDrop connect to ports macOS picked in the
+        // ephemeral range; seen as 8 a window every 2 minutes on 2026-10-17.
+        XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 60700, tcpFlags: 0x02), "一時ポート")
         XCTAssertTrue(InboundProbeCounter.counts(networkProtocol: .udp, destinationPort: 161, tcpFlags: nil))
         XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .udp, destinationPort: 55_000, tcpFlags: nil), "一時ポート")
     }

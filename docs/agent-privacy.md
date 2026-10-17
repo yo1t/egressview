@@ -136,8 +136,8 @@ What it does, and what it does not:
   `bytesIn` / `bytesOut` fields the agent already records and, if you enrol,
   sends to your Hub. No packet or header is written to disk, logged or sent.
 - **It also counts how a LAN device probes this Mac.** For incoming
-  connection requests (TCP SYN) and UDP datagrams to ports below this Mac's
-  ephemeral range (49152), it counts, per LAN sender, how many distinct ports
+  connection requests (TCP SYN) and UDP datagrams, both to ports below this
+  Mac's ephemeral range (49152), it counts, per LAN sender, how many distinct ports
   were reached in two minutes. Answers to UDP this Mac sent (DNS replies,
   device discovery) are not counted: for that, the filter remembers in memory,
   for two minutes, which LAN address and port this Mac sent UDP to and from
