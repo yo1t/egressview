@@ -49,9 +49,10 @@ public struct InboundProbeCounter: Sendable {
     /// from 10; sending from 5 keeps the near misses for whoever reads the
     /// stored rows later.
     public static let reportMinPorts = 5
-    /// UDP to ports at or above this is not counted. It does not separate
-    /// replies from probes (see above); it keeps the busiest traffic, most of
-    /// which lands there, away from the lock in the packet handler.
+    /// Nothing to ports at or above this is counted. For UDP it does not
+    /// separate replies from probes (see above); it keeps the busiest traffic
+    /// away from the lock in the packet handler. For TCP it leaves out the
+    /// ports macOS hands to services it advertises on the LAN.
     public static let ephemeralFloor: UInt16 = 49152
     /// How long a datagram this Mac sent makes the answers to it replies.
     public static let replySeconds = 120
@@ -81,6 +82,20 @@ public struct InboundProbeCounter: Sendable {
         let remotePort: UInt16
     }
 
+    /// Running totals for the diagnostics screen: numbers only, no address.
+    public struct Stats: Codable, Equatable, Sendable {
+        /// Inbound packets tallied as possible probes.
+        public var countedPackets: UInt64 = 0
+        /// UDP datagrams left out as answers to this Mac's own.
+        public var repliesSetAside: UInt64 = 0
+        /// Senders that reached the report threshold in a finished window.
+        public var sendersReported: UInt64 = 0
+        public var lastReportAt: Date?
+
+        public init() {}
+    }
+
+    public private(set) var stats = Stats()
     private var tallies: [Key: Tally] = [:]
     private var lanSources: [String: Bool] = [:]
     /// Seconds since 1970 that each datagram was last sent.
@@ -96,7 +111,11 @@ public struct InboundProbeCounter: Sendable {
         switch networkProtocol {
         case .tcp:
             guard let flags = tcpFlags else { return false }
-            return flags & 0x02 != 0 && flags & 0x10 == 0   // SYN, not ACK
+            // SYN, not ACK. Not to the ephemeral range either: Apple devices
+            // connect to ports this Mac advertises for Continuity and AirDrop,
+            // which macOS picks there -- 8 a window, every 2 minutes, for hours
+            // on 2026-10-17. A scan still shows plenty below it.
+            return flags & 0x02 != 0 && flags & 0x10 == 0 && destinationPort < ephemeralFloor
         case .udp:
             return destinationPort < ephemeralFloor
         }
@@ -140,6 +159,7 @@ public struct InboundProbeCounter: Sendable {
               !Self.isMulticastOrBroadcast(destinationAddress),
               isLANSender(sourceAddress) else { return }
         if networkProtocol == .udp, isReply(from: sourceAddress, port: sourcePort, to: destinationPort, at: time) {
+            stats.repliesSetAside &+= 1
             return
         }
         let window = Int(time.timeIntervalSince1970) / Self.windowSeconds * Self.windowSeconds
@@ -150,6 +170,7 @@ public struct InboundProbeCounter: Sendable {
         if tally.ports.count < Self.maxPortsPerSender { tally.ports.insert(destinationPort) }
         tally.packets += 1
         tallies[key] = tally
+        stats.countedPackets &+= 1
     }
 
     /// The windows that have ended by `now`, reported and forgotten.
@@ -172,6 +193,10 @@ public struct InboundProbeCounter: Sendable {
         }
         if lanSources.count > Self.maxSenders { lanSources.removeAll() }
         forgetOutbound(before: Int(now.timeIntervalSince1970) - Self.replySeconds)
+        if !summaries.isEmpty {
+            stats.sendersReported &+= UInt64(summaries.count)
+            stats.lastReportAt = now
+        }
         return summaries.sorted { ($0.windowStart, $0.sourceAddress) < ($1.windowStart, $1.sourceAddress) }
     }
 

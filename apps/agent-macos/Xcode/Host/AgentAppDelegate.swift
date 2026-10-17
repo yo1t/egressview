@@ -7,6 +7,7 @@ import OSLog
 @MainActor
 final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private let logger = Logger(subsystem: "com.egressview.agent.macos", category: "storage")
+    private let probeLogger = Logger(subsystem: "com.egressview.agent.macos", category: "inbound-probes")
     private struct StorageContext {
         let store: ObservationStore
         let migration: ObservationJournalMigrationResult
@@ -118,8 +119,13 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         },
         // LAN senders probing this Mac, counted by the packet filter when the
         // user has turned packet counting on (P3-191). Delivered to the Hub
-        // with the next uploads; nothing is shown here yet.
+        // with the next uploads; the diagnostics screen shows the totals.
         inboundProbeHandler: { [weak self] probes in
+            // Counts only, so the system log can show when reports arrived
+            // without holding the addresses.
+            self?.probeLogger.info(
+                "inbound-probes: \(probes.count, privacy: .public) sender(s), most ports \(probes.map(\.distinctPorts).max() ?? 0, privacy: .public)"
+            )
             DispatchQueue.main.async {
                 guard self?.isPreparedForRemoval == false else { return }
                 self?.hubDelivery.enqueueInboundProbes(probes)

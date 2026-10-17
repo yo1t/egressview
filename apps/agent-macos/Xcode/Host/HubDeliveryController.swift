@@ -1530,6 +1530,14 @@ private struct AgentSettingsView: View {
                            hostCounts.completedWithoutBytes))
                     Text(L("Host XPC: drain timeouts %lld · failures %lld",
                            hostCounts.drainTimeouts, hostCounts.xpcFailures))
+                    if let probes = extensionCounts.inboundProbes {
+                        let queue = hub.latestQueueStatus
+                        Text(L("LAN probes (packet counting): counted packets %lld · UDP replies set aside %lld · senders reported %lld (last %@) · waiting %lld · sent to Hub %lld · dropped %lld",
+                               probes.countedPackets, probes.repliesSetAside, probes.sendersReported,
+                               probes.lastReportAt?.formatted() ?? L("never"),
+                               queue?.inboundProbesPending ?? 0, queue?.inboundProbesSent ?? 0,
+                               queue?.inboundProbesDropped ?? 0))
+                    }
                 } else {
                     Text(L("Press Refresh to compare the Extension and local database stages."))
                 }

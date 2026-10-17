@@ -34,6 +34,10 @@ final class InboundProbeCounterTests: XCTestCase {
         XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 80, tcpFlags: 0x12), "SYN-ACK")
         XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 80, tcpFlags: 0x10), "ACK")
         XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 80, tcpFlags: nil))
+        XCTAssertTrue(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 49151, tcpFlags: 0x02))
+        // Continuity and AirDrop connect to ports macOS picked in the
+        // ephemeral range; seen as 8 a window every 2 minutes on 2026-10-17.
+        XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .tcp, destinationPort: 60700, tcpFlags: 0x02), "一時ポート")
         XCTAssertTrue(InboundProbeCounter.counts(networkProtocol: .udp, destinationPort: 161, tcpFlags: nil))
         XCTAssertFalse(InboundProbeCounter.counts(networkProtocol: .udp, destinationPort: 55_000, tcpFlags: nil), "一時ポート")
     }
@@ -135,6 +139,33 @@ final class InboundProbeCounterTests: XCTestCase {
             udp(&counter, to: port)
         }
         XCTAssertEqual(counter.takeCompleted(now: windowStart.addingTimeInterval(121)).map(\.distinctPorts), [30])
+    }
+
+    func test診断用に_数えた数と除いた返事と報告した送り元を数える() {
+        var counter = InboundProbeCounter()
+        for port in UInt16(20)..<UInt16(30) { syn(&counter, to: port) }
+        counter.noteOutbound(networkProtocol: .udp, sourcePort: 5000, destinationAddress: "192.168.1.1",
+                             destinationPort: 53, at: windowStart.addingTimeInterval(1))
+        udp(&counter, to: 5000)
+        XCTAssertEqual(counter.stats.countedPackets, 10)
+        XCTAssertEqual(counter.stats.repliesSetAside, 1)
+        XCTAssertEqual(counter.stats.sendersReported, 0)
+        XCTAssertNil(counter.stats.lastReportAt)
+        let now = windowStart.addingTimeInterval(121)
+        XCTAssertEqual(counter.takeCompleted(now: now).count, 1)
+        XCTAssertEqual(counter.stats.sendersReported, 1)
+        XCTAssertEqual(counter.stats.lastReportAt, now)
+    }
+
+    func test古い拡張機能の診断にも読める() throws {
+        // A snapshot from an extension without the probe totals still decodes.
+        let old = try JSONEncoder().encode(FlowCaptureDiagnostics(startedAt: Date(timeIntervalSince1970: 0)))
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: old) as? [String: Any])
+        json["inboundProbes"] = nil
+        let decoded = try JSONDecoder().decode(
+            FlowCaptureDiagnostics.self, from: JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertNil(decoded.inboundProbes)
     }
 
     func testTCPのフラグをヘッダーから読む() {

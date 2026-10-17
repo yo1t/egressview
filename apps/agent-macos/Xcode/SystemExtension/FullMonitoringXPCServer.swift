@@ -79,7 +79,8 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
     }
 
     func readFlowCaptureDiagnostics(withReply reply: @escaping (Data) -> Void) {
-        let snapshot = lock.withLock { flowDiagnostics }
+        var snapshot = lock.withLock { flowDiagnostics }
+        snapshot.inboundProbes = PacketCounting.probes.stats()
         reply((try? FullMonitoringXPC.encoder().encode(snapshot)) ?? Data())
     }
 

@@ -267,6 +267,8 @@ final class AgentDeliveryQueueTests: XCTestCase {
         XCTAssertEqual(with.inboundProbes, [probe()])
         try restarted.acknowledge(batchID: with.batchId)
         XCTAssertEqual(restarted.pendingInboundProbeCount, 0)
+        XCTAssertEqual(restarted.status().inboundProbesSent, 1, "診断画面の「Hubへ送った」")
+        XCTAssertEqual(restarted.status().inboundProbesPending, 0)
     }
 
     func test断られたバッチに乗っていた探られた記録は送り直さない() throws {
@@ -276,6 +278,8 @@ final class AgentDeliveryQueueTests: XCTestCase {
         let batch = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: Date(), metadata: metadata(), includeInboundProbes: true))
         XCTAssertEqual(batch.inboundProbes?.count, 1)
         _ = try queue.recordRejection(batchID: batch.batchId)
+        XCTAssertEqual(queue.status().inboundProbesDropped, 1, "診断画面の「捨てた」")
+        XCTAssertEqual(queue.status().inboundProbesSent, 0)
         let next = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: Date(), metadata: metadata(), includeInboundProbes: true))
         XCTAssertNil(next.inboundProbes)
     }

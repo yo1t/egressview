@@ -38,6 +38,10 @@ public struct FlowCaptureDiagnostics: Codable, Equatable, Sendable {
     public private(set) var droppedObservations: UInt64 = 0
     public private(set) var drainedObservations: UInt64 = 0
     public private(set) var encodingFailures: UInt64 = 0
+    /// The packet filter's LAN-probe totals (P3-191), filled in when the
+    /// snapshot is read. Absent from an extension older than them, or while
+    /// packet counting is off and nothing has been counted.
+    public var inboundProbes: InboundProbeCounter.Stats?
 
     public init(startedAt: Date = Date()) {
         self.startedAt = startedAt

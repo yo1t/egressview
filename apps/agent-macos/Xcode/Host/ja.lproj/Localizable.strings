@@ -869,3 +869,4 @@
 "Could not move the app to Trash: %@. Quit EgressView Agent and move it to Trash in Finder." = "アプリをゴミ箱に移動できませんでした: %@。EgressView Agentを終了し、Finderでゴミ箱へ移動してください。";
 "Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish." = "監視を止め、このMacの後片付けが完了しました。アプリをゴミ箱に入れると、macOSがネットワーク機能拡張を外します。そのあとMacを再起動すると完了です。";
 "Collection method" = "収集方式";
+"LAN probes (packet counting): counted packets %lld · UDP replies set aside %lld · senders reported %lld (last %@) · waiting %lld · sent to Hub %lld · dropped %lld" = "LAN内からの探索（パケットのカウント）：数えたパケット %lld・返事として除いたUDP %lld・報告した送り元 %lld（最後 %@）・送信待ち %lld・Hubへ送った %lld・捨てた %lld";
