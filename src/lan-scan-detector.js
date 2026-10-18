@@ -25,6 +25,10 @@ const PORT_PROBE_MIN_PORTS = 10;
 const EPHEMERAL_PORT_FLOOR = 32768;
 const SAMPLE_SIZE = 5;
 
+// The Agent records a connection that failed before it had a source address
+// with an unspecified one (Mac #829), and a sweep is mostly such attempts.
+const KNOWN_LOCAL_SQL = "o.localAddress IS NOT NULL AND o.localAddress NOT IN ('', '0.0.0.0', '::')";
+
 // LAN destinations only: RFC 1918, IPv6 link-local and unique local. Multicast
 // and broadcast are discovery by design (mDNS, SSDP) and are left out.
 const LAN_DESTINATION_SQL = `(
@@ -58,12 +62,21 @@ function findLanScans(db, {
   ).get();
   if (!hasAgents) return [];
   const findings = [];
+  // When every attempt in the window failed before getting a source address,
+  // the computer's address comes from its latest connection that had one, so
+  // the detection log names an address rather than 0.0.0.0.
+  const latestKnownLocal = db.prepare(`
+    SELECT o.localAddress FROM agent_observations o
+    WHERE o.agentId = ? AND o.lastObservedAt <= ? AND ${KNOWN_LOCAL_SQL}
+    ORDER BY o.lastObservedAt DESC LIMIT 1
+  `);
+  const localAddressFor = row => row.localAddress ?? latestKnownLocal.get(row.agentId, to)?.localAddress ?? null;
 
   const sweeps = db.prepare(`
     SELECT o.agentId, a.hostName, o.processName,
            COUNT(DISTINCT o.remoteAddress) AS addresses,
            COUNT(DISTINCT o.remotePort) AS ports,
-           MAX(o.localAddress) AS localAddress
+           MAX(CASE WHEN ${KNOWN_LOCAL_SQL} THEN o.localAddress END) AS localAddress
     FROM agent_observations o JOIN agents a ON a.agentId = o.agentId
     WHERE o.firstObservedAt >= ? AND o.firstObservedAt < ? AND ${LAN_DESTINATION_SQL}
     GROUP BY o.agentId, o.processName
@@ -81,7 +94,7 @@ function findLanScans(db, {
       agentId: row.agentId,
       hostName: row.hostName,
       processName: row.processName,
-      localAddress: row.localAddress,
+      localAddress: localAddressFor(row),
       windowStart: from,
       windowMs,
       addresses: row.addresses,
@@ -94,7 +107,7 @@ function findLanScans(db, {
   const probes = db.prepare(`
     SELECT o.agentId, a.hostName, o.processName, o.remoteAddress AS target,
            COUNT(DISTINCT o.remotePort) AS ports,
-           MAX(o.localAddress) AS localAddress
+           MAX(CASE WHEN ${KNOWN_LOCAL_SQL} THEN o.localAddress END) AS localAddress
     FROM agent_observations o JOIN agents a ON a.agentId = o.agentId
     WHERE o.firstObservedAt >= ? AND o.firstObservedAt < ? AND o.remotePort < ?
       AND ${LAN_DESTINATION_SQL}
@@ -113,7 +126,7 @@ function findLanScans(db, {
       agentId: row.agentId,
       hostName: row.hostName,
       processName: row.processName,
-      localAddress: row.localAddress,
+      localAddress: localAddressFor(row),
       windowStart: from,
       windowMs,
       addresses: 1,

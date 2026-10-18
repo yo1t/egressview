@@ -44,6 +44,32 @@ describe('LAN scan detection', () => {
     assert.equal(findings[0].sample.length, 5);
   });
 
+  it('送信元が決まる前に失敗した接続だけの掃引でも、送信元に0.0.0.0を出さない', () => {
+    const db = database();
+    observe(db, { processName: 'Safari', remoteAddress: '192.168.1.9', at: from - 60_000 });
+    for (let i = 1; i <= 40; i += 1) {
+      observe(db, { processName: 'curl', localAddress: '0.0.0.0', remoteAddress: `192.168.1.${i}`, at: from + i * 1000 });
+    }
+    const [finding] = findLanScans(db, { from });
+    assert.equal(finding.kind, 'sweep');
+    assert.equal(finding.localAddress, '192.168.1.50', 'そのAgentの直近の、送信元が分かる接続のアドレス');
+  });
+
+  it('送信元が分かる接続が混じっていれば、そのアドレスを使い、無ければnull', () => {
+    const db = database();
+    for (let i = 1; i <= 40; i += 1) {
+      observe(db, { localAddress: i === 7 ? '192.168.1.60' : '::', remoteAddress: `192.168.1.${i}`, at: from + i * 1000 });
+    }
+    assert.equal(findLanScans(db, { from })[0].localAddress, '192.168.1.60');
+    const empty = database();
+    for (let p = 20; p < 32; p += 1) {
+      observe(empty, { localAddress: '0.0.0.0', remoteAddress: '192.168.1.1', remotePort: p, at: from + p });
+    }
+    const [probe] = findLanScans(empty, { from });
+    assert.equal(probe.kind, 'port-probe');
+    assert.equal(probe.localAddress, null, '分からないものは分からないまま');
+  });
+
   it('ふだんの範囲（17アドレス）や、マルチキャスト・ブロードキャスト・インターネット宛ては数えない', () => {
     const db = database();
     for (let i = 1; i <= 17; i += 1) observe(db, { remoteAddress: `192.168.1.${i}`, at: from + i });
