@@ -73,6 +73,13 @@ send the same ones.**
 `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`,
 `bytesIn`, `bytesOut`, `collector`, `confidence`)
 
+Connection attempts that failed are sent too, as observations with no bytes,
+so a program sweeping the LAN can be noticed. When the Hub advertises support
+for it, `inboundProbes` is sent as well: per LAN sender and two-minute window,
+how many of this PC's closed ports it tried (`windowStart`, `windowSeconds`,
+`localAddress`, `sourceAddress`, `networkProtocol`, `distinctPorts`, `packets`,
+`samplePorts`). No contents.
+
 `remoteHostname` is added only when the Hub advertises support for it. The
 credential is sent as a Bearer token to that Hub.
 

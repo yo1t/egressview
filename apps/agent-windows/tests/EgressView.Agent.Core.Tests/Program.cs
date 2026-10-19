@@ -280,6 +280,47 @@ try
     }
 
     {
+        // P3-191: LAN senders turned away from this PC's closed ports.
+        var probes = new InboundProbeCounter();
+        var w0 = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000 / 120 * 120);
+        for (var port = 1; port <= 30; port++) probes.Record("192.168.20.53", "192.168.20.50", port, w0.AddSeconds(port));
+        for (var port = 1; port <= 3; port++) probes.Record("192.168.20.60", "192.168.20.50", port, w0.AddSeconds(port));
+        probes.Record("192.168.20.53", "192.168.20.50", 50000, w0.AddSeconds(40));
+        probes.Record("203.0.113.9", "192.168.20.50", 22, w0.AddSeconds(40));
+        probes.Record("192.168.20.255", "192.168.20.50", 137, w0.AddSeconds(40));
+        probes.Record("::ffff:192.168.20.70", "192.168.20.50", 22, w0.AddSeconds(41));
+        Assert(probes.TakeCompleted(w0.AddSeconds(100)).Count == 0, "a window is reported only once it has ended");
+        var summaries = probes.TakeCompleted(w0.AddSeconds(130));
+        Assert(summaries.Count == 1 && summaries[0].SourceAddress == "192.168.20.53" && summaries[0].DistinctPorts == 30
+               && summaries[0].Packets == 30 && summaries[0].SamplePorts.SequenceEqual(Enumerable.Range(1, 10))
+               && summaries[0].NetworkProtocol == "tcp" && summaries[0].WindowSeconds == 120 && summaries[0].WindowStart == w0,
+            "a LAN sender reaching 30 closed ports is reported once, with ten sample ports; the ephemeral range is not counted");
+        Assert(probes.TakeCompleted(w0.AddSeconds(400)).Count == 0,
+            "fewer than five ports, a sender outside the LAN, a broadcast address and reported windows are not reported");
+
+        var (v4, v4Port) = EtwNetworkCollector.SockAddr(new byte[] { 2, 0, 0, 80, 192, 168, 20, 105, 0, 0, 0, 0, 0, 0, 0, 0 });
+        var mapped = new byte[28];
+        mapped[0] = 23; mapped[2] = 0xF7; mapped[3] = 0xFA;
+        mapped[18] = 0xFF; mapped[19] = 0xFF; mapped[20] = 192; mapped[21] = 168; mapped[22] = 20; mapped[23] = 50;
+        var (v6, v6Port) = EtwNetworkCollector.SockAddr(mapped);
+        Assert(v4 == "192.168.20.105" && v4Port == 80 && v6 == "192.168.20.50" && v6Port == 63482,
+            "a SOCKADDR from Microsoft-Windows-TCPIP reads as an address and port, IPv4 mapped into IPv6 as IPv4");
+
+        var outbox = new InboundProbeOutbox();
+        outbox.Add(Enumerable.Range(0, 60).Select(index => summaries[0] with { Packets = index + 1 }));
+        var first = outbox.Take();
+        Assert(first.Count == InboundProbeOutbox.MaxPerBatch && outbox.Pending == 10, "a batch carries at most fifty summaries");
+        outbox.Return(first);
+        Assert(outbox.Pending == 60 && outbox.Take()[0].Packets == 1, "summaries from a batch that failed go back first");
+        outbox.Add(Enumerable.Range(0, InboundProbeOutbox.Capacity + 5).Select(_ => summaries[0]));
+        Assert(outbox.Pending == InboundProbeOutbox.Capacity && outbox.Dropped > 0, "the outbox is bounded and counts what it drops");
+
+        Assert(AgentCapabilityNegotiation.Decide(new AgentHubCapabilities([1], InboundProbes: true)).IncludeInboundProbes
+               && !AgentCapabilityNegotiation.Decide(new AgentHubCapabilities([1])).IncludeInboundProbes,
+            "inbound probes are sent only to a Hub that says it takes them");
+    }
+
+    {
         var queue = new ConnectionEndQueue();
         var t0 = new DateTimeOffset(2026, 10, 12, 0, 0, 0, TimeSpan.Zero);
         queue.Add(new ConnectionEnd("192.0.2.10", 1, "198.51.100.20", 443, t0));
@@ -2594,10 +2635,14 @@ try
         var handler = new DeliveryHandler(200, 200)
         {
             CapabilitiesStatus = HttpStatusCode.OK,
-            CapabilitiesJson = """{"schemaVersions":[1],"maxObservationsPerBatch":2,"observationFields":["remoteHostname"]}""",
+            CapabilitiesJson = """{"schemaVersions":[1],"maxObservationsPerBatch":2,"observationFields":["remoteHostname"],"inboundProbes":true}""",
         };
         var clock = new ManualTimeProvider(deliveryStarted);
-        var sender = new DeliverySender(new HttpClient(handler), clock);
+        // One probe summary, so the disclosure check below sees every key the
+        // sender can write, the optional ones included (P3-191).
+        var probeOutbox = new InboundProbeOutbox();
+        probeOutbox.Add([new InboundProbeSummary(deliveryStarted, 120, "10.0.0.1", "10.0.0.53", "tcp", 30, 60, [1, 2, 3])]);
+        var sender = new DeliverySender(new HttpClient(handler), clock) { InboundProbes = probeOutbox };
         var credential = new AgentCredential(new Uri("https://hub.example/"), agentId, agentToken, deliveryStarted);
         var metadata = new DeliveryMetadata("host", "windows", "Windows", "dev");
         Assert((await sender.SendNextAsync(capableStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged,
@@ -2610,7 +2655,11 @@ try
             var sentKeys = root.EnumerateObject().Select(item => item.Name)
                 .Concat(root.GetProperty("agent").EnumerateObject().Select(item => item.Name))
                 .Concat(root.GetProperty("observations")[0].EnumerateObject().Select(item => item.Name))
+                .Concat(root.GetProperty("inboundProbes")[0].EnumerateObject().Select(item => item.Name))
                 .ToHashSet(StringComparer.Ordinal);
+            Assert(probeOutbox.Pending == 0 && probeOutbox.Sent == 1
+                   && root.GetProperty("inboundProbes")[0].GetProperty("sourceAddress").GetString() == "10.0.0.53",
+                "an acknowledged batch carries the waiting probe summaries and they leave the outbox");
             foreach (var language in new[] { "en", "ja" })
             {
                 var resource = XDocument.Load(Path.Combine(windowsRoot, "src", "EgressView.Agent.Ui", "Resources", $"Strings.{language}.xaml"));

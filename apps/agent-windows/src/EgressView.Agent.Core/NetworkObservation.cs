@@ -295,6 +295,15 @@ public sealed record CollectorSnapshot(
     long ConnectionTableChecks = 0,
     // Ends written onto their rows, and ends that found no row within a
     // minute and were given up on.
+    // Failed connection attempts kept as observations, and LAN senders turned
+    // away from closed ports, for LAN scan detection (P3-191).
+    long TcpConnectFailures = 0,
+    long InboundProbePackets = 0,
+    long InboundProbeSendersReported = 0,
+    int InboundProbesPending = 0,
+    long InboundProbesSent = 0,
+    long InboundProbesDropped = 0,
+    string? TcpipSourceError = null,
     long ConnectionEndsRecorded = 0,
     long ConnectionEndsDropped = 0,
     int ConnectionEndsWaiting = 0,

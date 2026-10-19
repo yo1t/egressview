@@ -19,6 +19,8 @@ Enrollment sends the PC name, Windows version and Agent version to the chosen Hu
 - Agent: `hostName`, `platform`, `osVersion`, `agentVersion`.
 - Each observation: `observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`. Unavailable values are null.
 - `remoteHostname` (destination hostname) is added only when the Hub advertises support in its capabilities response. It is not sent to older Hubs.
+- Connection attempts that failed (the destination did not answer or refused) are sent too, as observations with no bytes, for LAN scan detection.
+- `inboundProbes`: per LAN sender and two-minute window, counts of attempts on this PC's closed ports (`windowStart`, `windowSeconds`, `localAddress`, `sourceAddress`, `networkProtocol`, `distinctPorts`, `packets`, `samplePorts`). Sent only when the Hub advertises support in its capabilities response. No contents.
 
 Update checks are separate from observation delivery. The Agent fetches `/windows/manifest.json` and its signature from `dl.egressview.com`. Its HTTP User-Agent contains the Agent and Windows versions. As with ordinary HTTP requests, the destination server can see the source IP address. Update checks send no observations or Hub credentials.
 

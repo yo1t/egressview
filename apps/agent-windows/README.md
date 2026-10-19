@@ -23,6 +23,8 @@ Hub登録ではPC名、Windowsのバージョン、Agentのバージョンを送
 - Agent: `hostName`, `platform`, `osVersion`, `agentVersion`。
 - 各観測: `observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`。取得できない値はnullです。
 - `remoteHostname`（宛先ホスト名）はHubのcapabilities応答が対応を通知した場合だけ追加します。旧Hubへは送りません。
+- 接続できなかった試み（宛先が応答しない・拒否した）も、送受信量0の観測として送ります。LAN内の探索の検知に使います。
+- `inboundProbes`：このPCの閉じたポートへLAN内の機器から接続が来たときの、送り元・2分ごとの集計（`windowStart`、`windowSeconds`、`localAddress`、`sourceAddress`、`networkProtocol`、`distinctPorts`、`packets`、`samplePorts`）。Hubのcapabilities応答が対応を通知した場合だけ送ります。通信内容は含みません。
 
 更新確認は観測データの送信とは別で、`dl.egressview.com`の`/windows/manifest.json`と署名を取得します。HTTP User-AgentにはAgentバージョンとWindowsバージョンが含まれます。通常のHTTP通信と同様、接続先サーバーには送信元IPアドレスが見えます。更新確認で観測データやHub資格情報は送りません。
 

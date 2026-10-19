@@ -61,6 +61,10 @@ public sealed class DeliverySender
 
     public DeliveryCapabilityStatus CapabilityStatus { get { lock (capabilityGate) return capabilityStatus; } }
 
+    /// Inbound probe summaries to send with the observations, when the Hub
+    /// takes them (P3-191).
+    public InboundProbeOutbox? InboundProbes { get; set; }
+
     public async Task<DeliveryAttempt> SendNextAsync(ObservationStore store, AgentCredential credential,
         DeliveryMetadata metadata, CancellationToken cancellationToken = default)
     {
@@ -70,12 +74,34 @@ public sealed class DeliverySender
             return new(DeliveryAttemptKind.Incompatible);
         var batch = store.PrepareDeliveryBatch(timeProvider.GetUtcNow(), outcome.BatchSize);
         if (batch is null) return new(DeliveryAttemptKind.Empty);
+        // Taken now and handed back unless this batch is acknowledged, so a
+        // failed send loses none of them.
+        IReadOnlyList<InboundProbeSummary> probes = outcome.IncludeInboundProbes && InboundProbes is { } outbox ? outbox.Take() : [];
+        var acknowledged = false;
+        try
+        {
+            var attempt = await SendBatchAsync(store, credential, metadata, outcome, batch, probes, cancellationToken);
+            acknowledged = attempt.Kind == DeliveryAttemptKind.Acknowledged;
+            return attempt;
+        }
+        finally
+        {
+            if (acknowledged) InboundProbes?.MarkSent(probes);
+            else InboundProbes?.Return(probes);
+        }
+    }
+
+    private async Task<DeliveryAttempt> SendBatchAsync(ObservationStore store, AgentCredential credential, DeliveryMetadata metadata,
+        AgentCapabilityOutcome outcome, DeliveryBatch batch, IReadOnlyList<InboundProbeSummary> probes, CancellationToken cancellationToken)
+    {
         var envelope = new DeliveryEnvelope(outcome.SchemaVersion, batch.BatchId, Timestamp(batch.SentAt), metadata,
             batch.Observations.Select(item => new DeliveryPayload(
                 item.ObservationId, item.NetworkProtocol, item.LocalAddress, item.LocalPort, item.RemoteAddress,
                 item.RemotePort, item.ProcessId, item.ProcessName, item.BundleID, Timestamp(item.FirstObservedAt),
                 Timestamp(item.LastObservedAt), item.BytesIn?.ToString(), item.BytesOut?.ToString(), item.Collector, item.Confidence,
-                outcome.IncludeRemoteHostname ? item.RemoteHostname : null)).ToArray());
+                outcome.IncludeRemoteHostname ? item.RemoteHostname : null)).ToArray(),
+            probes.Count == 0 ? null : probes.Select(probe => new InboundProbePayload(Timestamp(probe.WindowStart), probe.WindowSeconds,
+                probe.LocalAddress, probe.SourceAddress, probe.NetworkProtocol, probe.DistinctPorts, probe.Packets, probe.SamplePorts)).ToArray());
         using var request = new HttpRequestMessage(HttpMethod.Post,
             new Uri(credential.HubUrl.AbsoluteUri.TrimEnd('/') + "/api/agent/ingest"))
         {
@@ -220,7 +246,10 @@ public sealed class DeliverySender
     private static string Timestamp(DateTimeOffset value) => value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
 
     private sealed record DeliveryEnvelope(int SchemaVersion, Guid BatchId, string SentAt, DeliveryMetadata Agent,
-        IReadOnlyList<DeliveryPayload> Observations);
+        IReadOnlyList<DeliveryPayload> Observations,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<InboundProbePayload>? InboundProbes = null);
+    private sealed record InboundProbePayload(string WindowStart, int WindowSeconds, string LocalAddress, string SourceAddress,
+        string NetworkProtocol, int DistinctPorts, int Packets, IReadOnlyList<int> SamplePorts);
     private sealed record DeliveryPayload(Guid ObservationId, string NetworkProtocol, string LocalAddress, int LocalPort,
         string RemoteAddress, int RemotePort, [property: JsonPropertyName("processID")] int ProcessId, string ProcessName,
         [property: JsonPropertyName("bundleID")] string? BundleId, string FirstObservedAt, string LastObservedAt,

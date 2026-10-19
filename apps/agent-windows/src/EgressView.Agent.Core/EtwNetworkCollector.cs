@@ -28,6 +28,20 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     // thread and image-load events would multiply the volume for nothing.
     private static readonly Guid KernelProcess = new("22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716");
     private static readonly Guid DnsClient = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
+    /// Microsoft-Windows-TCPIP, for the two things Kernel-Network never says
+    /// (P3-191): a connection attempt that failed, and a segment dropped
+    /// because nothing listens on its port. Kernel-Network reports connections
+    /// that were made and data that moved; a sweep of the LAN in which nothing
+    /// answers left no trace at all -- 0 of 40 on 2026-10-20, against 40 of 40
+    /// on the Mac. This provider is very busy (several hundred thousand events
+    /// in under two minutes on this PC), so only these two events are asked
+    /// for, by id.
+    private static readonly Guid Tcpip = new("2F07E2EE-15DB-40F1-90EF-9D7BA282188A");
+    private const ulong TcpipKeywords = 0x400000000 | 0x10000000000;   // ConnectPath | Dropped
+    private const int TcpConnectTcbFailure = 1034;
+    private const int TcpipTransportPacketDrops = 1214;
+    /// TcpipTransportPacketDrops: no endpoint for the segment's port.
+    private const int DropReasonNoListener = 4;
 
     /// The two keywords this Agent reads: IPv4 and IPv6 traffic.
     ///
@@ -92,6 +106,12 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private long eventsSeen, eventsIgnored, interfaceUnresolved, inboundMulticastIgnored;
     private long connectionAttempted, connectionAccepted, connectionDisconnected, connectionClosed;
     private readonly ConnectionEndAudit connectionEnds = new();
+    /// LAN senders turned away from this PC's closed ports (P3-191).
+    public InboundProbeCounter InboundProbes { get; } = new();
+    /// Their summaries, waiting for the next batch to the Hub.
+    public InboundProbeOutbox InboundProbeOutbox { get; } = new();
+    private long tcpConnectFailures;
+    private string? tcpipSourceError;
     /// Ends waiting to be written onto their rows (P3-108). The service
     /// applies them from its heartbeat, against the store.
     public ConnectionEndQueue ConnectionEndsToRecord { get; } = new();
@@ -252,6 +272,17 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
                     hostnameSourceError = $"{ex.GetType().Name}: {ex.Message}";
                 }
             }
+            // Like process starts, an addition to the collection rather than
+            // the collection: if it cannot be enabled, traffic is still seen.
+            try
+            {
+                session.EnableProvider(Tcpip, TraceEventLevel.Informational, TcpipKeywords,
+                    new TraceEventProviderOptions { EventIDsToEnable = [TcpConnectTcbFailure, TcpipTransportPacketDrops] });
+            }
+            catch (Exception ex)
+            {
+                tcpipSourceError = $"{ex.GetType().Name}: {ex.Message}";
+            }
         }
         catch (Exception ex)
         {
@@ -284,6 +315,13 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         ConnectionsStillOpen = connectionEnds.StillOpen,
         ConnectionsNotFollowed = connectionEnds.Overflow,
         ConnectionTableChecks = connectionEnds.Reconciliations,
+        TcpConnectFailures = Interlocked.Read(ref tcpConnectFailures),
+        InboundProbePackets = InboundProbes.CountedPackets,
+        InboundProbeSendersReported = InboundProbes.SendersReported,
+        InboundProbesPending = InboundProbeOutbox.Pending,
+        InboundProbesSent = InboundProbeOutbox.Sent,
+        InboundProbesDropped = InboundProbeOutbox.Dropped,
+        TcpipSourceError = tcpipSourceError,
         ConnectionEndsRecorded = ConnectionEndsToRecord.Recorded,
         ConnectionEndsDropped = ConnectionEndsToRecord.Dropped,
         ConnectionEndsWaiting = ConnectionEndsToRecord.Waiting,
@@ -338,6 +376,15 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         {
             RecordDnsResult(e);
             Submit(deferredNames.Expire(eventAt));
+            return;
+        }
+        if (e.ProviderGuid == Tcpip)
+        {
+            switch ((int)e.ID)
+            {
+                case TcpConnectTcbFailure: RecordFailedConnect(e); break;
+                case TcpipTransportPacketDrops: RecordDroppedSegment(e); break;
+            }
             return;
         }
         Record(e);
@@ -475,6 +522,52 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         // hundred against millions, and folding a row whose bucket has already
         // been emitted would be work for no reduction.
         Submit(coalescer.Add(observation));
+    }
+
+    /// A connection this PC tried and that never opened, kept as one with no
+    /// bytes either way -- as the Mac Agent does since #829 -- so a program
+    /// sweeping the LAN shows on the Hub with the program's name.
+    private void RecordFailedConnect(TraceEvent e)
+    {
+        var (local, localPort) = SockAddr(Raw(e, "LocalAddress"));
+        var (remote, remotePort) = SockAddr(Raw(e, "RemoteAddress"));
+        if (local is null || remote is null || remotePort <= 0) return;
+        if (IPAddress.TryParse(remote, out var remoteIp) && (IPAddress.IsLoopback(remoteIp) || remoteIp.Equals(IPAddress.Any) || remoteIp.Equals(IPAddress.IPv6Any))) return;
+        var at = At(e);
+        var pid = IntValue(Raw(e, "ProcessId"), 0);
+        var process = processNames.ResolveIdentity(pid, at);
+        var localInterface = FindInterface(local);
+        var observation = new NetworkObservation(at, pid, "TCP", local, localPort, remote, remotePort, 0, 0,
+            ObservationLayer.Logical, localInterface?.Id, "etw", process.Name,
+            dnsNames.Resolve(process.InstanceId, remote, at), process.InstanceId);
+        Interlocked.Increment(ref tcpConnectFailures);
+        Submit(coalescer.Add(observation));
+    }
+
+    private void RecordDroppedSegment(TraceEvent e)
+    {
+        if (IntValue(Raw(e, "IPTransportProtocol"), 0) != 6 || IntValue(Raw(e, "Reason"), 0) != DropReasonNoListener) return;
+        var (local, localPort) = SockAddr(Raw(e, "LocalSockAddr"));
+        var (remote, _) = SockAddr(Raw(e, "RemoteSockAddr"));
+        InboundProbes.Record(remote, local, localPort, At(e));
+    }
+
+    /// A SOCKADDR as Microsoft-Windows-TCPIP writes it: family, port in network
+    /// order, then the address. IPv4 can arrive mapped into IPv6.
+    internal static (string? Address, int Port) SockAddr(object? value)
+    {
+        if (value is not byte[] bytes || bytes.Length < 8) return (null, 0);
+        var family = BitConverter.ToUInt16(bytes, 0);
+        var port = (bytes[2] << 8) | bytes[3];
+        IPAddress? address = family switch
+        {
+            2 => new IPAddress(bytes[4..8]),
+            23 when bytes.Length >= 24 => new IPAddress(bytes[8..24]),
+            _ => null,
+        };
+        if (address is null) return (null, 0);
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        return (address.ToString(), port);
     }
 
     private void FollowConnection(TraceEvent e, bool started)

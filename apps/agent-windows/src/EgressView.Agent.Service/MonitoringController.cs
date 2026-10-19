@@ -26,6 +26,9 @@ internal sealed class MonitoringController : IAsyncDisposable
         try { store.AddCounter("shutdown-collector-stop-timeout", 1); } catch (Exception) { }
     }
 
+    /// LAN probe summaries for the Hub, filled by the collector (P3-191).
+    internal InboundProbeOutbox InboundProbeOutbox => collector.InboundProbeOutbox;
+
     internal MonitoringController(ObservationStore store, ObservationPipeline pipeline, string disabledMarker)
     {
         this.store = store;
@@ -133,6 +136,7 @@ internal sealed class MonitoringController : IAsyncDisposable
                 try { store.SetCounter("etw-clock-drift-ms", (long)collector.EventClockDrift.TotalMilliseconds); } catch { }
                 collector.ReconcileConnectionEnds(now);
                 collector.ConnectionEndsToRecord.Apply(store.RecordConnectionEnds, now);
+                collector.InboundProbeOutbox.Add(collector.InboundProbes.TakeCompleted(now));
                 var eventsLost = collector.EventsLost;
                 var pipelineSnapshot = pipeline.Snapshot();
                 var healthy = collector.IsActive && collector.Error is null && pipelineSnapshot.PersistenceFailures == 0;
