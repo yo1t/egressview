@@ -1394,6 +1394,23 @@ public partial class MainWindow : Window
     ///
     /// Done here rather than in the XAML because both numbers depend on the
     /// height, and a star column cannot be told about one.
+    /// The dashboard fills the height it is shown in, set here from the
+    /// scroll viewer's own size rather than bound to its viewport.
+    ///
+    /// Bound, the grid's height depended on a viewport that depends on the
+    /// grid, and after the PC woke from sleep the window was larger than the
+    /// height the binding last settled on. A grid with a fixed height in a
+    /// taller space sits in its middle, so the cards hung there with some 145
+    /// pixels of nothing above and below them until another tab forced a new
+    /// layout. Now the height follows the space it is given, and the grid is
+    /// pinned to the top, so even a height that lags leaves its gap below the
+    /// cards rather than between them and the controls they belong to.
+    private void NetworkDashboard_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.HeightChanged)
+            DashboardGrid.Height = Math.Max(DashboardGrid.MinHeight, e.NewSize.Height);
+    }
+
     private void DashboardGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         var width = Math.Max(1, DashboardGrid.ActualWidth);
