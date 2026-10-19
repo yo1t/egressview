@@ -435,6 +435,7 @@ internal static class Entry
             throw new InvalidOperationException("Input controls lost their dark theme or selection.");
         VerifyDropDownsOpenAcrossTheirWidth();
         VerifyLabelsNotCutInEitherLanguage(application);
+        VerifyDashboardFollowsWindowHeight();
         foreach (var width in new[] { 630, 340 })
         {
             var countryDashboard = new MainWindow();
@@ -919,6 +920,37 @@ internal static class Entry
             if (FindVisual<T>(child) is { } deeper) return deeper;
         }
         return null;
+    }
+
+    /// The network dashboard starts right under its controls and fills the
+    /// height it is shown in, after the window grows as well as at first.
+    ///
+    /// Seen after the PC woke from sleep: the cards hung in the middle of a
+    /// taller window, some 145 pixels below the controls, until another tab
+    /// was opened. A real window is shown off screen, grown from 900 to 1300
+    /// high, and the cards must stay at the top and take the new height.
+    private static void VerifyDashboardFollowsWindowHeight()
+    {
+        var window = new MainWindow { Left = -20000, Top = -20000, Width = 1440, Height = 900, ShowActivated = false, ShowInTaskbar = false };
+        window.Show();
+        try
+        {
+            var faults = new List<string>();
+            foreach (var height in new[] { 900, 1300 })
+            {
+                window.Height = height;
+                window.UpdateLayout();
+                var dashboard = (ScrollViewer)window.FindName("NetworkDashboard")!;
+                var grid = (Grid)window.FindName("DashboardGrid")!;
+                var top = grid.TranslatePoint(new System.Windows.Point(0, 0), dashboard).Y;
+                var expected = Math.Max(grid.MinHeight, dashboard.ActualHeight);
+                if (Math.Abs(top) > 0.5) faults.Add($"at {height}: the cards start {top:F0}px below the controls");
+                if (Math.Abs(grid.ActualHeight - expected) > 1) faults.Add($"at {height}: the cards are {grid.ActualHeight:F0}px high in a {dashboard.ActualHeight:F0}px space");
+                Console.WriteLine($"dashboard-{height}: top {top:F0}, cards {grid.ActualHeight:F0} of {dashboard.ActualHeight:F0}");
+            }
+            if (faults.Count > 0) throw new InvalidOperationException($"The network dashboard does not follow the window: {string.Join("; ", faults)}");
+        }
+        finally { window.Close(); }
     }
 
     private static List<string> DeadPointsAcrossWidth(System.Windows.Controls.ComboBox choice)
