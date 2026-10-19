@@ -559,7 +559,15 @@ function snapshotHistory() {
 // Rows per transaction for the periodic snapshot. Measured on the production
 // Hub 2026-10-11: about 2,500 rows in one transaction took 176-196 ms every ten
 // minutes, once 632 ms, on the thread that answers every request (P3-190).
-const SNAPSHOT_SLICE_ROWS = 250;
+//
+// 250 rows took 18 ms at the median, but 400-800 ms while the nightly backup's
+// verification or the 04:00 integrity check was reading the disk (2026-10-15
+// to 10-17), and a pass is usually one slice (~230 rows), so the request
+// thread stalled once a day. A pass now starts at 50 rows and halves the slice
+// after one that took too long, down to 10.
+const SNAPSHOT_SLICE_ROWS = 50;
+const SNAPSHOT_SLICE_MIN_ROWS = 10;
+const SNAPSHOT_SLICE_SLOW_MS = 100;
 
 /**
  * The same snapshot, written a slice at a time with the event loop let go in
@@ -572,8 +580,11 @@ const SNAPSHOT_SLICE_ROWS = 250;
  */
 async function snapshotHistoryInSlices({
   sliceRows = SNAPSHOT_SLICE_ROWS,
+  minSliceRows = Math.min(SNAPSHOT_SLICE_MIN_ROWS, sliceRows),
+  slowSliceMs = SNAPSHOT_SLICE_SLOW_MS,
   measure = fn => fn(),
   yieldToLoop = () => new Promise(resolve => setImmediate(resolve)),
+  clock = () => performance.now(),
 } = {}) {
   if (!db || connectionHistory.size === 0) return 0;
   const startedAt = Date.now();
@@ -585,12 +596,18 @@ async function snapshotHistoryInSlices({
   lastSnapshotAt = startedAt;
   if (!pending.length) return 0;
   let written = 0;
-  for (let offset = 0; offset < pending.length; offset += sliceRows) {
+  let rows = sliceRows;
+  for (let offset = 0; offset < pending.length;) {
     // Closed or restored while this was waiting: the rest belongs to whatever
     // database is open next, which reloads the cache from its own rows.
     if (!db) break;
-    written += measure(() => appendHistoryLogs(pending.slice(offset, offset + sliceRows)));
-    if (offset + sliceRows < pending.length) await yieldToLoop();
+    const slice = pending.slice(offset, offset + rows);
+    const started = clock();
+    written += measure(() => appendHistoryLogs(slice));
+    offset += slice.length;
+    // The disk is busy with something else: hold the thread for less at a time.
+    if (clock() - started > slowSliceMs) rows = Math.max(minSliceRows, Math.floor(rows / 2));
+    if (offset < pending.length) await yieldToLoop();
   }
   logger.info(`[history] Snapshot ${written}/${connectionHistory.size} entries to SQLite`);
   return written;

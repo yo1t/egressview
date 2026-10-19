@@ -1354,6 +1354,25 @@ describe('snapshotHistory', () => {
     assert.equal(await history.snapshotHistoryInSlices({ yieldToLoop: async () => {} }), 0);
   });
 
+  it('分けて書くsnapshotは、遅かった小分けの後は行数を半分にし、下限で止める', async () => {
+    // 2026-10-15 to 10-17: 250 rows took 400-800 ms while the nightly backup or
+    // the integrity check was reading the disk.
+    const now = Date.now();
+    for (let i = 0; i < 40; i += 1) cache(`10.5.6.${i}`, now);
+    const slices = [];
+    let t = 0;
+    const written = await history.snapshotHistoryInSlices({
+      sliceRows: 16,
+      minSliceRows: 4,
+      slowSliceMs: 100,
+      measure: fn => { const n = fn(); slices.push(n); t += slices.length <= 3 ? 150 : 5; return n; },
+      clock: () => t,
+      yieldToLoop: async () => {},
+    });
+    assert.equal(written, 40);
+    assert.deepEqual(slices, [16, 8, 4, 4, 4, 4], '遅い間は16→8→4、下限4のまま速くなっても増やさない');
+  });
+
   it('起動直後のsnapshotは、DBから読んだ分を書き戻さない', () => {
     // loadIntoMemory marks everything as already persisted; without that the
     // first snapshot after startup rewrites the whole cache for nothing.
