@@ -2890,9 +2890,14 @@ public sealed class FlowRow(RecentFlow value, bool spansTime = true, DateTimeOff
     /// Empty rather than a second word for finished flows: a column where
     /// most rows say nothing reads as a flag, and one where every row says
     /// something reads as noise.
-    public string StateText { get; } = spansTime && value.EndedAt is null && readAt - value.LastSeen <= ActiveWindow
-        ? LocalizationManager.Text("StillActive")
-        : string.Empty;
+    public string StateText { get; } = spansTime && value.BytesSent == 0 && value.BytesReceived == 0
+        // A connection attempt that never opened (P3-191): kept with no bytes
+        // either way, which nothing else is -- traffic seen by ETW always
+        // carries its size, and a snapshot row carries none at all.
+        ? LocalizationManager.Text("ConnectFailed")
+        : spansTime && value.EndedAt is null && readAt - value.LastSeen <= ActiveWindow
+            ? LocalizationManager.Text("StillActive")
+            : string.Empty;
 
     /// Identifies the same row across refreshes so the list can be updated in
     /// place. Rebuilding it wholesale throws away the selection and the scroll

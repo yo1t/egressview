@@ -12,11 +12,13 @@ internal sealed class DeliveryController : IDisposable
     private readonly object stateGate = new();
     private DeliveryRuntimeStatus status = new("idle");
 
-    internal DeliveryController(ObservationStore store, WindowsCredentialStore credentials, DeliverySender? sender = null)
+    internal DeliveryController(ObservationStore store, WindowsCredentialStore credentials, DeliverySender? sender = null,
+        InboundProbeOutbox? inboundProbes = null)
     {
         this.store = store;
         this.credentials = credentials;
         this.sender = sender ?? new DeliverySender();
+        this.sender.InboundProbes ??= inboundProbes;
     }
 
     internal DeliveryRuntimeStatus Status { get { lock (stateGate) return status; } }

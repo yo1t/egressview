@@ -6,12 +6,13 @@ public sealed record AgentHubCapabilities(
     int? MaxBodyBytes = null,
     int? RequestsPerMinute = null,
     IReadOnlyList<string>? Compression = null,
-    IReadOnlyList<string>? ObservationFields = null);
+    IReadOnlyList<string>? ObservationFields = null,
+    bool? InboundProbes = null);
 
 public enum AgentCapabilityOutcomeKind { Agreed, Unknown, Incompatible }
 
 public sealed record AgentCapabilityOutcome(AgentCapabilityOutcomeKind Kind, int SchemaVersion,
-    int BatchSize, bool IncludeRemoteHostname);
+    int BatchSize, bool IncludeRemoteHostname, bool IncludeInboundProbes = false);
 
 public sealed record DeliveryCapabilityStatus(string State, DateTimeOffset? CheckedAt = null,
     int? StatusCode = null, int? SchemaVersion = null, int? BatchSize = null,
@@ -33,6 +34,8 @@ public static class AgentCapabilityNegotiation
         var batchSize = capabilities.MaxObservationsPerBatch is > 0 and < AgentBatchLimit
             ? capabilities.MaxObservationsPerBatch.Value : AgentBatchLimit;
         var hostname = capabilities.ObservationFields?.Contains("remoteHostname", StringComparer.Ordinal) == true;
-        return new(AgentCapabilityOutcomeKind.Agreed, CurrentSchemaVersion, batchSize, hostname);
+        // Only on the Hub's say-so: an older Hub rejects an envelope with a
+        // field it does not know (P3-191).
+        return new(AgentCapabilityOutcomeKind.Agreed, CurrentSchemaVersion, batchSize, hostname, capabilities.InboundProbes == true);
     }
 }

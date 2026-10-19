@@ -39,6 +39,8 @@ macOS版については[こちら](agent-privacy.ja.md)。両者は同じ製品�
 
 `schemaVersion`, `batchId`, `sentAt`, `agent` (`hostName`, `platform`, `osVersion`, `agentVersion`), `observations` (`observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`)
 
+接続できなかった試みも、送受信量0の観測として送られます（LAN内の探索の検知に使います）。Hubが対応を通知したときは、`inboundProbes` も送られます。このPCの閉じたポートへLAN内の機器から接続が来たときの、送り元・2分ごとの集計です（`windowStart`、`windowSeconds`、`localAddress`、`sourceAddress`、`networkProtocol`、`distinctPorts`、`packets`、`samplePorts`）。通信内容は含みません。
+
 `remoteHostname` は、Hubが対応を通知したときだけ追加されます。認証情報はBearer tokenとして、そのHubへ送られます。
 
 この一覧は、エージェントが登録前に画面へ表示するものと同じです。**内容を読んだことを確認しない限り、登録は開始できません。**
