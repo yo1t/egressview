@@ -56,6 +56,32 @@ describe('LAN scan detection', () => {
     assert.equal(finding.localAddress, '192.168.1.50', 'そのAgentの直近の、送信元が分かる接続のアドレス');
   });
 
+  it('送信元を補うときは、探した先と同じ種類（IPv4/IPv6）のアドレスを優先する', () => {
+    // 2026-10-21: an IPv4 sweep was named by the Mac's global IPv6 address,
+    // its latest connection, instead of its LAN address.
+    const db = database();
+    observe(db, { processName: 'Safari', localAddress: '192.168.1.50', remoteAddress: '192.168.1.9', at: from - 120_000 });
+    observe(db, { processName: 'Safari', localAddress: '2001:db8::50', remoteAddress: '2001:db8::1', at: from - 60_000 });
+    for (let i = 1; i <= 40; i += 1) {
+      observe(db, { processName: 'curl', localAddress: '0.0.0.0', remoteAddress: `192.168.1.${i}`, at: from + i * 1000 });
+    }
+    for (let i = 1; i <= 12; i += 1) {
+      observe(db, { processName: 'nc', localAddress: '::', remoteAddress: 'fe80::1', remotePort: 20 + i, at: from + i });
+    }
+    const byKind = Object.fromEntries(findLanScans(db, { from }).map(f => [f.kind, f]));
+    assert.equal(byKind.sweep.localAddress, '192.168.1.50', 'IPv4の掃引にはIPv4');
+    assert.equal(byKind['port-probe'].localAddress, '2001:db8::50', 'IPv6の相手にはIPv6');
+  });
+
+  it('同じ種類が無ければ、もう一方の種類を使う', () => {
+    const db = database();
+    observe(db, { processName: 'Safari', localAddress: '2001:db8::50', remoteAddress: '2001:db8::1', at: from - 60_000 });
+    for (let i = 1; i <= 40; i += 1) {
+      observe(db, { processName: 'curl', localAddress: '0.0.0.0', remoteAddress: `192.168.1.${i}`, at: from + i * 1000 });
+    }
+    assert.equal(findLanScans(db, { from })[0].localAddress, '2001:db8::50');
+  });
+
   it('送信元が分かる接続が混じっていれば、そのアドレスを使い、無ければnull', () => {
     const db = database();
     for (let i = 1; i <= 40; i += 1) {
