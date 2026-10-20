@@ -28,6 +28,13 @@ const SAMPLE_SIZE = 5;
 // The Agent records a connection that failed before it had a source address
 // with an unspecified one (Mac #829), and a sweep is mostly such attempts.
 const KNOWN_LOCAL_SQL = "o.localAddress IS NOT NULL AND o.localAddress NOT IN ('', '0.0.0.0', '::')";
+// The source is named in the same family as the addresses scanned: a sweep of
+// 192.168.x.x named by the computer's global IPv6 address (2026-10-21) is
+// correct but useless for finding the device on the LAN.
+const KNOWN_LOCAL_V4_SQL = `${KNOWN_LOCAL_SQL} AND instr(o.localAddress, ':') = 0`;
+const KNOWN_LOCAL_V6_SQL = `${KNOWN_LOCAL_SQL} AND instr(o.localAddress, ':') > 0`;
+// How far back to look for the computer's address when the window has none.
+const LOCAL_ADDRESS_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 // LAN destinations only: RFC 1918, IPv6 link-local and unique local. Multicast
 // and broadcast are discovery by design (mDNS, SSDP) and are left out.
@@ -65,18 +72,33 @@ function findLanScans(db, {
   // When every attempt in the window failed before getting a source address,
   // the computer's address comes from its latest connection that had one, so
   // the detection log names an address rather than 0.0.0.0.
-  const latestKnownLocal = db.prepare(`
+  const latestKnownLocal = family => db.prepare(`
     SELECT o.localAddress FROM agent_observations o
-    WHERE o.agentId = ? AND o.lastObservedAt <= ? AND ${KNOWN_LOCAL_SQL}
+    WHERE o.agentId = ? AND o.lastObservedAt <= ? AND o.lastObservedAt >= ?
+      AND ${family === 6 ? KNOWN_LOCAL_V6_SQL : KNOWN_LOCAL_V4_SQL}
     ORDER BY o.lastObservedAt DESC LIMIT 1
   `);
-  const localAddressFor = row => row.localAddress ?? latestKnownLocal.get(row.agentId, to)?.localAddress ?? null;
+  const latest = { 4: latestKnownLocal(4), 6: latestKnownLocal(6) };
+  const latestFor = (agentId, family) =>
+    latest[family].get(agentId, to, to - LOCAL_ADDRESS_LOOKBACK_MS)?.localAddress ?? null;
+  // Same family from the window, then from the computer's recent connections;
+  // only then the other family, and nothing rather than a placeholder.
+  const localAddressFor = (row, family) => {
+    const other = family === 6 ? 4 : 6;
+    const inWindow = { 4: row.localV4, 6: row.localV6 };
+    return inWindow[family] ?? latestFor(row.agentId, family)
+      ?? inWindow[other] ?? latestFor(row.agentId, other) ?? null;
+  };
+  const familyOf = address => (String(address || '').includes(':') ? 6 : 4);
+  const localColumns = `
+           MAX(CASE WHEN ${KNOWN_LOCAL_V4_SQL} THEN o.localAddress END) AS localV4,
+           MAX(CASE WHEN ${KNOWN_LOCAL_V6_SQL} THEN o.localAddress END) AS localV6`;
 
   const sweeps = db.prepare(`
     SELECT o.agentId, a.hostName, o.processName,
            COUNT(DISTINCT o.remoteAddress) AS addresses,
            COUNT(DISTINCT o.remotePort) AS ports,
-           MAX(CASE WHEN ${KNOWN_LOCAL_SQL} THEN o.localAddress END) AS localAddress
+           SUM(instr(o.remoteAddress, ':') > 0) * 2 > COUNT(*) AS mostlyV6,${localColumns}
     FROM agent_observations o JOIN agents a ON a.agentId = o.agentId
     WHERE o.firstObservedAt >= ? AND o.firstObservedAt < ? AND ${LAN_DESTINATION_SQL}
     GROUP BY o.agentId, o.processName
@@ -94,7 +116,7 @@ function findLanScans(db, {
       agentId: row.agentId,
       hostName: row.hostName,
       processName: row.processName,
-      localAddress: localAddressFor(row),
+      localAddress: localAddressFor(row, row.mostlyV6 ? 6 : 4),
       windowStart: from,
       windowMs,
       addresses: row.addresses,
@@ -106,8 +128,7 @@ function findLanScans(db, {
 
   const probes = db.prepare(`
     SELECT o.agentId, a.hostName, o.processName, o.remoteAddress AS target,
-           COUNT(DISTINCT o.remotePort) AS ports,
-           MAX(CASE WHEN ${KNOWN_LOCAL_SQL} THEN o.localAddress END) AS localAddress
+           COUNT(DISTINCT o.remotePort) AS ports,${localColumns}
     FROM agent_observations o JOIN agents a ON a.agentId = o.agentId
     WHERE o.firstObservedAt >= ? AND o.firstObservedAt < ? AND o.remotePort < ?
       AND ${LAN_DESTINATION_SQL}
@@ -126,7 +147,7 @@ function findLanScans(db, {
       agentId: row.agentId,
       hostName: row.hostName,
       processName: row.processName,
-      localAddress: localAddressFor(row),
+      localAddress: localAddressFor(row, familyOf(row.target)),
       windowStart: from,
       windowMs,
       addresses: 1,
@@ -153,11 +174,60 @@ function windowsToCheck({ now, lastChecked, windowMs = WINDOW_MS, settleMs = 60 
 }
 
 /** One notification per program and kind within `cooldownMs`. */
-function createLanScanCooldown({ cooldownMs = 60 * 60 * 1000 } = {}) {
+const LAN_SCAN_COOLDOWN_MS = 60 * 60 * 1000;
+
+function lanScanCooldownKey(finding) {
+  return `${finding.agentId}|${finding.processName}|${finding.kind}|${finding.target || ''}`;
+}
+
+/** A LAN sender probing an Agent's computer: one notification per this key an hour. */
+function inboundProbeCooldownKey({ agentId, sourceAddress, networkProtocol }) {
+  return `${agentId}|${sourceAddress}|${networkProtocol}`;
+}
+
+/**
+ * The hourly limits are kept in memory, so a restart -- every deploy -- used
+ * to forget them and send the same notification again. The detection log
+ * keeps each notification; this turns its recent lan_scan rows back into
+ * cooldown entries. Rows written before the log carried agentId are skipped.
+ *
+ * @returns {{ programs: Array<{key, at}>, probed: Array<{key, at}> }}
+ */
+function cooldownSeedsFromLog(rows) {
+  const programs = [];
+  const probed = [];
+  for (const row of rows || []) {
+    let tag;
+    try { tag = JSON.parse(row.threatTag || ''); } catch { continue; }
+    if (!tag || typeof tag !== 'object' || !tag.agentId) continue;
+    if (tag.kind === 'probed') {
+      if (!row.src || !tag.protocol) continue;
+      probed.push({
+        key: inboundProbeCooldownKey({ agentId: tag.agentId, sourceAddress: row.src, networkProtocol: tag.protocol }),
+        at: row.detectedAt,
+      });
+    } else if (tag.kind === 'sweep' || tag.kind === 'port-probe') {
+      programs.push({
+        key: lanScanCooldownKey({
+          agentId: tag.agentId, processName: row.threatSource, kind: tag.kind, target: tag.target,
+        }),
+        at: row.detectedAt,
+      });
+    }
+  }
+  return { programs, probed };
+}
+
+function createLanScanCooldown({ cooldownMs = LAN_SCAN_COOLDOWN_MS } = {}) {
   const last = new Map();
   return {
+    /** Restores an entry from the detection log; never moves one back in time. */
+    seed(key, at) {
+      if (!(at > (last.get(key) ?? -Infinity))) return;
+      last.set(key, at);
+    },
     admit(finding, now = Date.now()) {
-      const key = `${finding.agentId}|${finding.processName}|${finding.kind}|${finding.target || ''}`;
+      const key = lanScanCooldownKey(finding);
       const previous = last.get(key);
       if (previous != null && now - previous < cooldownMs) return false;
       last.set(key, now);
@@ -169,5 +239,6 @@ function createLanScanCooldown({ cooldownMs = 60 * 60 * 1000 } = {}) {
 
 module.exports = {
   findLanScans, windowsToCheck, windowStartFor, createLanScanCooldown,
+  lanScanCooldownKey, inboundProbeCooldownKey, cooldownSeedsFromLog, LAN_SCAN_COOLDOWN_MS,
   WINDOW_MS, SWEEP_MIN_ADDRESSES, PORT_PROBE_MIN_PORTS, EPHEMERAL_PORT_FLOOR,
 };

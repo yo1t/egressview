@@ -5,6 +5,7 @@ const { describe, it } = require('node:test');
 const Database = require('better-sqlite3');
 const {
   findLanScans, windowsToCheck, createLanScanCooldown, WINDOW_MS,
+  cooldownSeedsFromLog, lanScanCooldownKey, inboundProbeCooldownKey,
 } = require('../../src/lan-scan-detector');
 
 // P3-191. Thresholds come from seven days of production: at most 17 LAN
@@ -53,6 +54,32 @@ describe('LAN scan detection', () => {
     const [finding] = findLanScans(db, { from });
     assert.equal(finding.kind, 'sweep');
     assert.equal(finding.localAddress, '192.168.1.50', 'そのAgentの直近の、送信元が分かる接続のアドレス');
+  });
+
+  it('送信元を補うときは、探した先と同じ種類（IPv4/IPv6）のアドレスを優先する', () => {
+    // 2026-10-21: an IPv4 sweep was named by the Mac's global IPv6 address,
+    // its latest connection, instead of its LAN address.
+    const db = database();
+    observe(db, { processName: 'Safari', localAddress: '192.168.1.50', remoteAddress: '192.168.1.9', at: from - 120_000 });
+    observe(db, { processName: 'Safari', localAddress: '2001:db8::50', remoteAddress: '2001:db8::1', at: from - 60_000 });
+    for (let i = 1; i <= 40; i += 1) {
+      observe(db, { processName: 'curl', localAddress: '0.0.0.0', remoteAddress: `192.168.1.${i}`, at: from + i * 1000 });
+    }
+    for (let i = 1; i <= 12; i += 1) {
+      observe(db, { processName: 'nc', localAddress: '::', remoteAddress: 'fe80::1', remotePort: 20 + i, at: from + i });
+    }
+    const byKind = Object.fromEntries(findLanScans(db, { from }).map(f => [f.kind, f]));
+    assert.equal(byKind.sweep.localAddress, '192.168.1.50', 'IPv4の掃引にはIPv4');
+    assert.equal(byKind['port-probe'].localAddress, '2001:db8::50', 'IPv6の相手にはIPv6');
+  });
+
+  it('同じ種類が無ければ、もう一方の種類を使う', () => {
+    const db = database();
+    observe(db, { processName: 'Safari', localAddress: '2001:db8::50', remoteAddress: '2001:db8::1', at: from - 60_000 });
+    for (let i = 1; i <= 40; i += 1) {
+      observe(db, { processName: 'curl', localAddress: '0.0.0.0', remoteAddress: `192.168.1.${i}`, at: from + i * 1000 });
+    }
+    assert.equal(findLanScans(db, { from })[0].localAddress, '2001:db8::50');
   });
 
   it('送信元が分かる接続が混じっていれば、そのアドレスを使い、無ければnull', () => {
@@ -113,5 +140,49 @@ describe('LAN scan detection', () => {
     assert.equal(cooldown.admit(finding, 30 * 60 * 1000), false);
     assert.equal(cooldown.admit({ ...finding, kind: 'port-probe', target: '192.168.1.1' }, 30 * 60 * 1000), true);
     assert.equal(cooldown.admit(finding, 61 * 60 * 1000), true);
+  });
+
+  describe('再起動をまたぐ1時間の制限', () => {
+    const now = 1_800_000_000_000;
+    const rows = [
+      { src: '192.168.1.50', threatSource: 'curl', detectedAt: now - 10 * 60_000,
+        threatTag: JSON.stringify({ kind: 'sweep', agentId: 'a1', target: null }) },
+      { src: '192.168.1.50', threatSource: 'nc', detectedAt: now - 5 * 60_000,
+        threatTag: JSON.stringify({ kind: 'port-probe', agentId: 'a1', target: '192.168.1.1' }) },
+      { src: '10.0.0.5', threatSource: null, detectedAt: now - 3 * 60_000,
+        threatTag: JSON.stringify({ kind: 'probed', agentId: 'a1', protocol: 'tcp' }) },
+      // Written before the log carried agentId, or unreadable: skipped.
+      { src: '192.168.1.50', threatSource: 'curl', detectedAt: now - 2 * 60_000,
+        threatTag: JSON.stringify({ kind: 'sweep', target: null }) },
+      { src: '192.168.1.50', threatSource: 'curl', detectedAt: now - 60_000, threatTag: 'not json' },
+    ];
+
+    it('検出ログの行から、プログラムと探られた側の制限を作り直す', () => {
+      const { programs, probed } = cooldownSeedsFromLog(rows);
+      assert.deepEqual(programs, [
+        { key: lanScanCooldownKey({ agentId: 'a1', processName: 'curl', kind: 'sweep' }), at: now - 10 * 60_000 },
+        { key: lanScanCooldownKey({ agentId: 'a1', processName: 'nc', kind: 'port-probe', target: '192.168.1.1' }), at: now - 5 * 60_000 },
+      ]);
+      assert.deepEqual(probed, [
+        { key: inboundProbeCooldownKey({ agentId: 'a1', sourceAddress: '10.0.0.5', networkProtocol: 'tcp' }), at: now - 3 * 60_000 },
+      ]);
+    });
+
+    it('作り直した制限があれば、再起動直後の同じ掃引は1時間以内に通知しない', () => {
+      const cooldown = createLanScanCooldown();
+      for (const { key, at } of cooldownSeedsFromLog(rows).programs) cooldown.seed(key, at);
+      const sweep = { agentId: 'a1', processName: 'curl', kind: 'sweep', target: null };
+      assert.equal(cooldown.admit(sweep, now), false, '10分前に通知済み');
+      assert.equal(cooldown.admit({ ...sweep, processName: 'python3' }, now), true, '別のプログラムは通知する');
+      assert.equal(cooldown.admit(sweep, now + 51 * 60_000), true, '1時間を過ぎれば通知する');
+    });
+
+    it('作り直しは、新しい記録を古い時刻で上書きしない', () => {
+      const cooldown = createLanScanCooldown();
+      const sweep = { agentId: 'a1', processName: 'curl', kind: 'sweep', target: null };
+      assert.equal(cooldown.admit(sweep, now), true);
+      cooldown.seed(lanScanCooldownKey(sweep), now - 59 * 60_000);
+      assert.equal(cooldown.admit(sweep, now + 2 * 60_000), false, '直前の通知が効いたまま');
+    });
   });
 });

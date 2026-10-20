@@ -165,7 +165,7 @@ describe('LAN内の探索の通知', () => {
     assert.equal(entries[0].srcDnsName, 'JAMESBOND');
     assert.equal(entries[0].threat.source, 'chrome');
     assert.deepEqual(JSON.parse(entries[0].threat.tag), {
-      kind: 'sweep', protocol: null, host: 'JAMESBOND', addresses: 120, ports: 3, target: null,
+      kind: 'sweep', agentId: 'a1', protocol: null, host: 'JAMESBOND', addresses: 120, ports: 3, target: null,
       windowMs: 120000, sample: ['192.168.1.1', '192.168.1.2'],
     });
   });

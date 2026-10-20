@@ -288,6 +288,8 @@ const _LAN_SCAN_MSG = {
 function lanScanSummary(finding) {
   return JSON.stringify({
     kind: finding.kind,
+    // Read back at startup to carry the hourly limit across a restart.
+    agentId: finding.agentId || null,
     protocol: finding.networkProtocol || null,
     host: finding.hostName || null,
     addresses: finding.addresses,
