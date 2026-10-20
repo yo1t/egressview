@@ -153,11 +153,60 @@ function windowsToCheck({ now, lastChecked, windowMs = WINDOW_MS, settleMs = 60 
 }
 
 /** One notification per program and kind within `cooldownMs`. */
-function createLanScanCooldown({ cooldownMs = 60 * 60 * 1000 } = {}) {
+const LAN_SCAN_COOLDOWN_MS = 60 * 60 * 1000;
+
+function lanScanCooldownKey(finding) {
+  return `${finding.agentId}|${finding.processName}|${finding.kind}|${finding.target || ''}`;
+}
+
+/** A LAN sender probing an Agent's computer: one notification per this key an hour. */
+function inboundProbeCooldownKey({ agentId, sourceAddress, networkProtocol }) {
+  return `${agentId}|${sourceAddress}|${networkProtocol}`;
+}
+
+/**
+ * The hourly limits are kept in memory, so a restart -- every deploy -- used
+ * to forget them and send the same notification again. The detection log
+ * keeps each notification; this turns its recent lan_scan rows back into
+ * cooldown entries. Rows written before the log carried agentId are skipped.
+ *
+ * @returns {{ programs: Array<{key, at}>, probed: Array<{key, at}> }}
+ */
+function cooldownSeedsFromLog(rows) {
+  const programs = [];
+  const probed = [];
+  for (const row of rows || []) {
+    let tag;
+    try { tag = JSON.parse(row.threatTag || ''); } catch { continue; }
+    if (!tag || typeof tag !== 'object' || !tag.agentId) continue;
+    if (tag.kind === 'probed') {
+      if (!row.src || !tag.protocol) continue;
+      probed.push({
+        key: inboundProbeCooldownKey({ agentId: tag.agentId, sourceAddress: row.src, networkProtocol: tag.protocol }),
+        at: row.detectedAt,
+      });
+    } else if (tag.kind === 'sweep' || tag.kind === 'port-probe') {
+      programs.push({
+        key: lanScanCooldownKey({
+          agentId: tag.agentId, processName: row.threatSource, kind: tag.kind, target: tag.target,
+        }),
+        at: row.detectedAt,
+      });
+    }
+  }
+  return { programs, probed };
+}
+
+function createLanScanCooldown({ cooldownMs = LAN_SCAN_COOLDOWN_MS } = {}) {
   const last = new Map();
   return {
+    /** Restores an entry from the detection log; never moves one back in time. */
+    seed(key, at) {
+      if (!(at > (last.get(key) ?? -Infinity))) return;
+      last.set(key, at);
+    },
     admit(finding, now = Date.now()) {
-      const key = `${finding.agentId}|${finding.processName}|${finding.kind}|${finding.target || ''}`;
+      const key = lanScanCooldownKey(finding);
       const previous = last.get(key);
       if (previous != null && now - previous < cooldownMs) return false;
       last.set(key, now);
@@ -169,5 +218,6 @@ function createLanScanCooldown({ cooldownMs = 60 * 60 * 1000 } = {}) {
 
 module.exports = {
   findLanScans, windowsToCheck, windowStartFor, createLanScanCooldown,
+  lanScanCooldownKey, inboundProbeCooldownKey, cooldownSeedsFromLog, LAN_SCAN_COOLDOWN_MS,
   WINDOW_MS, SWEEP_MIN_ADDRESSES, PORT_PROBE_MIN_PORTS, EPHEMERAL_PORT_FLOOR,
 };

@@ -5,6 +5,7 @@ const { describe, it } = require('node:test');
 const Database = require('better-sqlite3');
 const {
   findLanScans, windowsToCheck, createLanScanCooldown, WINDOW_MS,
+  cooldownSeedsFromLog, lanScanCooldownKey, inboundProbeCooldownKey,
 } = require('../../src/lan-scan-detector');
 
 // P3-191. Thresholds come from seven days of production: at most 17 LAN
@@ -113,5 +114,49 @@ describe('LAN scan detection', () => {
     assert.equal(cooldown.admit(finding, 30 * 60 * 1000), false);
     assert.equal(cooldown.admit({ ...finding, kind: 'port-probe', target: '192.168.1.1' }, 30 * 60 * 1000), true);
     assert.equal(cooldown.admit(finding, 61 * 60 * 1000), true);
+  });
+
+  describe('再起動をまたぐ1時間の制限', () => {
+    const now = 1_800_000_000_000;
+    const rows = [
+      { src: '192.168.1.50', threatSource: 'curl', detectedAt: now - 10 * 60_000,
+        threatTag: JSON.stringify({ kind: 'sweep', agentId: 'a1', target: null }) },
+      { src: '192.168.1.50', threatSource: 'nc', detectedAt: now - 5 * 60_000,
+        threatTag: JSON.stringify({ kind: 'port-probe', agentId: 'a1', target: '192.168.1.1' }) },
+      { src: '10.0.0.5', threatSource: null, detectedAt: now - 3 * 60_000,
+        threatTag: JSON.stringify({ kind: 'probed', agentId: 'a1', protocol: 'tcp' }) },
+      // Written before the log carried agentId, or unreadable: skipped.
+      { src: '192.168.1.50', threatSource: 'curl', detectedAt: now - 2 * 60_000,
+        threatTag: JSON.stringify({ kind: 'sweep', target: null }) },
+      { src: '192.168.1.50', threatSource: 'curl', detectedAt: now - 60_000, threatTag: 'not json' },
+    ];
+
+    it('検出ログの行から、プログラムと探られた側の制限を作り直す', () => {
+      const { programs, probed } = cooldownSeedsFromLog(rows);
+      assert.deepEqual(programs, [
+        { key: lanScanCooldownKey({ agentId: 'a1', processName: 'curl', kind: 'sweep' }), at: now - 10 * 60_000 },
+        { key: lanScanCooldownKey({ agentId: 'a1', processName: 'nc', kind: 'port-probe', target: '192.168.1.1' }), at: now - 5 * 60_000 },
+      ]);
+      assert.deepEqual(probed, [
+        { key: inboundProbeCooldownKey({ agentId: 'a1', sourceAddress: '10.0.0.5', networkProtocol: 'tcp' }), at: now - 3 * 60_000 },
+      ]);
+    });
+
+    it('作り直した制限があれば、再起動直後の同じ掃引は1時間以内に通知しない', () => {
+      const cooldown = createLanScanCooldown();
+      for (const { key, at } of cooldownSeedsFromLog(rows).programs) cooldown.seed(key, at);
+      const sweep = { agentId: 'a1', processName: 'curl', kind: 'sweep', target: null };
+      assert.equal(cooldown.admit(sweep, now), false, '10分前に通知済み');
+      assert.equal(cooldown.admit({ ...sweep, processName: 'python3' }, now), true, '別のプログラムは通知する');
+      assert.equal(cooldown.admit(sweep, now + 51 * 60_000), true, '1時間を過ぎれば通知する');
+    });
+
+    it('作り直しは、新しい記録を古い時刻で上書きしない', () => {
+      const cooldown = createLanScanCooldown();
+      const sweep = { agentId: 'a1', processName: 'curl', kind: 'sweep', target: null };
+      assert.equal(cooldown.admit(sweep, now), true);
+      cooldown.seed(lanScanCooldownKey(sweep), now - 59 * 60_000);
+      assert.equal(cooldown.admit(sweep, now + 2 * 60_000), false, '直前の通知が効いたまま');
+    });
   });
 });

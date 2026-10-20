@@ -276,6 +276,17 @@ describe('logNotification + queryNotificationLog', () => {
     assert.ok(row.detectedAt > 0, 'detectedAt should be a positive timestamp');
   });
 
+  it('getRecentNotificationsは、その種類の直近の行だけを古い順に返す（再起動で通知の制限を引き継ぐため）', () => {
+    const since = Date.now() - 1000;
+    history.logNotification(makeNotifEntry({ threat: { source: 'curl', tag: '{"kind":"sweep"}' } }), 'lan_scan', true);
+    history.logNotification(makeNotifEntry(), 'threat', true);
+    history.logNotification(makeNotifEntry({ threat: { source: 'nc', tag: '{"kind":"port-probe"}' } }), 'lan_scan', false);
+    const rows = history.getRecentNotifications('lan_scan', since);
+    assert.deepEqual(rows.map(r => r.threatSource), ['curl', 'nc']);
+    assert.ok(rows.every(r => r.detectedAt >= since && 'threatTag' in r && 'src' in r));
+    assert.deepEqual(history.getRecentNotifications('lan_scan', Date.now() + 60_000), []);
+  });
+
   it('stores slackSent=true correctly', () => {
     history.logNotification(makeNotifEntry(), 'threat', true);
     const rows = history.queryNotificationLog(null, null);

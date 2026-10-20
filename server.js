@@ -31,7 +31,9 @@ const manualThreatModule = require('./src/manual-threat-lookup');
 const { manualThreatLookup } = manualThreatModule;
 const aiProviderModule = require('./src/ai-provider');
 const { runDatabaseCheck, msUntilNextHour } = require('./src/db-background-check');
-const { windowsToCheck, createLanScanCooldown } = require('./src/lan-scan-detector');
+const {
+  windowsToCheck, createLanScanCooldown, inboundProbeCooldownKey, cooldownSeedsFromLog, LAN_SCAN_COOLDOWN_MS,
+} = require('./src/lan-scan-detector');
 const { PROBE_NOTIFY_MIN_PORTS } = require('./src/agent-inbound-probes');
 const { aiProvider }  = aiProviderModule;
 const { createAiNotificationService } = require('./src/ai-notification-service');
@@ -450,12 +452,39 @@ const ingestAuditSummary = createIngestAuditSummary({ append: event => authAudit
 // or above PROBE_NOTIFY_MIN_PORTS are reported, once an hour per computer,
 // sender and protocol.
 const inboundProbeCooldown = new Map();
+// A program on an Agent's computer looking around the LAN: one notification
+// per program and kind an hour (the check itself runs after startup below).
+const lanScanCooldown = createLanScanCooldown();
+// Both hourly limits live in memory; the detection log carries them across a
+// restart, so a deploy does not send the same notification again. Read once,
+// on first use, when the history database is open.
+let lanScanCooldownsRestored = false;
+function restoreLanScanCooldowns() {
+  if (lanScanCooldownsRestored) return;
+  try {
+    const rows = history.getRecentNotifications('lan_scan', Date.now() - LAN_SCAN_COOLDOWN_MS);
+    if (rows == null) return;
+    lanScanCooldownsRestored = true;
+    const { programs, probed } = cooldownSeedsFromLog(rows);
+    for (const { key, at } of programs) lanScanCooldown.seed(key, at);
+    for (const { key, at } of probed) {
+      if (!(inboundProbeCooldown.get(key) >= at)) inboundProbeCooldown.set(key, at);
+    }
+    if (programs.length || probed.length) {
+      logger.info(`[lan-scan] restored ${programs.length + probed.length} hourly limit(s) from the detection log`);
+    }
+  } catch (error) {
+    lanScanCooldownsRestored = true;
+    logger.warn('[lan-scan] could not restore hourly limits:', error.message);
+  }
+}
 function reportInboundProbes({ agentId, hostName, probes }) {
+  restoreLanScanCooldowns();
   const now = Date.now();
-  for (const [key, at] of inboundProbeCooldown) if (now - at >= 60 * 60 * 1000) inboundProbeCooldown.delete(key);
+  for (const [key, at] of inboundProbeCooldown) if (now - at >= LAN_SCAN_COOLDOWN_MS) inboundProbeCooldown.delete(key);
   for (const probe of probes) {
     if (probe.distinctPorts < PROBE_NOTIFY_MIN_PORTS) continue;
-    const key = `${agentId}|${probe.sourceAddress}|${probe.networkProtocol}`;
+    const key = inboundProbeCooldownKey({ agentId, ...probe });
     if (inboundProbeCooldown.has(key)) continue;
     inboundProbeCooldown.set(key, now);
     logger.warn(`[lan-scan] ${probe.sourceAddress} probed ${hostName} (${probe.localAddress}): `
@@ -834,8 +863,8 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
   // A program on an Agent's computer looking around the LAN (P3-191): each
   // finished two-minute window is read once, on the read thread, a minute
   // after it ends so the Agents' uploads have landed. One notification per
-  // program and kind an hour.
-  const lanScanCooldown = createLanScanCooldown();
+  // program and kind an hour (lanScanCooldown above).
+  restoreLanScanCooldowns();
   let lanScanChecked = null;
   let lanScanRunning = false;
   setInterval(() => {
