@@ -730,6 +730,19 @@ function logNotification(entry, type, slackSent) {
 }
 
 
+/**
+ * Notification-log rows of one type since `since` (ms), oldest first; null
+ * while no database is open, so a caller can tell "none" from "not yet".
+ */
+function getRecentNotifications(type, since) {
+  if (!db) return null;
+  return db.prepare(`
+    SELECT src, threatSource, threatTag, detectedAt FROM notification_log
+    WHERE detectedAt >= ? AND type = ?
+    ORDER BY detectedAt
+  `).all(since, type);
+}
+
 function getKnownMacs() {
   if (!db) return new Set();
   return new Set(
@@ -912,6 +925,7 @@ module.exports = {
   monitoringGaps,
   prunePollWindows,
   logNotification,
+  getRecentNotifications,
   queryNotificationLog,
   queryNewNodes,
   setRetentionDays,
