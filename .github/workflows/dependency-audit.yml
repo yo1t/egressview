@@ -1,0 +1,82 @@
+name: Daily dependency audit
+
+# The production-dependency audit otherwise runs only with CI: on a pull
+# request, a push to main, or weekly. On 2026-10-21 two new advisories
+# (follow-redirects, hono) were found only because a pull request happened to
+# run CI, and Dependabot raised no alert for either. Without a pull request the
+# Hub could have run a vulnerable version for days with nobody told.
+#
+# This runs the same audit every day. A failure opens one issue (or comments on
+# the open one), so it is noticed the same day; a pass closes it.
+
+on:
+  schedule:
+    # 22:41 UTC = 07:41 JST, before the day's work.
+    - cron: '41 22 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: dependency-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Production dependency audit
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    env:
+      ISSUE_TITLE: 'Dependency audit: production dependencies have advisories'
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # npm audit reads package-lock.json; nothing needs installing.
+      - name: Audit production dependencies
+        id: audit
+        run: |
+          set +e
+          npm run --silent security:audit > audit.txt 2>&1
+          status=$?
+          cat audit.txt
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Open or update the issue
+        if: steps.audit.outputs.status != '0'
+        run: |
+          {
+            echo "The daily \`npm run security:audit\` (production dependencies, moderate and above) failed on \`main\` at ${GITHUB_SHA}."
+            echo
+            echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo '```'
+            head -c 60000 audit.txt
+            echo '```'
+          } > body.md
+          number=$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number,title \
+            --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file body.md
+          else
+            gh issue create --title "$ISSUE_TITLE" --body-file body.md
+          fi
+          exit 1
+
+      - name: Close the issue once the audit passes
+        if: steps.audit.outputs.status == '0'
+        run: |
+          number=$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number,title \
+            --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue close "$number" --comment "The daily audit passes again on \`main\` at ${GITHUB_SHA}."
+          fi
