@@ -3697,6 +3697,25 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate) Execute($"UPDATE threat_cache_state SET etag={(etag is null ? "etag" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}',source='{Sql(source)}' WHERE id=1");
     }
 
+    /// Every indicator held, as stored, so a partial download can keep the
+    /// share of the feeds it could not read.
+    public IReadOnlyList<ThreatIndicator> ReadThreatIndicators()
+    {
+        lock (gate)
+        {
+            CheckOperation(WinSqlite.Prepare(db, "SELECT kind,value,source,tag,confidence FROM threat_indicators", -1, out var statement, 0));
+            try
+            {
+                var result = new List<ThreatIndicator>();
+                while (WinSqlite.Step(statement) == WinSqlite.Row)
+                    result.Add(new ThreatIndicator(Text(statement, 0), Text(statement, 1),
+                        NullableTextValue(statement, 2), NullableTextValue(statement, 3), Text(statement, 4)));
+                return result;
+            }
+            finally { WinSqlite.Finalize(statement); }
+        }
+    }
+
     public ThreatReport ReadThreatReport(DateTimeOffset from, DateTimeOffset to)
     {
         lock (gate)

@@ -305,7 +305,7 @@ internal sealed class AgentWindowsService : ServiceBase
         var credentialStore = new WindowsCredentialStore();
         using var deliveryController = new DeliveryController(store, credentialStore, inboundProbes: monitoring.InboundProbeOutbox);
         using var enrichmentController = new EnrichmentController(store, credentialStore,
-            Path.Combine(root, "public-threat-feeds.enabled"), new MaxMindCredentialStore(),
+            Path.Combine(root, "public-threat-feeds.enabled"), new MaxMindCredentialStore(), new AbuseChKeyStore(),
             Path.Combine(root, "country", GeoLite2Updater.EditionId + ".mmdb"),
             Path.Combine(root, "country-table.enabled"),
             Path.Combine(root, "geo-lookup-source.txt"));

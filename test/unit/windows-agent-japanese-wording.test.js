@@ -19,6 +19,11 @@ const ENGLISH_ON_PURPOSE = {
   SourceIpwho: 'ipwho.is',
   SourcePublicFeeds: 'abuse.ch',
   AbuseChTerms: 'abuse.ch',
+  AbuseChKeyTitle: 'abuse.ch',
+  AbuseChKeyHint: 'abuse.ch',
+  AbuseChKeyGet: 'auth.abuse.ch',
+  FeedShortfallNeedKey: 'abuse.ch',
+  FeedShortfallKeyRefused: 'abuse.ch',
   // A command to type.
   OllamaNoModels: 'ollama pull',
   // The field names the Hub receives, as the protocol spells them.

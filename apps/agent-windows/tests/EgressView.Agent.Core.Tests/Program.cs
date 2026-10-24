@@ -3821,6 +3821,20 @@ try
                 .Contains("invalid-configuration", StringComparison.Ordinal) && calls == before,
                 "a file far too large to be a GeoIP.conf is refused before the service reads it");
 
+            string? sentKey = "unset";
+            string AskKey(string request) => IpcProtocol.Handle(request, () => "{}", _ => [],
+                setAbuseChKey: key => { sentKey = key; return true; });
+            var keySaved = AskKey(JsonSerializer.Serialize(new { v = 1, op = "set-abuse-ch-key", key = " 0123456789abcdef0123 " })); // pragma: allowlist secret
+            Assert(keySaved.Contains("\"configured\":true", StringComparison.Ordinal) && sentKey == "0123456789abcdef0123" // pragma: allowlist secret
+                   && !keySaved.Contains("0123456789abcdef0123", StringComparison.Ordinal), // pragma: allowlist secret
+                "the abuse.ch key reaches the service trimmed, and the reply never repeats it");
+            sentKey = "unset";
+            Assert(AskKey(JsonSerializer.Serialize(new { v = 1, op = "set-abuse-ch-key", key = "not a key at all" }))
+                       .Contains("invalid-abuse-ch-key", StringComparison.Ordinal) && sentKey == "unset",
+                "something that is not shaped like a key is refused before the service stores it");
+            Assert(AskKey(JsonSerializer.Serialize(new { v = 1, op = "set-abuse-ch-key" })).Contains("\"configured\":false", StringComparison.Ordinal)
+                   && sentKey is null, "sending nothing withdraws the key");
+
             var kinds = new List<string>();
             foreach (var kind in new[] { "geo", "threat", "country", "all", "weather" })
                 IpcProtocol.Handle(JsonSerializer.Serialize(new { v = 1, op = "refresh-enrichment", kind }),
@@ -4465,6 +4479,96 @@ try
                 "a feed that legitimately publishes nothing is not reported as missing");
         }
 
+        // abuse.ch retired the keyless ThreatFox and URLhaus downloads on
+        // 2026-10-22 (410 Gone). The keyed exports, and what a download that
+        // could not read every feed does to the indicators already held.
+        {
+            var urls = ThreatFeedDownloader.Feeds.Select(feed => feed.UrlFor("k1")?.ToString()).ToList(); // pragma: allowlist secret
+            Assert(urls.SequenceEqual([
+                    "https://feodotracker.abuse.ch/downloads/ipblocklist.csv",
+                    "https://threatfox-api.abuse.ch/v2/files/exports/k1/recent.csv",
+                    "https://urlhaus-api.abuse.ch/v2/files/exports/k1/recent.csv",
+                    "https://www.spamhaus.org/drop/drop.txt",
+                ]),
+                "the same four feeds as the Hub and the Mac, the abuse.ch two at their keyed addresses");
+            Assert(ThreatFeedDownloader.Feeds.Where(feed => feed.UrlFor(null) is null).Select(feed => feed.Source)
+                       .SequenceEqual(["threatfox", "urlhaus"])
+                   && ThreatFeedDownloader.Feeds.Count(feed => feed.UrlFor("  ") is null) == 2, // pragma: allowlist secret
+                "without a key, or with only spaces, ThreatFox and URLhaus have no address to fetch");
+            var escaped = ThreatFeedDownloader.Feeds[1].UrlFor("a/b?c")!; // pragma: allowlist secret
+            Assert(escaped.AbsolutePath == "/v2/files/exports/a%2Fb%3Fc/recent.csv" && escaped.Query.Length == 0,
+                "the key is one path segment, never a query or a second segment");
+
+            var header = "# \"first_seen_utc\",\"ioc_id\",\"ioc_value\",\"ioc_type\",\"threat_type\",\"fk_malware\",\"malware_alias\",\"malware_printable\",\"last_seen_utc\",\"confidence_level\",\"is_compromised\",\"reference\",\"tags\",\"anonymous\",\"reporter\"";
+            static string Row(string value, string type, int level = 100, bool compromised = false, string malware = "Remcos") =>
+                $"\"2026-10-24 01:50:00\", \"1\", \"{value}\", \"{type}\", \"botnet_cc\", \"win.x\", \"None\", \"{malware}\", \"\", \"{level}\", \"{(compromised ? "True" : "False")}\", \"None\", \"None\", \"0\", \"r\"";
+            var keyed = ThreatFeedDownloader.Parse(string.Join("\r\n", header,
+                Row("203.0.113.7:4444", "ip:port", malware: "AsyncRAT"),
+                Row("c2.example.org", "domain"),
+                Row("hacked.example.com", "domain", compromised: true),
+                Row("weak.example.net", "domain", level: 50),
+                Row("https://Evil.Example.net/a.exe", "url"),
+                Row("https://raw.githubusercontent.com/u/r/x.ps1", "url"),
+                Row("http://198.51.100.9:8080/x", "url", malware: "Mirai"),
+                Row(new string('0', 32), "md5_hash")), "threatfox", "threatfox");
+            var byValue = keyed.ToDictionary(item => item.Value);
+            Assert(keyed.Count == 7, "hashes cannot be matched against a destination and are skipped");
+            Assert(byValue["203.0.113.7"] is { Kind: "ip", Tag: "AsyncRAT", Confidence: "high" }
+                   && byValue["c2.example.org"] is { Kind: "domain", Confidence: "high", Tag: "Remcos" }
+                   && byValue["hacked.example.com"] is { Confidence: "low", Tag: "Remcos (compromised legitimate site)" }
+                   && byValue["weak.example.net"].Confidence == "low"
+                   && byValue["evil.example.net"].Confidence == "high"
+                   && byValue["raw.githubusercontent.com"] is { Confidence: "low", Tag: "Remcos (file hosting service)" }
+                   && byValue["198.51.100.9"] is { Kind: "ip", Tag: "Mirai" },
+                "domain and url IOCs are read by the Hub's rules: compromised, shared hosting and level below 75 are low");
+            var duplicate = ThreatFeedDownloader.Parse(string.Join("\r\n", header,
+                Row("http://203.0.113.9/x", "url", level: 50, malware: "Other"),
+                Row("203.0.113.9:443", "ip:port", malware: "CobaltStrike")), "threatfox", "threatfox");
+            Assert(duplicate.Count == 1 && duplicate[0] is { Confidence: "high", Tag: "CobaltStrike" },
+                "one host reported twice keeps the stronger reading");
+
+            var result = new ThreatFeedResult([new("cidr", "203.0.113.0/24", "spamhaus", null, "high"),
+                    new("domain", "fresh.example", "spamhaus", null, "high")],
+                ["urlhaus"], SourcesNeedingKey: ["threatfox"]);
+            var merged = result.KeepingPrevious([
+                new("cidr", "198.51.100.0/24", "spamhaus", null, "high"),
+                new("domain", "c2.example.org", "threatfox", null, "high"),
+                new("domain", "bad.example", "urlhaus", null, "high"),
+                new("domain", "fresh.example", "urlhaus", "old", "low"),
+                new("ip", "203.0.113.5", "feodo", null, "high"),
+            ]);
+            Assert(merged.Indicators.Select(item => item.Value).Order().SequenceEqual(
+                       ["203.0.113.0/24", "bad.example", "c2.example.org", "fresh.example"])
+                   && merged.Indicators.Single(item => item.Value == "fresh.example").Source == "spamhaus",
+                "feeds that were read are replaced, the two that were not keep what was held, and a fresh reading wins");
+            Assert(merged.KeptSources.SequenceEqual(["urlhaus", "threatfox"]) && !result.IsComplete
+                   && result.UnreadSources.SequenceEqual(["urlhaus", "threatfox"]),
+                "the kept feeds are named, so the screen can say the old list is still in use");
+            Assert(new ThreatFeedResult([], [], ["threatfox"]).KeepingPrevious([]).KeptSources.Count == 0,
+                "nothing held, nothing kept");
+
+            var asked = new List<string>();
+            var noKey = new ThreatFeedDownloader(new HttpClient(new FeedHandler(asked, new()))).DownloadAsync().GetAwaiter().GetResult();
+            Assert(asked.Order().SequenceEqual(["feodotracker.abuse.ch", "www.spamhaus.org"])
+                   && noKey.SourcesNeedingKey.SequenceEqual(["threatfox", "urlhaus"]) && noKey.MissingSources.Count == 0,
+                "without a key the abuse.ch exports are not asked for at all, and that is not called a failure");
+            var refused = new ThreatFeedDownloader(new HttpClient(new FeedHandler([], new()
+                {
+                    ["threatfox-api.abuse.ch"] = HttpStatusCode.Unauthorized,
+                    ["urlhaus-api.abuse.ch"] = HttpStatusCode.Forbidden,
+                }))).DownloadAsync("bad-key-0000").GetAwaiter().GetResult(); // pragma: allowlist secret
+            Assert(refused.SourcesRejectingKey.SequenceEqual(["threatfox", "urlhaus"]) && refused.MissingSources.Count == 0,
+                "a 401 or 403 from abuse.ch is a refused key, which is the person's to check");
+
+            Assert(AbuseChKeyStore.IsPlausible("0123456789abcdef0123456789abcdef") // pragma: allowlist secret
+                   && !AbuseChKeyStore.IsPlausible("short") && !AbuseChKeyStore.IsPlausible("two words here")
+                   && !AbuseChKeyStore.IsPlausible("line\nbreak-0123"),
+                "only something shaped like a key is stored and sent as part of an address");
+            Assert(EgressView.Agent.Service.EnrichmentController.ShortfallText(result, merged.KeptSources)
+                   == "missing-feeds:urlhaus;needs-key:threatfox;kept:urlhaus+threatfox",
+                "the diagnostics line names each reason apart");
+        }
+
         // A diagnostics request must not re-read the database.
         //
         // It used to, under the lock every other request needs, on a pipe that
@@ -5093,6 +5197,22 @@ file sealed class StubHandler(Func<HttpRequestMessage, string> reply) : HttpMess
         {
             Content = new StringContent(reply(request), System.Text.Encoding.UTF8, "application/json"),
         });
+}
+
+/// Answers each feed host with a status, recording which hosts were asked.
+/// Spamhaus gets one range and everything else a comment, so a download
+/// always has one feed that worked.
+file sealed class FeedHandler(List<string> asked, Dictionary<string, HttpStatusCode> statuses) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var host = request.RequestUri!.Host;
+        asked.Add(host);
+        return Task.FromResult(new HttpResponseMessage(statuses.GetValueOrDefault(host, HttpStatusCode.OK))
+        {
+            Content = new StringContent(host == "www.spamhaus.org" ? "203.0.113.0/24 ; SBL1\n" : "# nothing\n"),
+        });
+    }
 }
 
 /// Never answers, so a deadline is the only thing that can end the request.

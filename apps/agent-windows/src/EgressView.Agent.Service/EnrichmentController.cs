@@ -4,7 +4,7 @@ using EgressView.Agent.Core;
 namespace EgressView.Agent.Service;
 
 internal sealed class EnrichmentController(ObservationStore store, WindowsCredentialStore credentials,
-    string publicFeedsMarker, MaxMindCredentialStore maxMind, string countryTablePath,
+    string publicFeedsMarker, MaxMindCredentialStore maxMind, AbuseChKeyStore abuseChKeys, string countryTablePath,
     string countryTableMarker, string geoLookupSourceFile) : IDisposable
 {
     private readonly SemaphoreSlim geoWake = new(0, 1);
@@ -21,6 +21,13 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     private readonly object gate = new();
     private string geoState = "idle", threatState = "idle";
     private string? geoFailure, threatFailure;
+    private FeedShortfall? threatShortfall;
+
+    /// Which feeds contributed nothing to the last public-feed download, and
+    /// why. Sent as lists rather than folded into one failure string, so the
+    /// window can say which of them is the person's to fix.
+    private sealed record FeedShortfall(IReadOnlyList<string> Failed, IReadOnlyList<string> NeedingKey,
+        IReadOnlyList<string> RejectingKey, IReadOnlyList<string> Kept);
 
     public void RequestNow(string kind)
     {
@@ -62,8 +69,8 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         var credential = credentials.Load();
         var geo = store.ReadGeoCacheState();
         var threat = store.ReadThreatCacheState();
-        string gs, ts; string? gf, tf;
-        lock (gate) { gs = geoState; ts = threatState; gf = geoFailure; tf = threatFailure; }
+        string gs, ts; string? gf, tf; FeedShortfall? shortfall;
+        lock (gate) { gs = geoState; ts = threatState; gf = geoFailure; tf = threatFailure; shortfall = threatShortfall; }
         var now = DateTimeOffset.UtcNow;
         return JsonSerializer.Serialize(new
         {
@@ -72,6 +79,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
             policy = credential is null && PublicFeedsEnabled ? "public-feeds" : "hub-only",
             thirdPartyLookup = LookupSource.UsesThirdParty(),
             publicFeedsEnabled = PublicFeedsEnabled,
+            abuseChKeyConfigured = LoadAbuseChKey() is not null,
             lookupSource = LookupSource.ToWire(),
             thirdPartyBudget = ThirdPartyGeoLookup.DailyBudget,
             thirdPartyRemaining = Math.Max(0, ThirdPartyGeoLookup.DailyBudget - SpentToday(now)),
@@ -80,7 +88,11 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
                 freshness = EnrichmentFreshness.Classify(geo.FetchedAt, TimeSpan.FromHours(24), now), lastFailure = gf },
             threat = new { state = ts, lastSuccessAt = threat.FetchedAt, count = threat.IndicatorCount,
                 availability = threat.Availability, freshness = EnrichmentFreshness.Classify(threat.FetchedAt, TimeSpan.FromHours(6), now),
-                source = threat.Source, lastFailure = tf },
+                source = threat.Source, lastFailure = tf,
+                shortfall = ts == "partial" && shortfall is not null
+                    ? new { failed = shortfall.Failed, needingKey = shortfall.NeedingKey,
+                        rejectingKey = shortfall.RejectingKey, kept = shortfall.Kept }
+                    : null },
             countryTable = CountryTableStatus(now),
         });
     }
@@ -118,6 +130,25 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     {
         try { return maxMind.Load(); }
         catch (Exception) { return null; }
+    }
+
+    private string? LoadAbuseChKey()
+    {
+        try { return abuseChKeys.Load(); }
+        catch (Exception) { return null; }
+    }
+
+    /// Stores or withdraws the abuse.ch Auth-Key.
+    ///
+    /// A PC reading the feeds itself fetches straight away, so the key is
+    /// tried while the person is looking; one enrolled with a Hub keeps it for
+    /// its fallback and fetches nothing now.
+    internal bool SetAbuseChKey(string? key)
+    {
+        if (key is null) { abuseChKeys.Delete(); return true; }
+        abuseChKeys.Save(key);
+        if (credentials.Load() is null && PublicFeedsEnabled) RequestNow("threat");
+        return true;
     }
 
     /// Keeps the table current and places the addresses nobody else placed.
@@ -482,10 +513,15 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         SetState(false, "fetching", null);
         try
         {
-            var result = await publicFeeds.DownloadAsync(token);
-            store.ReplaceThreatIndicators(true, result.Indicators, null, DateTimeOffset.UtcNow, source);
-            SetState(false, result.IsComplete ? "idle" : "partial",
-                result.IsComplete ? null : "missing-feeds:" + string.Join('+', result.MissingSources));
+            var result = await publicFeeds.DownloadAsync(LoadAbuseChKey(), token);
+            // A feed not read this time keeps what is already held for it,
+            // rather than being dropped by the replace below -- including the
+            // Hub's share, when this is the fallback for a Hub that is away.
+            var merged = result.KeepingPrevious(store.ReadThreatIndicators());
+            store.ReplaceThreatIndicators(true, merged.Indicators, null, DateTimeOffset.UtcNow, source);
+            lock (gate)
+                threatShortfall = new(result.MissingSources, result.SourcesNeedingKey, result.SourcesRejectingKey, merged.KeptSources);
+            SetState(false, result.IsComplete ? "idle" : "partial", result.IsComplete ? null : ShortfallText(result, merged.KeptSources));
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (ThreatFeedException) { SetState(false, "failed", "all-feeds-failed"); }
@@ -493,6 +529,17 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     }
 
     private readonly ThreatFeedDownloader publicFeeds = new();
+
+    /// The same shortfall in one line, for the diagnostics bundle and logs.
+    internal static string ShortfallText(ThreatFeedResult result, IReadOnlyList<string> kept)
+    {
+        var parts = new List<string>();
+        if (result.MissingSources.Count > 0) parts.Add("missing-feeds:" + string.Join('+', result.MissingSources));
+        if (result.SourcesNeedingKey.Count > 0) parts.Add("needs-key:" + string.Join('+', result.SourcesNeedingKey));
+        if (result.SourcesRejectingKey.Count > 0) parts.Add("key-refused:" + string.Join('+', result.SourcesRejectingKey));
+        if (kept.Count > 0) parts.Add("kept:" + string.Join('+', kept));
+        return string.Join(';', parts);
+    }
 
     private string GetState(bool geo) { lock (gate) return geo ? geoState : threatState; }
     private void SetState(bool geo, string state, string? failure)

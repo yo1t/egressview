@@ -1342,6 +1342,95 @@ public partial class MainWindow : Window
         finally { FetchPublicFeedsOnceButton.IsEnabled = true; }
     }
 
+    /// Which feeds the last public-feed download could not read, and why.
+    ///
+    /// The count on its own would read as success. Which lists are missing,
+    /// and why, is the part that lets someone judge what the check is worth
+    /// right now -- and whether it is theirs to fix.
+    private void RenderFeedShortfall(JsonElement threat)
+    {
+        if (!threat.TryGetProperty("shortfall", out var shortfall) || shortfall.ValueKind != JsonValueKind.Object) return;
+        static IReadOnlyList<string> Names(JsonElement item, string name) =>
+            item.TryGetProperty(name, out var list) && list.ValueKind == JsonValueKind.Array
+                ? [.. list.EnumerateArray().Select(source => FeedName(source.GetString() ?? string.Empty))] : [];
+        var failed = Names(shortfall, "failed");
+        var needingKey = Names(shortfall, "needingKey");
+        var rejectingKey = Names(shortfall, "rejectingKey");
+        var kept = Names(shortfall, "kept");
+        var count = threat.TryGetProperty("count", out var total) ? total.GetInt64() : 0;
+        var parts = new List<string> { string.Format(LocalizationManager.Text("FeedShortfallIndicators"), count) };
+        if (needingKey.Count > 0) parts.Add(string.Format(LocalizationManager.Text("FeedShortfallNeedKey"), string.Join(", ", needingKey)));
+        if (rejectingKey.Count > 0) parts.Add(string.Format(LocalizationManager.Text("FeedShortfallKeyRefused"), string.Join(", ", rejectingKey)));
+        if (failed.Count > 0) parts.Add(string.Format(LocalizationManager.Text("FeedShortfallFailed"), string.Join(", ", failed)));
+        parts.Add(kept.Count == 0 ? LocalizationManager.Text("FeedShortfallRest")
+            : string.Format(LocalizationManager.Text("FeedShortfallKept"), string.Join(", ", kept)));
+        ThreatEnrichmentFailure.Text = string.Join(" ", parts);
+    }
+
+    private static string FeedName(string source) => source switch
+    {
+        "feodo" => "Feodo Tracker",
+        "threatfox" => "ThreatFox",
+        "urlhaus" => "URLhaus",
+        "spamhaus" => "Spamhaus DROP",
+        _ => source,
+    };
+
+    private bool abuseChKeyConfigured;
+
+    private void RenderAbuseChKey(bool configured)
+    {
+        if (AbuseChKeyState is null) return;
+        abuseChKeyConfigured = configured;
+        AbuseChKeyState.Text = LocalizationManager.Text(configured ? "AbuseChKeyStored" : "AbuseChKeyNone");
+        RemoveAbuseChKeyButton.IsEnabled = configured;
+    }
+
+    private void AbuseChKeyInput_PasswordChanged(object sender, RoutedEventArgs e) =>
+        SaveAbuseChKeyButton.IsEnabled = AbuseChKeyInput.Password.Trim().Length > 0;
+
+    /// The key goes straight to the service, which stores it; the window
+    /// clears the box and keeps no copy, as with the MaxMind account.
+    private async void SaveAbuseChKey_Click(object sender, RoutedEventArgs e)
+    {
+        var key = AbuseChKeyInput.Password.Trim();
+        AbuseChKeyInput.Clear();
+        if (key.Length == 0) return;
+        if (!AbuseChKeyStore.IsPlausible(key)) { AbuseChKeyFailure.Text = LocalizationManager.Text("AbuseChKeyInvalid"); return; }
+        await SendAbuseChKeyAsync(key);
+    }
+
+    private async void RemoveAbuseChKey_Click(object sender, RoutedEventArgs e)
+    {
+        AbuseChKeyInput.Clear();
+        await SendAbuseChKeyAsync(null);
+    }
+
+    private async Task SendAbuseChKeyAsync(string? key)
+    {
+        SaveAbuseChKeyButton.IsEnabled = RemoveAbuseChKeyButton.IsEnabled = false;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "set-abuse-ch-key", key }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (root.TryGetProperty("status", out var status) && status.GetString() == "rejected")
+            {
+                var reason = root.TryGetProperty("reason", out var value) ? value.GetString() : null;
+                AbuseChKeyFailure.Text = LocalizationManager.Text(
+                    reason == "invalid-abuse-ch-key" ? "AbuseChKeyInvalid" : "AbuseChKeySaveFailed");
+                return;
+            }
+            EnsureAccepted(root);
+            AbuseChKeyFailure.Text = string.Empty;
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { AbuseChKeyFailure.Text = LocalizationManager.Text("CannotConnect"); }
+        finally { RemoveAbuseChKeyButton.IsEnabled = abuseChKeyConfigured; }
+    }
+
     private void Hyperlink_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
     {
         try { Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true }); }
@@ -1996,6 +2085,9 @@ public partial class MainWindow : Window
                 RenderCountryTable(countryTable);
                 countryTableOn = countryTable.TryGetProperty("enabled", out var on) && on.GetBoolean();
             }
+
+            RenderFeedShortfall(data.GetProperty("threat"));
+            RenderAbuseChKey(data.TryGetProperty("abuseChKeyConfigured", out var keyed) && keyed.GetBoolean());
 
             publicThreatFeeds = data.TryGetProperty("publicFeedsEnabled", out var feeds) && feeds.GetBoolean();
             if (PublicThreatFeedsEnabled is not null) PublicThreatFeedsEnabled.IsChecked = publicThreatFeeds;
