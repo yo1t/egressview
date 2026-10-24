@@ -96,9 +96,102 @@ describe('parseThreatFox: keyed recent.csv (2026-10-22 onward)', () => {
     '"2026-10-24 01:57:00", "1982525", "http://198.51.100.9:8080/x", "url", "payload_delivery", "elf.mirai", "None", "Mirai", "", "75", "False", "None", "None", "0", "r3"',
   ].join('\n');
 
-  it('ip:portだけを取り、マルウェア名は別名が無ければ表示名を使う', () => {
+  it('マルウェア名は別名が無ければ表示名を使う', () => {
     const entries = parseThreatFox(csv);
-    assert.deepEqual(entries, [{ ip: '203.0.113.7', port: 4444, source: 'threatfox', tag: 'ThreatFox: AsyncRAT' }]);
+    assert.deepEqual(entries.find(e => e.port === 4444),
+      { ip: '203.0.113.7', port: 4444, source: 'threatfox', tag: 'ThreatFox: AsyncRAT' });
+  });
+
+  it('domainとurlも取り、改ざんされた正規サイトや確信度75未満は低信頼度にする', () => {
+    const entries = parseThreatFox(csv);
+    assert.deepEqual(entries.find(e => e.domain === 'b0iyqov228.workers.dev'), {
+      domain: 'b0iyqov228.workers.dev', source: 'threatfox',
+      tag: 'ThreatFox: php.shin_webshell (改ざんされた正規サイト)', confidence: 'low',
+    });
+    // A url whose host is an IPv4 address is matched as that address.
+    assert.deepEqual(entries.find(e => e.ip === '198.51.100.9'), {
+      ip: '198.51.100.9', port: null, source: 'threatfox', tag: 'ThreatFox: Mirai',
+      confidence: 'high', url: 'http://198.51.100.9:8080/x',
+    });
+  });
+
+  it('ハッシュは照合に使えないので取らない', () => {
+    const withHash = `${csv}\n"2026-10-24 01:56:00", "1982526", "d41d8cd98f00b204e9800998ecf8427e", "md5_hash", "payload", "win.x", "None", "X", "", "100", "False", "None", "None", "0", "r4"`;
+    assert.equal(parseThreatFox(withHash).length, 3);
+  });
+
+  it('URLのホスト名で照合し、共有サービス上のものは低信頼度', () => {
+    const rows = [
+      csv.split('\n')[1],
+      '"2026-10-24 01:50:00", "2", "https://Evil-Payload.example.net/a/b.exe", "url", "payload_delivery", "win.x", "None", "LummaStealer", "", "100", "False", "None", "None", "0", "r"',
+      '"2026-10-24 01:50:00", "3", "https://raw.githubusercontent.com/u/r/main/x.ps1", "url", "payload_delivery", "win.x", "None", "X", "", "100", "False", "None", "None", "0", "r"',
+      '"2026-10-24 01:50:00", "4", "c2.example.org", "domain", "botnet_cc", "win.x", "None", "Remcos", "", "50", "False", "None", "None", "0", "r"',
+    ].join('\n');
+    const entries = parseThreatFox(rows);
+    const byHost = Object.fromEntries(entries.map(e => [e.domain, e]));
+    assert.equal(byHost['evil-payload.example.net'].confidence, 'high');
+    assert.equal(byHost['evil-payload.example.net'].url, 'https://Evil-Payload.example.net/a/b.exe');
+    assert.equal(byHost['raw.githubusercontent.com'].confidence, 'low');
+    assert.match(byHost['raw.githubusercontent.com'].tag, /正規サービス上/);
+    assert.equal(byHost['c2.example.org'].confidence, 'low', 'ThreatFox rated it 50');
+  });
+});
+
+describe('ThreatFoxのドメインで照合する', () => {
+  const header = '# "first_seen_utc","ioc_id","ioc_value","ioc_type","threat_type","fk_malware","malware_alias","malware_printable","last_seen_utc","confidence_level","is_compromised","reference","tags","anonymous","reporter"';
+  const row = (value, type, level, compromised, malware = 'Remcos') =>
+    `"2026-10-24 01:50:00", "1", "${value}", "${type}", "botnet_cc", "win.x", "None", "${malware}", "", "${level}", "${compromised}", "None", "None", "0", "r"`;
+  const ok = (data) => ({ status: 'fulfilled', value: { data } });
+
+  function freshModule() {
+    delete require.cache[require.resolve('../../src/threat-intel')];
+    return require('../../src/threat-intel');
+  }
+
+  it('ドメインとそのサブドメインに一致し、Agentにも確信度付きで渡る', () => {
+    const intel = freshModule();
+    intel._applyFeedResults([ok(''), ok([header, row('c2.example.org', 'domain', 100, 'False')].join('\n')), ok(''), ok('')]);
+    assert.equal(intel.matchThreatIntel('203.0.113.50', 'c2.example.org')?.source, 'threatfox');
+    assert.equal(intel.matchThreatIntel('203.0.113.50', 'a.c2.example.org')?.matchValue, 'c2.example.org');
+    assert.deepEqual(intel.listIndicators().domains, [['c2.example.org', 'threatfox', 'ThreatFox: Remcos', 'high']]);
+    assert.equal(intel.getStats().feeds.find(f => f.name === 'threatfox').entries, 1);
+  });
+
+  it('同じIPがip:portとurlにあれば、強いほうを残す', () => {
+    const intel = freshModule();
+    intel._applyFeedResults([ok(''), ok([
+      header,
+      row('203.0.113.9:443', 'ip:port', 100, 'False', 'CobaltStrike'),
+      row('http://203.0.113.9/x', 'url', 50, 'False', 'Other'),
+    ].join('\n')), ok(''), ok('')]);
+    const hit = intel.matchThreatIntel('203.0.113.9', null);
+    assert.equal(hit.tag, 'ThreatFox: CobaltStrike');
+    assert.notEqual(hit.confidence, 'low');
+  });
+
+  it('次の取得で消えたドメインは照合から外れる', () => {
+    const intel = freshModule();
+    intel._applyFeedResults([ok(''), ok([header, row('old.example.org', 'domain', 100, 'False')].join('\n')), ok(''), ok('')]);
+    intel._applyFeedResults([ok(''), ok([header, row('new.example.org', 'domain', 100, 'False')].join('\n')), ok(''), ok('')]);
+    assert.equal(intel.matchThreatIntel('203.0.113.50', 'old.example.org'), null);
+    assert.equal(intel.matchThreatIntel('203.0.113.50', 'new.example.org')?.source, 'threatfox');
+  });
+
+  it('ドメインもディスクに残り、再起動後に照合に使える', () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-tf-')), 'h.sqlite');
+    const first = freshModule();
+    first.initDb(dbPath);
+    first._applyFeedResults([ok(''), ok([header, row('kept.example.org', 'domain', 90, 'True')].join('\n')), ok(''), ok('')]);
+    first.closeDb();
+    const second = freshModule();
+    second.initDb(dbPath);
+    const hit = second.matchThreatIntel('203.0.113.50', 'kept.example.org');
+    assert.equal(hit?.source, 'threatfox');
+    assert.equal(hit?.confidence, 'low');
+    second.closeDb();
   });
 });
 
