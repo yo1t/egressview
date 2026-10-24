@@ -287,7 +287,9 @@ function parseThreatFox(text) {
     const [ip, portStr] = iocRaw.split(':');
     if (!ip || !ip.match(/^\d+\.\d+\.\d+\.\d+$/)) continue;
     const port = parseInt(portStr, 10) || null;
-    const malware = (parts[6] || '').trim();
+    // malware_alias, or in the keyed recent.csv (where the alias is often
+    // "None") malware_printable, the column after it.
+    const malware = [parts[6], parts[7]].map(v => (v || '').trim()).find(v => v && v !== 'None') || '';
     entries.push({ ip, port, source: 'threatfox', tag: `ThreatFox: ${malware || 'malware IOC'}` });
   }
   return entries;
@@ -526,10 +528,11 @@ async function fetchThreatIntel() {
   logger.info('[threat-intel] Fetching feeds...');
 
   try {
+    const key = abuseChAuthKey();
     const results = await Promise.allSettled([
       axios.get('https://feodotracker.abuse.ch/downloads/ipblocklist.csv', { timeout: 30000, responseType: 'text' }),
-      axios.get('https://threatfox.abuse.ch/export/csv/ip-port/recent/', { timeout: 30000, responseType: 'text' }),
-      axios.get('https://urlhaus.abuse.ch/downloads/csv_recent/', { timeout: 30000, responseType: 'text' }),
+      key ? axios.get(abuseChExportUrl('threatfox', key), { timeout: 30000, responseType: 'text' }) : missingAbuseChKey(),
+      key ? axios.get(abuseChExportUrl('urlhaus', key), { timeout: 30000, responseType: 'text' }) : missingAbuseChKey(),
       axios.get('https://www.spamhaus.org/drop/drop.txt', { timeout: 30000, responseType: 'text' }),
     ]);
     const parsed = await parseFeedsOffThread(results);
@@ -540,6 +543,27 @@ async function fetchThreatIntel() {
   } finally {
     fetching = false;
   }
+}
+
+// ─── abuse.ch keyed exports ───────────────────────────────────────────────────
+// On 2026-10-22 abuse.ch retired the keyless ThreatFox and URLhaus downloads
+// (410 Gone). The same CSV files are now served under a free Auth-Key, which
+// goes in the URL path as abuse.ch documents. The key is never logged: axios
+// errors carry the status, not the URL. Feodo Tracker is still keyless.
+
+function abuseChAuthKey() {
+  return String(process.env.ABUSE_CH_AUTH_KEY || '').trim();
+}
+
+function abuseChExportUrl(feed, key) {
+  const host = feed === 'threatfox' ? 'threatfox-api.abuse.ch' : 'urlhaus-api.abuse.ch';
+  return `https://${host}/v2/files/exports/${encodeURIComponent(key)}/recent.csv`;
+}
+
+function missingAbuseChKey() {
+  return Promise.reject(new Error(
+    'ABUSE_CH_AUTH_KEY is not set (abuse.ch requires a free Auth-Key since 2026-10-22: https://auth.abuse.ch/)'
+  ));
 }
 
 // ─── Match a connection against threat intel ──────────────────────────────────
@@ -710,6 +734,7 @@ module.exports = {
   listIndicators,
   // Exposed for testing
   parseCsvLine,
+  abuseChExportUrl,
   parseFeodoTracker,
   parseThreatFox,
   parseUrlhaus,

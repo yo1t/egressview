@@ -86,6 +86,30 @@ describe('parseThreatFox', () => {
   });
 });
 
+describe('parseThreatFox: keyed recent.csv (2026-10-22 onward)', () => {
+  // The keyed export mixes IOC types and separates fields with ", ".
+  const csv = [
+    '# ThreatFox IOCs: recent additions - CSV format',
+    '# "first_seen_utc","ioc_id","ioc_value","ioc_type","threat_type","fk_malware","malware_alias","malware_printable","last_seen_utc","confidence_level","is_compromised","reference","tags","anonymous","reporter"',
+    '"2026-10-24 01:59:02", "1982523", "b0iyqov228.workers.dev", "domain", "payload_delivery", "php.shin_webshell", "None", "php.shin_webshell", "", "50", "True", "None", "None", "0", "r1"',
+    '"2026-10-24 01:58:00", "1982524", "203.0.113.7:4444", "ip:port", "botnet_cc", "win.asyncrat", "None", "AsyncRAT", "", "75", "False", "None", "None", "0", "r2"',
+    '"2026-10-24 01:57:00", "1982525", "http://198.51.100.9:8080/x", "url", "payload_delivery", "elf.mirai", "None", "Mirai", "", "75", "False", "None", "None", "0", "r3"',
+  ].join('\n');
+
+  it('ip:portだけを取り、マルウェア名は別名が無ければ表示名を使う', () => {
+    const entries = parseThreatFox(csv);
+    assert.deepEqual(entries, [{ ip: '203.0.113.7', port: 4444, source: 'threatfox', tag: 'ThreatFox: AsyncRAT' }]);
+  });
+});
+
+describe('abuseChExportUrl', () => {
+  it('キーをパスに入れたabuse.chの鍵付きエクスポートを指す', () => {
+    const { abuseChExportUrl } = require('../../src/threat-intel');
+    assert.equal(abuseChExportUrl('urlhaus', 'k1'), 'https://urlhaus-api.abuse.ch/v2/files/exports/k1/recent.csv');
+    assert.equal(abuseChExportUrl('threatfox', 'k1'), 'https://threatfox-api.abuse.ch/v2/files/exports/k1/recent.csv');
+  });
+});
+
 describe('parseUrlhaus', () => {
   const sample = `# URLhaus CSV
 "id","dateadded","url","url_status","last_online","threat","tags","urlhaus_link","reporter"
