@@ -79,4 +79,19 @@
   <system:String x:Key="MoreThreatsFormat">この通知にはほかに{0:N0}件の一致があります。「脅威」タブで確認できます。</system:String>
   <system:String x:Key="FeedNotProof">フィードに載っていることは、害がある証拠ではありません。誰かがある時点で、この宛先を上の理由に関係するものとして公開した、という意味です。</system:String>
   <system:String x:Key="PairsSentMost">どのアプリがどこへ</system:String>
+  <system:String x:Key="AbuseChKeyTitle">abuse.chのAuth-Key（ThreatFoxとURLhaus用）</system:String>
+  <system:String x:Key="AbuseChKeyHint">ThreatFoxとURLhausの取得には、abuse.chの無料のAuth-Keyが必要です。キーがないと、公開フィードからはFeodo TrackerとSpamhausだけを取得します。キーはWindowsの資格情報マネージャーにだけ保存し、abuse.chへ取得先アドレスの一部としてだけ送ります。</system:String>
+  <system:String x:Key="AbuseChKeyGet">auth.abuse.chで無料のAuth-Keyを取得</system:String>
+  <system:String x:Key="AbuseChKeyStored">キーを資格情報マネージャーに保存済みです。置き換えるときだけ入力してください。</system:String>
+  <system:String x:Key="AbuseChKeyNone">キーは保存されていません。</system:String>
+  <system:String x:Key="AbuseChKeySave">Auth-Keyを保存</system:String>
+  <system:String x:Key="AbuseChKeyRemove">Auth-Keyを削除</system:String>
+  <system:String x:Key="AbuseChKeyInvalid">Auth-Keyの形ではありません。空白や改行を含めず、キーだけを貼り付けてください。</system:String>
+  <system:String x:Key="AbuseChKeySaveFailed">Auth-Keyを保存できませんでした。</system:String>
+  <system:String x:Key="FeedShortfallIndicators">指標 {0:N0} 件。</system:String>
+  <system:String x:Key="FeedShortfallNeedKey">{0} はabuse.chの無料のAuth-Keyが必要です（下で設定できます）。</system:String>
+  <system:String x:Key="FeedShortfallKeyRefused">{0} でabuse.chがAuth-Keyを受け付けませんでした。下のキーを確認してください。</system:String>
+  <system:String x:Key="FeedShortfallFailed">{0} は取得できませんでした。</system:String>
+  <system:String x:Key="FeedShortfallRest">通信先は残りの指標と照合しています。</system:String>
+  <system:String x:Key="FeedShortfallKept">{0} は、それまで持っていた一覧で照合を続けています。</system:String>
 </ResourceDictionary>

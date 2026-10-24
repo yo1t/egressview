@@ -49,3 +49,35 @@ public sealed class MaxMindCredentialStore
 
     public void Delete() => WindowsCredentialVault.Delete(Target);
 }
+
+/// The person's abuse.ch Auth-Key, kept where Windows keeps secrets.
+///
+/// ThreatFox and URLhaus need it since 2026-10-22. Apart from the Hub
+/// credential and the MaxMind account for the same reason they are apart from
+/// each other: each serves a PC that may have none of the others.
+public sealed class AbuseChKeyStore
+{
+    private const string Target = "EgressView.Agent.AbuseChAuthKey";
+
+    public void Save(string key)
+    {
+        var clean = key.Trim();
+        if (!IsPlausible(clean)) throw new ArgumentException("Not an abuse.ch Auth-Key.", nameof(key));
+        WindowsCredentialVault.Write(Target, "abuse.ch", System.Text.Encoding.UTF8.GetBytes(clean));
+    }
+
+    public string? Load() => WindowsCredentialVault.Read<string>(Target, (_, bytes) =>
+    {
+        var key = System.Text.Encoding.UTF8.GetString(bytes);
+        return IsPlausible(key) ? key : null;
+    });
+
+    public void Delete() => WindowsCredentialVault.Delete(Target);
+
+    /// Printable ASCII without spaces, and not absurdly long. abuse.ch keys
+    /// are about fifty hex-like characters; the check is only there so that
+    /// something pasted by mistake -- a paragraph, a line break -- is refused
+    /// rather than stored and sent as part of an address.
+    public static bool IsPlausible(string? key) =>
+        key is { Length: >= 8 and <= 256 } && key.All(character => character is > ' ' and < '\x7f');
+}

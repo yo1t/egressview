@@ -8,9 +8,49 @@ namespace EgressView.Agent.Core;
 /// feeds returned nothing for the whole life of that code and the screen went
 /// on showing a total, because a feed that yields no rows looks exactly like a
 /// feed with nothing to report. Whoever turned it on could not tell.
-public sealed record ThreatFeedResult(IReadOnlyList<ThreatIndicator> Indicators, IReadOnlyList<string> MissingSources)
+///
+/// Three reasons a feed can contribute nothing, kept apart because they differ
+/// in who can do something about them: a feed that failed is nobody's to fix,
+/// a missing abuse.ch Auth-Key is the person's to add, and a refused one is
+/// theirs to check.
+public sealed record ThreatFeedResult(IReadOnlyList<ThreatIndicator> Indicators, IReadOnlyList<string> MissingSources,
+    IReadOnlyList<string>? SourcesNeedingKey = null, IReadOnlyList<string>? SourcesRejectingKey = null)
 {
-    public bool IsComplete => MissingSources.Count == 0;
+    /// Feeds not requested because there is no abuse.ch Auth-Key.
+    public IReadOnlyList<string> SourcesNeedingKey { get; } = SourcesNeedingKey ?? [];
+    /// Feeds where abuse.ch refused the Auth-Key (401/403).
+    public IReadOnlyList<string> SourcesRejectingKey { get; } = SourcesRejectingKey ?? [];
+
+    /// Every feed that contributed nothing this time, whatever the reason.
+    public IReadOnlyList<string> UnreadSources => [.. MissingSources, .. SourcesRejectingKey, .. SourcesNeedingKey];
+
+    public bool IsComplete => UnreadSources.Count == 0;
+
+    /// This download, with the indicators already held for any feed that was
+    /// not read this time.
+    ///
+    /// A download replaces the stored set, so without this a partial one threw
+    /// away what it could not replace. On 2026-10-24 a fallback download on a
+    /// Hub-enrolled Mac swapped the Hub's 11,438 indicators for 1,693 -- Feodo
+    /// and Spamhaus only -- because ThreatFox and URLhaus answered 410. The
+    /// fallback meant to cover for an absent Hub narrowed the check to about a
+    /// seventh of what it had been, and this Agent did the same.
+    ///
+    /// What was downloaded wins over what was held for the same indicator: the
+    /// store keys indicators by kind and value, and the newer reading is the
+    /// one to keep.
+    public (IReadOnlyList<ThreatIndicator> Indicators, IReadOnlyList<string> KeptSources) KeepingPrevious(
+        IReadOnlyList<ThreatIndicator> previous)
+    {
+        var unread = UnreadSources.ToHashSet(StringComparer.Ordinal);
+        var downloaded = Indicators.Select(Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var kept = previous.Where(item => item.Source is { } source && unread.Contains(source)
+            && !downloaded.Contains(Key(item))).ToList();
+        var keptSources = UnreadSources.Where(source => kept.Any(item => item.Source == source)).ToList();
+        return ([.. Indicators, .. kept], keptSources);
+
+        static string Key(ThreatIndicator item) => item.Kind + ":" + item.Value;
+    }
 }
 
 public sealed class ThreatFeedException(string message) : Exception(message);
@@ -18,24 +58,49 @@ public sealed class ThreatFeedException(string message) : Exception(message);
 /// Downloads the same public threat feeds the Hub reads, for agents that have
 /// no Hub.
 ///
-/// These are plain list downloads, not lookup services: no key, no query, and
-/// <b>no destination from this PC is sent anywhere</b>. What it does reveal is
-/// that this PC asked at all, which is why it stays something the person turns
-/// on rather than something done for them.
+/// These are plain list downloads, not lookup services: no query, and <b>no
+/// destination from this PC is sent anywhere</b>. What it does reveal is that
+/// this PC asked at all, which is why it stays something the person turns on
+/// rather than something done for them.
+///
+/// ThreatFox and URLhaus need the person's own abuse.ch Auth-Key. abuse.ch
+/// retired the keyless downloads on 2026-10-22 (they answer 410 Gone), so
+/// without a key those two are not requested at all and are reported as
+/// needing one, not as failed.
 ///
 /// Ported from the Mac Agent, feeds, parsers and judgements alike. A
 /// standalone agent and a Hub-connected one must not disagree about what is
 /// dangerous, and neither must the two platforms.
 public sealed class ThreatFeedDownloader(HttpClient? http = null)
 {
-    /// The same four feeds the Hub's threat-intel reads.
-    public static readonly (string Url, string Kind, string Source)[] Feeds =
+    /// One feed: either a public address, or an abuse.ch export that takes the
+    /// Auth-Key in its path.
+    public sealed record Feed(string Kind, string Source, string? PublicUrl, string? AbuseChExportHost)
+    {
+        public bool RequiresAbuseChKey => AbuseChExportHost is not null;
+
+        /// The address to fetch, or null when this feed needs a key and there
+        /// is none.
+        public Uri? UrlFor(string? abuseChAuthKey)
+        {
+            if (PublicUrl is not null) return new Uri(PublicUrl);
+            var key = abuseChAuthKey?.Trim();
+            if (AbuseChExportHost is null || string.IsNullOrEmpty(key)) return null;
+            return new Uri($"https://{AbuseChExportHost}/v2/files/exports/{Uri.EscapeDataString(key)}/recent.csv");
+        }
+    }
+
+    /// The same four feeds the Hub's threat-intel reads, at the same addresses.
+    public static readonly Feed[] Feeds =
     [
-        ("https://feodotracker.abuse.ch/downloads/ipblocklist.csv", "feodo", "feodo"),
-        ("https://threatfox.abuse.ch/export/csv/ip-port/recent/", "threatfox", "threatfox"),
-        ("https://urlhaus.abuse.ch/downloads/csv_recent/", "urlhaus", "urlhaus"),
-        ("https://www.spamhaus.org/drop/drop.txt", "spamhausDrop", "spamhaus"),
+        new("feodo", "feodo", "https://feodotracker.abuse.ch/downloads/ipblocklist.csv", null),
+        new("threatfox", "threatfox", null, "threatfox-api.abuse.ch"),
+        new("urlhaus", "urlhaus", null, "urlhaus-api.abuse.ch"),
+        new("spamhausDrop", "spamhaus", "https://www.spamhaus.org/drop/drop.txt", null),
     ];
+
+    /// Where to get a free abuse.ch Auth-Key.
+    public const string AbuseChAuthKeyUrl = "https://auth.abuse.ch/";
 
     /// Feeds that legitimately publish nothing for long stretches, so an empty
     /// result from them is a fact rather than a fault.
@@ -81,17 +146,27 @@ public sealed class ThreatFeedDownloader(HttpClient? http = null)
         return client;
     }
 
-    public async Task<ThreatFeedResult> DownloadAsync(CancellationToken cancellationToken = default)
+    public async Task<ThreatFeedResult> DownloadAsync(string? abuseChAuthKey = null,
+        CancellationToken cancellationToken = default)
     {
         var indicators = new List<ThreatIndicator>();
         var missing = new List<string>();
+        var needingKey = new List<string>();
+        var rejectingKey = new List<string>();
         var anySucceeded = false;
-        foreach (var (url, kind, source) in Feeds)
+        foreach (var feed in Feeds)
         {
+            var (kind, source) = (feed.Kind, feed.Source);
+            if (feed.UrlFor(abuseChAuthKey) is not { } url) { needingKey.Add(source); continue; }
             string text;
             try
             {
                 using var response = await http.GetAsync(url, cancellationToken);
+                if (feed.RequiresAbuseChKey && response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                {
+                    rejectingKey.Add(source);
+                    continue;
+                }
                 if (response.StatusCode != HttpStatusCode.OK) { missing.Add(source); continue; }
                 text = await response.Content.ReadAsStringAsync(cancellationToken);
             }
@@ -115,8 +190,8 @@ public sealed class ThreatFeedDownloader(HttpClient? http = null)
             }
             indicators.AddRange(parsed);
         }
-        if (!anySucceeded) throw new ThreatFeedException("Every public threat feed failed.");
-        return new ThreatFeedResult(indicators, missing);
+        if (!anySucceeded) throw new ThreatFeedException("Every public threat feed that was requested failed.");
+        return new ThreatFeedResult(indicators, missing, needingKey, rejectingKey);
     }
 
     /// Finds a column by its name in the feed's own header line.
@@ -175,25 +250,83 @@ public sealed class ThreatFeedDownloader(HttpClient? http = null)
         return result;
     }
 
+    /// `first_seen_utc,ioc_id,ioc_value,ioc_type,threat_type,fk_malware,malware_alias,malware_printable,…`
+    ///
+    /// Read the way the Hub reads it (`parseThreatFox` in `src/threat-intel.js`)
+    /// and the Mac since #855: ip:port IOCs become addresses; domain and url
+    /// IOCs become names keyed by host (a url on an IPv4 address becomes that
+    /// address); hashes are skipped. A compromised legitimate site, a file on
+    /// a shared service, or an IOC ThreatFox rates below 75 is low confidence.
     private static List<ThreatIndicator> ParseThreatFox(string text, string source)
     {
         var lines = Lines(text);
         var valueColumn = ColumnIndex(lines, "ioc_value");
+        var typeColumn = ColumnIndex(lines, "ioc_type");
         var malwareColumn = ColumnIndex(lines, "malware_printable");
         if (malwareColumn < 0) malwareColumn = ColumnIndex(lines, "malware");
+        // The keyed export added columns that moved these, so they are only
+        // ever read by name.
+        var confidenceColumn = ColumnIndex(lines, "confidence_level");
+        var compromisedColumn = ColumnIndex(lines, "is_compromised");
         if (valueColumn < 0) valueColumn = 2;
-        var result = new List<ThreatIndicator>();
+        if (typeColumn < 0) typeColumn = 3;
+        var indicators = new List<ThreatIndicator>();
         foreach (var line in lines)
         {
             if (line.StartsWith('#')) continue;
             var fields = CsvFields(line);
-            // Strips the port: the indicator is the host, and keeping the port
-            // would stop it matching the same host reached on another one.
-            var value = FieldOrEmpty(fields, valueColumn).Split(':')[0];
-            if (!IsPlausibleIpv4(value)) continue;
+            var ioc = FieldOrEmpty(fields, valueColumn);
+            if (ioc.Length == 0) continue;
+            var type = FieldOrEmpty(fields, typeColumn);
+            if (type.Length == 0) type = "ip:port";
             var malware = FieldOrEmpty(fields, malwareColumn);
-            result.Add(new ThreatIndicator("ip", value, source,
-                malware.Length == 0 ? "malware infrastructure" : malware, "high"));
+            if (malware == "None") malware = string.Empty;
+            var name = malware.Length == 0 ? "malware infrastructure" : malware;
+            switch (type)
+            {
+                case "domain" or "url":
+                {
+                    var host = type == "url"
+                        ? Uri.TryCreate(ioc, UriKind.Absolute, out var uri) ? uri.Host : null
+                        : ioc;
+                    host = host?.ToLowerInvariant().TrimEnd('.');
+                    if (string.IsNullOrEmpty(host) || !host.Contains('.')) continue;
+                    var compromised = FieldOrEmpty(fields, compromisedColumn) == "True";
+                    int? level = int.TryParse(FieldOrEmpty(fields, confidenceColumn), out var parsed) ? parsed : null;
+                    var sharedHosting = ConfidenceForHost(host) == "low";
+                    var low = compromised || sharedHosting || level < 75;
+                    var note = compromised ? " (compromised legitimate site)" : sharedHosting ? " (file hosting service)" : "";
+                    indicators.Add(new ThreatIndicator(IsPlausibleIpv4(host) ? "ip" : "domain", host, source,
+                        name + note, low ? "low" : "high"));
+                    break;
+                }
+                case "ip:port":
+                {
+                    // Strips the port: the indicator is the host, and keeping
+                    // the port would stop it matching the same host reached on
+                    // another one.
+                    var value = ioc.Split(':')[0];
+                    if (!IsPlausibleIpv4(value)) continue;
+                    indicators.Add(new ThreatIndicator("ip", value, source, name, "high"));
+                    break;
+                }
+            }
+        }
+        // One indicator can appear as several IOCs. The stronger reading wins,
+        // so a C2 address is never downgraded by a weaker report of the same
+        // host -- the same rule as the Hub and the Mac.
+        var kept = new Dictionary<string, int>(StringComparer.Ordinal);
+        var result = new List<ThreatIndicator>();
+        foreach (var indicator in indicators)
+        {
+            var key = indicator.Kind + ":" + indicator.Value;
+            if (kept.TryGetValue(key, out var index))
+            {
+                if (result[index].Confidence == "low" && indicator.Confidence == "high") result[index] = indicator;
+                continue;
+            }
+            kept[key] = result.Count;
+            result.Add(indicator);
         }
         return result;
     }

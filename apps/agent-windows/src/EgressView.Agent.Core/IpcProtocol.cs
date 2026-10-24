@@ -34,7 +34,8 @@ public static class IpcProtocol
         Func<string?, bool>? setCountryTableAccount = null,
         Func<bool, bool>? setCountryTableEnabled = null,
         Action? fetchPublicFeedsOnce = null,
-        Func<GeoLookupSource, string>? setGeoLookupSource = null)
+        Func<GeoLookupSource, string>? setGeoLookupSource = null,
+        Func<string?, bool>? setAbuseChKey = null)
     {
         try
         {
@@ -76,6 +77,7 @@ public static class IpcProtocol
                 "set-country-table-enabled" => SetSwitch(root, setCountryTableEnabled, "country-table-setting-failed"),
                 "fetch-public-feeds-once" => Invoke(fetchPublicFeedsOnce, "public-feeds-unavailable"),
                 "set-geo-lookup-source" => SetGeoLookupSource(root, setGeoLookupSource),
+                "set-abuse-ch-key" => SetAbuseChKey(root, setAbuseChKey),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
@@ -141,6 +143,29 @@ public static class IpcProtocol
                 : Reject("no-maxmind-account");
         }
         catch { return Reject("country-table-account-failed"); }
+    }
+
+    /// Hands over the abuse.ch Auth-Key, or withdraws it when nothing is sent.
+    ///
+    /// As with the MaxMind account, the reply is only yes or no: echoing the
+    /// key would put it somewhere it has no reason to be.
+    private static string SetAbuseChKey(JsonElement root, Func<string?, bool>? set)
+    {
+        if (set is null) return Reject("operation-unavailable");
+        string? key = null;
+        if (root.TryGetProperty("key", out var value))
+        {
+            if (value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)) return Reject("invalid-abuse-ch-key");
+            key = value.GetString()?.Trim();
+        }
+        if (key is not null && !AbuseChKeyStore.IsPlausible(key)) return Reject("invalid-abuse-ch-key");
+        try
+        {
+            return set(key)
+                ? JsonSerializer.Serialize(new { status = "ok", configured = key is not null })
+                : Reject("abuse-ch-key-failed");
+        }
+        catch { return Reject("abuse-ch-key-failed"); }
     }
 
     private static string PrepareUninstall(JsonElement root, Func<bool, bool, AgentUninstallResult>? prepare)

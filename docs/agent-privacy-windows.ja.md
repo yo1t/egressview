@@ -16,7 +16,7 @@ macOS版については[こちら](agent-privacy.ja.md)。両者は同じ製品�
 |---|---|---|---|
 | **あなたのHub**（入力したアドレス） | 登録後、かつ送信が有効なときのみ | このPCのホスト名と、観測した接続メタデータ | 受領応答、脅威フィードデータ、既に観測済みのアドレスの地図上の位置 |
 | **`dl.egressview.com`** | 定期的な更新チェックと、「更新を確認」を押したとき | User-AgentにAgentとWindowsのバージョンを含むHTTPS GET。インストールID、アカウント、観測データは含みません | リリースのmanifest |
-| **`feodotracker.abuse.ch` / `threatfox.abuse.ch` / `urlhaus.abuse.ch` / `www.spamhaus.org`** | **公開フィードの取得を有効にした場合のみ** | 公開リスト全体を取得する通常のHTTPS GET。**あなたの観測結果は送りません** | 公開されている指標リスト |
+| **`feodotracker.abuse.ch` / `threatfox-api.abuse.ch` / `urlhaus-api.abuse.ch` / `www.spamhaus.org`** | **公開フィードの取得を有効にした場合のみ**。ThreatFoxとURLhausは、abuse.chのAuth-Keyを保存した場合だけ取得します | 公開リスト全体を取得する通常のHTTPS GET。ThreatFoxとURLhausでは、保存したabuse.chのAuth-Key（Windowsの資格情報マネージャーに保存）がアドレスの一部になります。**あなたの観測結果は送りません** | 公開されている指標リスト |
 | **`download.maxmind.com`** | **国別テーブルを有効にした場合のみ** | あなたのMaxMindアカウントIDとライセンスキー。**観測した宛先は送りません** | GeoLite2-Countryデータベース |
 | **`ipwho.is`** | **「Hubに問い合わせ、無ければ ipwho.is」を選んだ場合のみ** | **観測した宛先のIPアドレス**（1日最大500件） | そのアドレスの国と座標 |
 | **`api.openai.com` / `api.anthropic.com`** | **クラウドのAI分析を有効にし、かつ質問ごとに確認した場合のみ** | 画面に表示した上限付きpreview、質問、会話の文脈 | 回答 |

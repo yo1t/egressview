@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 
 namespace EgressView.Agent.Core;
 
-/// Windows Credential Manager, for the two secrets this Agent holds.
+/// Windows Credential Manager, for the secrets this Agent holds.
 ///
 /// The Hub credential and the MaxMind licence key have nothing to do with each
 /// other, but they are kept the same way -- machine-persisted, readable only by
