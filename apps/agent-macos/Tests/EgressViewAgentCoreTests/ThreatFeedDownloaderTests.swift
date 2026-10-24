@@ -70,21 +70,88 @@ final class ThreatFeedParsingTests: XCTestCase {
     /// The standalone path must read the same four lists the Hub does, or a
     /// Mac with a Hub and one without would disagree about what is dangerous.
     func test_Hubと同じ4つのフィードを見る() {
-        let urls = ThreatFeedDownloader.feeds.map(\.url.absoluteString)
-        XCTAssertEqual(urls.count, 4)
-        XCTAssertTrue(urls.contains { $0.contains("feodotracker.abuse.ch") })
-        XCTAssertTrue(urls.contains { $0.contains("threatfox.abuse.ch") })
-        XCTAssertTrue(urls.contains { $0.contains("urlhaus.abuse.ch") })
-        XCTAssertTrue(urls.contains { $0.contains("spamhaus.org") })
+        let urls = ThreatFeedDownloader.feeds.compactMap { $0.url(abuseChAuthKey: "k1")?.absoluteString } // pragma: allowlist secret
+        XCTAssertEqual(urls, [
+            "https://feodotracker.abuse.ch/downloads/ipblocklist.csv",
+            "https://threatfox-api.abuse.ch/v2/files/exports/k1/recent.csv",
+            "https://urlhaus-api.abuse.ch/v2/files/exports/k1/recent.csv",
+            "https://www.spamhaus.org/drop/drop.txt",
+        ])
+    }
+
+    /// abuse.ch answers 410 at the keyless ThreatFox and URLhaus addresses
+    /// since 2026-10-22, so without a key they are not requested at all.
+    func test_キーが無ければThreatFoxとURLhausのURLを作らない() {
+        let sources = ThreatFeedDownloader.feeds
+            .filter { $0.url(abuseChAuthKey: nil) == nil }
+            .map(\.source)
+        XCTAssertEqual(sources, ["threatfox", "urlhaus"])
+        XCTAssertTrue(ThreatFeedDownloader.feeds
+            .filter { $0.url(abuseChAuthKey: "  ") == nil }.count == 2, "空白だけはキーとみなさない") // pragma: allowlist secret
+    }
+
+    func test_キーはパスとして符号化する() {
+        let feed = ThreatFeedDownloader.feeds.first { $0.source == "threatfox" }!
+        XCTAssertEqual(feed.url(abuseChAuthKey: "a/b?c")?.path, "/v2/files/exports/a/b?c/recent.csv") // pragma: allowlist secret
+        XCTAssertNil(feed.url(abuseChAuthKey: "a/b?c")?.query) // pragma: allowlist secret
     }
 
     /// Downloading a list sends nothing about this Mac's traffic. Any query
     /// string would be the beginning of doing exactly that.
     func test_フィードURLに問い合わせ内容を載せない() {
         for feed in ThreatFeedDownloader.feeds {
-            XCTAssertNil(feed.url.query, "\(feed.url) にクエリを付けない")
-            XCTAssertEqual(feed.url.scheme, "https")
+            guard let url = feed.url(abuseChAuthKey: "k1") else { return XCTFail("\(feed.source)") } // pragma: allowlist secret
+            XCTAssertNil(url.query, "\(url) にクエリを付けない")
+            XCTAssertEqual(url.scheme, "https")
         }
+    }
+
+    // MARK: - ThreatFox keyed export (2026-10-22 onward)
+
+    private let keyedHeader = "# \"first_seen_utc\",\"ioc_id\",\"ioc_value\",\"ioc_type\",\"threat_type\",\"fk_malware\",\"malware_alias\",\"malware_printable\",\"last_seen_utc\",\"confidence_level\",\"is_compromised\",\"reference\",\"tags\",\"anonymous\",\"reporter\""
+
+    private func keyedRow(_ value: String, _ type: String, level: Int = 100, compromised: Bool = false, malware: String = "Remcos") -> String {
+        "\"2026-10-24 01:50:00\", \"1\", \"\(value)\", \"\(type)\", \"botnet_cc\", \"win.x\", \"None\", \"\(malware)\", \"\", \"\(level)\", \"\(compromised ? "True" : "False")\", \"None\", \"None\", \"0\", \"r\""
+    }
+
+    private func parseKeyed(_ rows: [String]) -> [ThreatIndicator] {
+        ThreatFeedDownloader.parse(([keyedHeader] + rows).joined(separator: "\r\n"), kind: .threatfox, source: "threatfox")
+    }
+
+    /// Read the way the Hub reads it, so both judge a destination alike.
+    func test_threatfoxのdomainとurlもHubと同じ規則で読む() {
+        let result = parseKeyed([
+            keyedRow("203.0.113.7:4444", "ip:port", malware: "AsyncRAT"),
+            keyedRow("c2.example.org", "domain"),
+            keyedRow("hacked.example.com", "domain", compromised: true),
+            keyedRow("weak.example.net", "domain", level: 50),
+            keyedRow("https://Evil.Example.net/a.exe", "url"),
+            keyedRow("https://raw.githubusercontent.com/u/r/x.ps1", "url"),
+            keyedRow("http://198.51.100.9:8080/x", "url", malware: "Mirai"),
+            keyedRow(String(repeating: "0", count: 32), "md5_hash"),
+        ])
+        let byValue = Dictionary(uniqueKeysWithValues: result.map { ($0.value, $0) })
+        XCTAssertEqual(result.count, 7, "ハッシュは照合に使えないので取らない")
+        XCTAssertEqual(byValue["203.0.113.7"]?.tag, "AsyncRAT")
+        XCTAssertEqual(byValue["c2.example.org"]?.kind, .domain)
+        XCTAssertEqual(byValue["c2.example.org"]?.confidence, .high)
+        XCTAssertEqual(byValue["hacked.example.com"]?.confidence, .low)
+        XCTAssertEqual(byValue["hacked.example.com"]?.tag, "Remcos (compromised legitimate site)")
+        XCTAssertEqual(byValue["weak.example.net"]?.confidence, .low)
+        XCTAssertEqual(byValue["evil.example.net"]?.confidence, .high)
+        XCTAssertEqual(byValue["raw.githubusercontent.com"]?.confidence, .low)
+        XCTAssertEqual(byValue["198.51.100.9"]?.kind, .ip)
+        XCTAssertEqual(byValue["198.51.100.9"]?.tag, "Mirai")
+    }
+
+    func test_同じ指標が複数あれば強いほうを残す() {
+        let result = parseKeyed([
+            keyedRow("http://203.0.113.9/x", "url", level: 50, malware: "Other"),
+            keyedRow("203.0.113.9:443", "ip:port", malware: "CobaltStrike"),
+        ])
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.confidence, .high)
+        XCTAssertEqual(result.first?.tag, "CobaltStrike")
     }
 
     // MARK: - Line endings
@@ -120,16 +187,76 @@ final class ThreatFeedParsingTests: XCTestCase {
 
     private struct StubTransport: GeoCacheTransport {
         let bodies: [String: String]
+        var statuses: [String: Int] = [:]
         func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
             let key = request.url?.host ?? ""
-            guard let body = bodies[key] else {
+            let status = statuses[key] ?? 200
+            guard let body = bodies[key] ?? (status == 200 ? nil : "") else {
                 throw URLError(.cannotConnectToHost)
             }
             let response = HTTPURLResponse(
-                url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+                url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
             )!
             return (Data(body.utf8), response)
         }
+    }
+
+    /// Fetches nothing it is not given, and remembers what it was asked for.
+    private final class RecordingTransport: GeoCacheTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _hosts: [String] = []
+        var hosts: [String] { lock.withLock { _hosts } }
+        func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            lock.withLock { _hosts.append(request.url?.host ?? "") }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data("203.0.113.0/24 ; SBL1\n".utf8), response)
+        }
+    }
+
+    func test_キーが無ければabuse_chの2つは要求せず_キーが必要と報告する() async throws {
+        let transport = RecordingTransport()
+        let result = try await ThreatFeedDownloader(transport: transport).download()
+        XCTAssertEqual(Set(transport.hosts), ["feodotracker.abuse.ch", "www.spamhaus.org"])
+        XCTAssertEqual(result.sourcesNeedingKey, ["threatfox", "urlhaus"])
+        XCTAssertEqual(result.missingSources, [], "キーが無いことは取得の失敗ではない")
+        XCTAssertFalse(result.isComplete)
+    }
+
+    func test_キーを拒否されたら拒否として報告する() async throws {
+        let result = try await ThreatFeedDownloader(transport: StubTransport(
+            bodies: ["www.spamhaus.org": "203.0.113.0/24 ; SBL1\n", "feodotracker.abuse.ch": "#\n"],
+            statuses: ["threatfox-api.abuse.ch": 401, "urlhaus-api.abuse.ch": 403]
+        ), abuseChAuthKey: "bad").download() // pragma: allowlist secret
+        XCTAssertEqual(result.sourcesRejectingKey, ["threatfox", "urlhaus"])
+        XCTAssertEqual(result.missingSources, [])
+    }
+
+    /// 2026-10-24: a fallback download replaced a Hub-enrolled Mac's 11,438
+    /// indicators with 1,693, because the two feeds it could not read took
+    /// their share of the stored set with them.
+    func test_読めなかったフィードの分は持っていた指標を残す() {
+        let result = ThreatFeedDownloader.DownloadResult(
+            indicators: [ThreatIndicator(kind: .cidr, value: "203.0.113.0/24", source: "spamhaus", tag: nil)],
+            missingSources: ["urlhaus"],
+            sourcesNeedingKey: ["threatfox"]
+        )
+        let previous = [
+            ThreatIndicator(kind: .cidr, value: "198.51.100.0/24", source: "spamhaus", tag: nil),
+            ThreatIndicator(kind: .domain, value: "c2.example.org", source: "threatfox", tag: nil),
+            ThreatIndicator(kind: .domain, value: "bad.example", source: "urlhaus", tag: nil),
+            ThreatIndicator(kind: .ip, value: "203.0.113.5", source: "feodo", tag: nil),
+        ]
+        let merged = result.keepingPrevious(previous)
+        XCTAssertEqual(Set(merged.indicators.map(\.value)), ["203.0.113.0/24", "c2.example.org", "bad.example"],
+                       "読めたSpamhausとFeodoは今回の内容で置き換え、読めなかった2つは残す")
+        XCTAssertEqual(merged.keptSources, ["urlhaus", "threatfox"])
+    }
+
+    func test_持っていなければ残すものも無い() {
+        let result = ThreatFeedDownloader.DownloadResult(indicators: [], missingSources: [], sourcesNeedingKey: ["threatfox"])
+        let merged = result.keepingPrevious([])
+        XCTAssertTrue(merged.indicators.isEmpty)
+        XCTAssertEqual(merged.keptSources, [])
     }
 
     /// The failure that went unnoticed for the life of this code: a feed that
@@ -137,10 +264,10 @@ final class ThreatFeedParsingTests: XCTestCase {
     func test_解析できなかったフィードは取得できなかったものとして報告する() async throws {
         let result = try await ThreatFeedDownloader(transport: StubTransport(bodies: [
             "www.spamhaus.org": "203.0.113.0/24 ; SBL1\n",
-            "threatfox.abuse.ch": "# only comments\n",
-            "urlhaus.abuse.ch": "# only comments\n",
+            "threatfox-api.abuse.ch": "# only comments\n",
+            "urlhaus-api.abuse.ch": "# only comments\n",
             "feodotracker.abuse.ch": "# only comments\n",
-        ])).download()
+        ]), abuseChAuthKey: "k1").download() // pragma: allowlist secret
         XCTAssertFalse(result.isComplete)
         XCTAssertEqual(result.missingSources.sorted(), ["threatfox", "urlhaus"])
         XCTAssertEqual(result.indicators.count, 1)
@@ -151,10 +278,10 @@ final class ThreatFeedParsingTests: XCTestCase {
     func test_空を出し続けるフィードは欠落として数えない() async throws {
         let result = try await ThreatFeedDownloader(transport: StubTransport(bodies: [
             "www.spamhaus.org": "203.0.113.0/24 ; SBL1\n",
-            "threatfox.abuse.ch": "\"t\", \"1\", \"203.0.113.9:443\"\n",
-            "urlhaus.abuse.ch": "\"1\",\"2026-01-01\",\"http://bad.example/x\"\n",
+            "threatfox-api.abuse.ch": "\"t\", \"1\", \"203.0.113.9:443\"\n",
+            "urlhaus-api.abuse.ch": "\"1\",\"2026-01-01\",\"http://bad.example/x\"\n",
             "feodotracker.abuse.ch": "# empty for months\n",
-        ])).download()
+        ]), abuseChAuthKey: "k1").download() // pragma: allowlist secret
         XCTAssertTrue(result.isComplete, "欠落: \(result.missingSources)")
     }
 

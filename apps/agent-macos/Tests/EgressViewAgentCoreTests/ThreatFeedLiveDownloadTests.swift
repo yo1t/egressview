@@ -18,7 +18,10 @@ final class ThreatFeedLiveDownloadTests: XCTestCase {
             "第三者へ実際に接続するため、明示的に有効化したときだけ実行する"
         )
 
-        let result = try await ThreatFeedDownloader().download()
+        // ThreatFox and URLhaus need an abuse.ch Auth-Key since 2026-10-22.
+        let key = ProcessInfo.processInfo.environment["EGRESSVIEW_ABUSE_CH_AUTH_KEY"]
+        try XCTSkipIf(key?.isEmpty ?? true, "EGRESSVIEW_ABUSE_CH_AUTH_KEY が無ければ全フィードは取れない")
+        let result = try await ThreatFeedDownloader(abuseChAuthKey: key).download()
         let indicators = result.indicators
         XCTAssertFalse(indicators.isEmpty, "1件も取れないなら経路か解析が壊れている")
         // Feodo publishes an empty list for long stretches and is excluded from

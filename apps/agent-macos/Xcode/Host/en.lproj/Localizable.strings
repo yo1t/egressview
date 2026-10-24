@@ -496,7 +496,6 @@
 "Network monitoring System Extension is not installed." = "Network monitoring System Extension is not installed.";
 
 /* Standalone threat feeds: partial results and terms */
-"%lld indicators, but %@ could not be read. Destinations are checked against the rest." = "%lld indicators, but %@ could not be read. Destinations are checked against the rest.";
 "abuse.ch terms" = "abuse.ch terms";
 "Spamhaus terms" = "Spamhaus terms";
 "%lld countries are shaded from all-time local history." = "%lld countries are shaded from all-time local history.";
@@ -870,3 +869,19 @@
 "Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish." = "Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish.";
 "Collection method" = "Collection method";
 "LAN probes (packet counting): counted packets %lld · UDP replies set aside %lld · senders reported %lld (last %@) · waiting %lld · sent to Hub %lld · dropped %lld" = "LAN probes (packet counting): counted packets %lld · UDP replies set aside %lld · senders reported %lld (last %@) · waiting %lld · sent to Hub %lld · dropped %lld";
+
+/* abuse.ch Auth-Key for ThreatFox and URLhaus */
+"abuse.ch Auth-Key (ThreatFox and URLhaus)" = "abuse.ch Auth-Key (ThreatFox and URLhaus)";
+"abuse.ch requires a free Auth-Key for ThreatFox and URLhaus. Without one, public-feed downloads read only Feodo Tracker and Spamhaus. The key is stored only in the Keychain and is sent only to abuse.ch, as part of the download address." = "abuse.ch requires a free Auth-Key for ThreatFox and URLhaus. Without one, public-feed downloads read only Feodo Tracker and Spamhaus. The key is stored only in the Keychain and is sent only to abuse.ch, as part of the download address.";
+"Get a free Auth-Key at auth.abuse.ch" = "Get a free Auth-Key at auth.abuse.ch";
+"abuse.ch Auth-Key" = "abuse.ch Auth-Key";
+"Save Auth-Key" = "Save Auth-Key";
+"Remove Auth-Key" = "Remove Auth-Key";
+"The Auth-Key could not be saved to the Keychain." = "The Auth-Key could not be saved to the Keychain.";
+"The Auth-Key could not be removed from the Keychain." = "The Auth-Key could not be removed from the Keychain.";
+"%lld indicators." = "%lld indicators.";
+"%@ need a free abuse.ch Auth-Key (set it below)." = "%@ need a free abuse.ch Auth-Key (set it below).";
+"abuse.ch refused the Auth-Key for %@. Check the key below." = "abuse.ch refused the Auth-Key for %@. Check the key below.";
+"%@ could not be read." = "%@ could not be read.";
+"Destinations are checked against the rest." = "Destinations are checked against the rest.";
+"The list held before is still used for %@." = "The list held before is still used for %@.";
