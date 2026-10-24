@@ -70,7 +70,7 @@ final class ThreatFeedParsingTests: XCTestCase {
     /// The standalone path must read the same four lists the Hub does, or a
     /// Mac with a Hub and one without would disagree about what is dangerous.
     func test_Hubと同じ4つのフィードを見る() {
-        let urls = ThreatFeedDownloader.feeds.compactMap { $0.url(abuseChAuthKey: "k1")?.absoluteString }
+        let urls = ThreatFeedDownloader.feeds.compactMap { $0.url(abuseChAuthKey: "k1")?.absoluteString } // pragma: allowlist secret
         XCTAssertEqual(urls, [
             "https://feodotracker.abuse.ch/downloads/ipblocklist.csv",
             "https://threatfox-api.abuse.ch/v2/files/exports/k1/recent.csv",
@@ -87,20 +87,20 @@ final class ThreatFeedParsingTests: XCTestCase {
             .map(\.source)
         XCTAssertEqual(sources, ["threatfox", "urlhaus"])
         XCTAssertTrue(ThreatFeedDownloader.feeds
-            .filter { $0.url(abuseChAuthKey: "  ") == nil }.count == 2, "空白だけはキーとみなさない")
+            .filter { $0.url(abuseChAuthKey: "  ") == nil }.count == 2, "空白だけはキーとみなさない") // pragma: allowlist secret
     }
 
     func test_キーはパスとして符号化する() {
         let feed = ThreatFeedDownloader.feeds.first { $0.source == "threatfox" }!
-        XCTAssertEqual(feed.url(abuseChAuthKey: "a/b?c")?.path, "/v2/files/exports/a/b?c/recent.csv")
-        XCTAssertNil(feed.url(abuseChAuthKey: "a/b?c")?.query)
+        XCTAssertEqual(feed.url(abuseChAuthKey: "a/b?c")?.path, "/v2/files/exports/a/b?c/recent.csv") // pragma: allowlist secret
+        XCTAssertNil(feed.url(abuseChAuthKey: "a/b?c")?.query) // pragma: allowlist secret
     }
 
     /// Downloading a list sends nothing about this Mac's traffic. Any query
     /// string would be the beginning of doing exactly that.
     func test_フィードURLに問い合わせ内容を載せない() {
         for feed in ThreatFeedDownloader.feeds {
-            guard let url = feed.url(abuseChAuthKey: "k1") else { return XCTFail("\(feed.source)") }
+            guard let url = feed.url(abuseChAuthKey: "k1") else { return XCTFail("\(feed.source)") } // pragma: allowlist secret
             XCTAssertNil(url.query, "\(url) にクエリを付けない")
             XCTAssertEqual(url.scheme, "https")
         }
@@ -226,7 +226,7 @@ final class ThreatFeedParsingTests: XCTestCase {
         let result = try await ThreatFeedDownloader(transport: StubTransport(
             bodies: ["www.spamhaus.org": "203.0.113.0/24 ; SBL1\n", "feodotracker.abuse.ch": "#\n"],
             statuses: ["threatfox-api.abuse.ch": 401, "urlhaus-api.abuse.ch": 403]
-        ), abuseChAuthKey: "bad").download()
+        ), abuseChAuthKey: "bad").download() // pragma: allowlist secret
         XCTAssertEqual(result.sourcesRejectingKey, ["threatfox", "urlhaus"])
         XCTAssertEqual(result.missingSources, [])
     }
@@ -267,7 +267,7 @@ final class ThreatFeedParsingTests: XCTestCase {
             "threatfox-api.abuse.ch": "# only comments\n",
             "urlhaus-api.abuse.ch": "# only comments\n",
             "feodotracker.abuse.ch": "# only comments\n",
-        ]), abuseChAuthKey: "k1").download()
+        ]), abuseChAuthKey: "k1").download() // pragma: allowlist secret
         XCTAssertFalse(result.isComplete)
         XCTAssertEqual(result.missingSources.sorted(), ["threatfox", "urlhaus"])
         XCTAssertEqual(result.indicators.count, 1)
@@ -281,7 +281,7 @@ final class ThreatFeedParsingTests: XCTestCase {
             "threatfox-api.abuse.ch": "\"t\", \"1\", \"203.0.113.9:443\"\n",
             "urlhaus-api.abuse.ch": "\"1\",\"2026-01-01\",\"http://bad.example/x\"\n",
             "feodotracker.abuse.ch": "# empty for months\n",
-        ]), abuseChAuthKey: "k1").download()
+        ]), abuseChAuthKey: "k1").download() // pragma: allowlist secret
         XCTAssertTrue(result.isComplete, "欠落: \(result.missingSources)")
     }
 
