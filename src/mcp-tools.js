@@ -65,6 +65,29 @@ function wrapToolHandler(name, handler, audit) {
   };
 }
 
+/**
+ * One detection-log row as get_alerts returns it. The log names the threat
+ * columns threatSource / threatConfidence / threatTag; until 2026-10-24 this
+ * read feed / confidence / detail, which do not exist, so every threat came
+ * back without them.
+ */
+function alertFromLogRow(r) {
+  return {
+    type:       r.type,
+    detectedAt: tsToIso(r.detectedAt),
+    src:        r.src || null,
+    srcName:    r.srcMdnsName || r.srcDnsName || null,
+    dst:        r.dst || null,
+    host:       r.dstHost || null,
+    dport:      r.dport ?? null,
+    proto:      r.proto || null,
+    feed:       r.threatSource || null,
+    confidence: r.threatConfidence || null,
+    detail:     r.threatTag || null,
+    slackSent:  Boolean(r.slackSent),
+  };
+}
+
 function registerTool(server, name, description, inputShape, handler) {
   if (!permissionForMcpTool(name)) {
     throw new Error(`MCP tool is missing a permission classification: ${name}`);
@@ -232,15 +255,7 @@ function buildMcpServer({
     async ({ period, limit }) => {
       const { from, to } = periodRange(period);
       const data = await apiClient.get('/notification-log', { from, to });
-      const alerts = (data.logs ?? []).slice(0, limit).map(r => ({
-        type:       r.type,
-        detectedAt: tsToIso(r.detectedAt),
-        dst:        r.dst        || null,
-        src:        r.src        || null,
-        feed:       r.feed       || null,
-        confidence: r.confidence || null,
-        detail:     r.detail     || null,
-      }));
+      const alerts = (data.logs ?? []).slice(0, limit).map(alertFromLogRow);
       return ok({ period, count: alerts.length, alerts });
     }
   );
@@ -365,6 +380,7 @@ module.exports = {
   TOOL_AUDIT_CALLBACK,
   periodRange,
   tsToIso,
+  alertFromLogRow,
   ok,
   wrapToolHandler,
   registerTool,
