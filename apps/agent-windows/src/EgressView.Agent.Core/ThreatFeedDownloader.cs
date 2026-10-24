@@ -100,7 +100,7 @@ public sealed class ThreatFeedDownloader(HttpClient? http = null)
     ];
 
     /// Where to get a free abuse.ch Auth-Key.
-    public const string AbuseChAuthKeyUrl = "https://auth.abuse.ch/";
+    public const string AbuseChAuthKeyUrl = "https://auth.abuse.ch/"; // pragma: allowlist secret
 
     /// Feeds that legitimately publish nothing for long stretches, so an empty
     /// result from them is a fact rather than a fault.
