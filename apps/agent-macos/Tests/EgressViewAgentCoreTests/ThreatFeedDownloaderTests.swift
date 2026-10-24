@@ -252,6 +252,52 @@ final class ThreatFeedParsingTests: XCTestCase {
         XCTAssertEqual(merged.keptSources, ["urlhaus", "threatfox"])
     }
 
+    /// 2026-10-24: the screen said 70,029 indicators while the store held
+    /// 13,431, because URLhaus lists one host under many URLs and the count
+    /// was taken before the store folded them together.
+    func test_同じホストが何行あっても1件として数える() async throws {
+        let result = try await ThreatFeedDownloader(transport: StubTransport(bodies: [
+            "www.spamhaus.org": "203.0.113.0/24 ; SBL1\n",
+            "threatfox-api.abuse.ch": ([keyedHeader, keyedRow("203.0.113.9:443", "ip:port")]).joined(separator: "\r\n"),
+            "urlhaus-api.abuse.ch": """
+                "1","2026-10-24","http://bad.example/a.exe"
+                "2","2026-10-24","http://bad.example/b.exe"
+                "3","2026-10-24","http://BAD.example/c.exe"
+                "4","2026-10-24","http://203.0.113.9/x"
+                "5","2026-10-24","http://203.0.113.9:8080/y"
+
+                """,
+            "feodotracker.abuse.ch": "# empty\n",
+        ]), abuseChAuthKey: "k1").download() // pragma: allowlist secret
+        XCTAssertEqual(result.indicators.count, 3, "\(result.indicators.map(\.value))")
+        XCTAssertEqual(Set(result.indicators.map(\.value)), ["203.0.113.0/24", "203.0.113.9", "bad.example"])
+    }
+
+    func test_情報源をまたいでも強いほうを残す() {
+        let weak = ThreatIndicator(kind: .domain, value: "x.example", source: "threatfox", tag: "weak", confidence: .low)
+        let strong = ThreatIndicator(kind: .domain, value: "x.example", source: "urlhaus", tag: "strong", confidence: .high)
+        XCTAssertEqual(ThreatFeedDownloader.strongestPerIndicator([weak, strong]), [strong])
+        XCTAssertEqual(ThreatFeedDownloader.strongestPerIndicator([strong, weak]), [strong])
+    }
+
+    func test_同じ強さなら後のほうを残す_Hubと保存先に合わせる() {
+        let first = ThreatIndicator(kind: .ip, value: "203.0.113.9", source: "threatfox", tag: "a")
+        let later = ThreatIndicator(kind: .ip, value: "203.0.113.9", source: "urlhaus", tag: "b")
+        XCTAssertEqual(ThreatFeedDownloader.strongestPerIndicator([first, later]), [later])
+    }
+
+    func test_残した指標と今回の指標が重なっても1件にする() {
+        let result = ThreatFeedDownloader.DownloadResult(
+            indicators: [ThreatIndicator(kind: .ip, value: "203.0.113.9", source: "threatfox", tag: nil)],
+            missingSources: ["urlhaus"]
+        )
+        let merged = result.keepingPrevious([
+            ThreatIndicator(kind: .ip, value: "203.0.113.9", source: "urlhaus", tag: nil),
+        ])
+        XCTAssertEqual(merged.indicators.count, 1)
+        XCTAssertEqual(merged.keptSources, ["urlhaus"])
+    }
+
     func test_持っていなければ残すものも無い() {
         let result = ThreatFeedDownloader.DownloadResult(indicators: [], missingSources: [], sourcesNeedingKey: ["threatfox"])
         let merged = result.keepingPrevious([])

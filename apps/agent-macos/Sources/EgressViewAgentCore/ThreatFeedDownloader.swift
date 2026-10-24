@@ -118,7 +118,7 @@ public struct ThreatFeedDownloader: Sendable {
             let unread = Set(unreadSources)
             let kept = previous.filter { $0.source.map(unread.contains) ?? false }
             let keptSources = unreadSources.filter { source in kept.contains { $0.source == source } }
-            return (indicators + kept, keptSources)
+            return (ThreatFeedDownloader.strongestPerIndicator(indicators + kept), keptSources)
         }
     }
 
@@ -174,7 +174,7 @@ public struct ThreatFeedDownloader: Sendable {
         }
         guard anySucceeded else { throw DownloadError.allFeedsFailed }
         return DownloadResult(
-            indicators: indicators, missingSources: missing,
+            indicators: Self.strongestPerIndicator(indicators), missingSources: missing,
             sourcesNeedingKey: needingKey, sourcesRejectingKey: rejectingKey
         )
     }
@@ -277,15 +277,25 @@ public struct ThreatFeedDownloader: Sendable {
                 continue
             }
         }
-        // One indicator can appear as several IOCs. The stronger reading wins,
-        // so a C2 address is never downgraded by a weaker report of the same
-        // host -- the same rule as the Hub.
+        return strongestPerIndicator(indicators)
+    }
+
+    /// One entry per kind and value. The stronger reading wins, so a C2
+    /// address is never downgraded by a weaker report of the same host -- the
+    /// same rule as the Hub. Between equals the later one is kept, as the Hub
+    /// and the store both do.
+    ///
+    /// The store keeps one row per kind and value whatever it is given, so
+    /// without this the count shown was of rows before that, not of what is
+    /// checked: URLhaus lists one host under many URLs, and on 2026-10-24 a
+    /// Mac said 70,029 indicators while holding 13,431.
+    public static func strongestPerIndicator(_ indicators: [ThreatIndicator]) -> [ThreatIndicator] {
         var kept: [String: Int] = [:]
         var result: [ThreatIndicator] = []
         for indicator in indicators {
             let key = "\(indicator.kind.rawValue):\(indicator.value)"
             if let index = kept[key] {
-                if result[index].confidence == .low, indicator.confidence == .high {
+                if !(result[index].confidence == .high && indicator.confidence == .low) {
                     result[index] = indicator
                 }
                 continue
