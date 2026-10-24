@@ -365,7 +365,12 @@ const LOW_CONFIDENCE_DOMAINS = new Set([
 
 function parseUrlhaus(text) {
   // CSV: skip comments (#), fields: id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter
+  // One entry per host. URLhaus lists a host under every URL it served, so
+  // counting rows put "65,319 entries" on the settings screen for about
+  // 7,000 hosts, and the figure jumped back to 7,000 after each restart. The
+  // confidence depends only on the host, so the first row (the newest) wins.
   const entries = [];
+  const seen = new Set();
   for (const line of text.split('\n')) {
     if (!line || line.startsWith('#') || line.startsWith('"id"')) continue;
     const parts = parseCsvLine(line);
@@ -380,11 +385,11 @@ function parseUrlhaus(text) {
       const tag = isLowConf
         ? `URLhaus: malware hosted on ${host} (正規サービス — 要パス確認)`
         : 'URLhaus: malware distribution';
-      if (host.match(/^\d+\.\d+\.\d+\.\d+$/)) {
-        entries.push({ type: 'ip', value: host, source: 'urlhaus', tag, url, confidence });
-      } else {
-        entries.push({ type: 'domain', value: host, source: 'urlhaus', tag, url, confidence });
-      }
+      const type = /^\d+\.\d+\.\d+\.\d+$/.test(host) ? 'ip' : 'domain';
+      const key = `${type}:${host}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push({ type, value: host, source: 'urlhaus', tag, url, confidence });
     } catch {}
   }
   return entries;
@@ -392,7 +397,10 @@ function parseUrlhaus(text) {
 
 function parseSpamhausDrop(text) {
   // Lines: CIDR ; SBnnnn  (or comments starting with ;)
+  // The list can carry one range twice under different SBL ids (62.60.226.0/24
+  // on 2026-10-24); it is one range to match, and one to count.
   const entries = [];
+  const seen = new Set();
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith(';')) continue;
@@ -404,6 +412,9 @@ function parseSpamhausDrop(text) {
     const prefix = parseInt(m[2], 10);
     const ipNum = ipToNum(ip);
     const mask = (0xFFFFFFFF << (32 - prefix)) >>> 0;
+    const key = `${ipNum & mask}/${prefix}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     entries.push({ network: ipNum & mask, mask, prefix, source: 'spamhaus', tag: 'Spamhaus DROP (hijacked network)' });
   }
   return entries;

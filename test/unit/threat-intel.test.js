@@ -238,6 +238,19 @@ describe('parseUrlhaus', () => {
     assert.equal(entries[0].value, 'evil.example');
     assert.equal(entries[0].url, 'https://evil.example/payload?x=1,2');
   });
+
+  it('同じホストは何行あっても1件にする（最初の行のURLを残す）', () => {
+    const csv = [
+      '"1","2026-10-24","http://bad.example/a.exe","online","","malware_download","","",""',
+      '"2","2026-10-24","http://bad.example/b.exe","online","","malware_download","","",""',
+      '"3","2026-10-24","http://BAD.example/c.exe","online","","malware_download","","",""',
+      '"4","2026-10-24","http://203.0.113.9/x","online","","malware_download","","",""',
+      '"5","2026-10-24","http://203.0.113.9:8080/y","online","","malware_download","","",""',
+    ].join('\n');
+    const entries = parseUrlhaus(csv);
+    assert.deepEqual(entries.map(e => `${e.type}:${e.value}`), ['domain:bad.example', 'ip:203.0.113.9']);
+    assert.equal(entries[0].url, 'http://bad.example/a.exe');
+  });
 });
 
 describe('parseSpamhausDrop', () => {
@@ -261,6 +274,11 @@ describe('parseSpamhausDrop', () => {
 
   it('returns empty for empty input', () => {
     assert.deepEqual(parseSpamhausDrop(''), []);
+  });
+
+  it('同じ範囲が別のSBL番号で2回載っていても1件にする', () => {
+    const entries = parseSpamhausDrop('203.0.113.0/24 ; SBL1\n203.0.113.0/24 ; SBL2\n198.51.100.0/24 ; SBL3\n');
+    assert.equal(entries.length, 2);
   });
 });
 
