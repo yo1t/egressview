@@ -189,6 +189,41 @@ describe('指標が再起動をまたいで残る (P3-54 part B)', () => {
     second.closeDb();
   });
 
+  it('復元したあと取得に失敗しても、復元した指標で照合中と言う', () => {
+    // A restart while a feed is down: the cached entries are matched against,
+    // so neither the stats nor the log may say the feed contributes nothing.
+    const dbPath = temporaryDb();
+    const first = freshModule();
+    first.initDb(dbPath);
+    first._applyFeedResults([ok(FEODO), ok(''), ok(''), ok(SPAMHAUS)]);
+    first.closeDb();
+
+    const second = freshModule();
+    second.initDb(dbPath);
+    const logger = require('../../src/logger');
+    const errors = [];
+    const original = logger.error;
+    logger.error = (...args) => { errors.push(args.join(' ')); };
+    try {
+      second._applyFeedResults([failed('Request failed with status code 401'), ok(''), ok(''), ok(SPAMHAUS)]);
+    } finally {
+      logger.error = original;
+    }
+    const feodo = second.getStats().feeds.find(f => f.name === 'feodo');
+    assert.match(feodo.lastError, /401/);
+    assert.equal(feodo.lastSuccessAt, null);
+    assert.ok(feodo.restoredAt, 'the restore time survives the failed fetch');
+    assert.equal(feodo.contributingNothing, false);
+    assert.ok(feodo.entries > 0);
+    assert.equal(second.matchThreatIntel('198.51.100.9', null)?.source, 'feodo');
+
+    const summary = errors.find(line => line.includes('did not answer'));
+    assert.ok(summary, 'the missing feed is still reported');
+    assert.match(summary, /feodo \(not reached since start; matching on the saved list from /);
+    assert.doesNotMatch(summary, /contributing nothing/);
+    second.closeDb();
+  });
+
   it('取得に成功すると、そのソースの古い行を置き換える', () => {
     // Per source, so one feed's refresh never drops another's cache.
     const dbPath = temporaryDb();

@@ -220,6 +220,10 @@ function recordFeed(name, { count = null, error = null } = {}) {
     // what this feed is contributing. Zeroing it here would under-report.
     count: error ? previous.count : count,
     lastError: error,
+    // Kept across attempts. A feed restored from the cache whose first fetch
+    // fails is still matching on those entries; dropping this made the log and
+    // the settings screen say it was contributing nothing.
+    restoredAt: previous.restoredAt || null,
   });
 }
 
@@ -537,12 +541,17 @@ function _applyFeedResults(results, { deferCache = false, parsed = {} } = {}) {
     logger.error(
       `[threat-intel] ${unavailable.length} of ${feedState.size} feeds did not answer, so `
       + 'matching is running without them: '
-      + unavailable.map(([name, state]) => (
-        state.lastSuccessAt
-          ? `${name} (last succeeded ${new Date(state.lastSuccessAt).toISOString()}, `
-            + `${state.count} entries retained)`
-          : `${name} (never succeeded since start, contributing nothing)`
-      )).join(', ')
+      + unavailable.map(([name, state]) => {
+        if (state.lastSuccessAt) {
+          return `${name} (last succeeded ${new Date(state.lastSuccessAt).toISOString()}, `
+            + `${state.count} entries retained)`;
+        }
+        if (state.restoredAt) {
+          return `${name} (not reached since start; matching on the saved list from `
+            + `${new Date(state.restoredAt).toISOString()}, ${state.count} entries)`;
+        }
+        return `${name} (never succeeded since start, contributing nothing)`;
+      }).join(', ')
     );
   }
   if (deferCache) return cacheJobs;
