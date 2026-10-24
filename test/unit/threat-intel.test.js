@@ -116,7 +116,7 @@ describe('parseThreatFox: keyed recent.csv (2026-10-22 onward)', () => {
   });
 
   it('ハッシュは照合に使えないので取らない', () => {
-    const withHash = `${csv}\n"2026-10-24 01:56:00", "1982526", "d41d8cd98f00b204e9800998ecf8427e", "md5_hash", "payload", "win.x", "None", "X", "", "100", "False", "None", "None", "0", "r4"`;
+    const withHash = `${csv}\n"2026-10-24 01:56:00", "1982526", "${'0'.repeat(32)}", "md5_hash", "payload", "win.x", "None", "X", "", "100", "False", "None", "None", "0", "r4"`;
     assert.equal(parseThreatFox(withHash).length, 3);
   });
 
