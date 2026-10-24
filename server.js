@@ -593,6 +593,8 @@ notifier.setLogCallback((entry, type, slackSent, options = {}) => {
   if (options.record !== false) history.logNotification(entry, type, slackSent);
   if (type === 'threat') aiNotificationService.observeThreat(entry);
 });
+// The once-a-day limit for low-confidence threat matches survives a restart.
+notifier.setThreatHistoryLoader(since => history.getRecentNotifications('threat', since));
 
 // ─── Wire up poller callbacks ─────────────────────────────────────────────────
 

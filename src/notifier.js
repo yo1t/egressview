@@ -53,6 +53,63 @@ setInterval(() => {
   }
 }, 60 * 60_000).unref();
 
+// A low-confidence match is a shared hosting service (github.com,
+// drive.google.com, ...) where one malicious file is listed and the path
+// cannot be seen. Every new connection to that service matched, and GitHub
+// rotates its addresses, so on 2026-10-17..24 this Mac and the Hub host made
+// 56 detection-log rows that were all the same github.com listing. Such a
+// match is now logged and sent to Slack once a day per source and listing;
+// high-confidence matches are unchanged, and the connection views still show
+// every match.
+const LOW_CONFIDENCE_REPEAT_MS = 24 * 60 * 60 * 1000;
+const _lowConfidenceSeen = new Map();
+let _threatHistoryLoader = null;
+let _lowConfidenceRestored = false;
+
+function lowConfidenceKey({ src, source, tag }) {
+  return `${src || ''}|${source || ''}|${tag || ''}`;
+}
+
+/**
+ * `load(since)` returns the detection log's threat rows since `since` (or null
+ * while no database is open), so the daily limit survives a restart.
+ */
+function setThreatHistoryLoader(load) {
+  _threatHistoryLoader = load;
+  _lowConfidenceRestored = false;
+}
+
+function _restoreLowConfidence(now) {
+  if (_lowConfidenceRestored || !_threatHistoryLoader) return;
+  let rows;
+  try {
+    rows = _threatHistoryLoader(now - LOW_CONFIDENCE_REPEAT_MS);
+  } catch (error) {
+    _lowConfidenceRestored = true;
+    logger.warn('[notifier] could not restore the low-confidence daily limit:', error.message);
+    return;
+  }
+  if (rows == null) return;
+  _lowConfidenceRestored = true;
+  for (const row of rows) {
+    if (row.threatConfidence !== 'low') continue;
+    const key = lowConfidenceKey({ src: row.src, source: row.threatSource, tag: row.threatTag });
+    if (!(_lowConfidenceSeen.get(key) >= row.detectedAt)) _lowConfidenceSeen.set(key, row.detectedAt);
+  }
+}
+
+/** Whether a low-confidence match was already reported in the last day. */
+function _lowConfidenceRepeat(entry, now = Date.now()) {
+  _restoreLowConfidence(now);
+  for (const [key, at] of _lowConfidenceSeen) {
+    if (now - at >= LOW_CONFIDENCE_REPEAT_MS) _lowConfidenceSeen.delete(key);
+  }
+  const key = lowConfidenceKey({ src: entry.src, source: entry.threat.source, tag: entry.threat.tag });
+  if (_lowConfidenceSeen.has(key)) return true;
+  _lowConfidenceSeen.set(key, now);
+  return false;
+}
+
 // injectable for tests
 let _httpPost = _defaultHttpPost;
 
@@ -146,6 +203,12 @@ function _buildMessage(entry, lang) {
 
 async function notify(entry) {
   if (!entry.threat) return false;
+
+  if (entry.threat.confidence === 'low' && _lowConfidenceRepeat(entry)) {
+    // No row and no Slack, but the AI threat rules still observe it.
+    if (_logCallback) _logCallback(entry, 'threat', false, { record: false });
+    return false;
+  }
 
   let slackSent = false;
 
@@ -367,7 +430,12 @@ async function test() {
 
 // test seam only — not for production use
 function _setHttpPost(fn) { _httpPost = fn; }
-function _resetCooldown() { _cooldown.clear(); }
+function _resetCooldown() {
+  _cooldown.clear();
+  _lowConfidenceSeen.clear();
+  _threatHistoryLoader = null;
+  _lowConfidenceRestored = false;
+}
 function _resetLogCallback() { _logCallback = null; }
 
 // ─── Slack API helpers ────────────────────────────────────────────────────────
@@ -454,6 +522,7 @@ module.exports = {
   getDetectionConfig,
   sendAiNotification,
   setLogCallback,
+  setThreatHistoryLoader,
   test,
   verifyToken,
   lookupUser,
