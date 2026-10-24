@@ -124,6 +124,60 @@ describe('notify — cooldown', () => {
   });
 });
 
+// 2026-10-17..24: one URLhaus listing on github.com made 56 detection-log rows,
+// one per new connection, because GitHub rotates its addresses.
+describe('notify — low-confidence matches once a day', () => {
+  const low = (dst, src = '192.168.1.10') => makeEntry({
+    src, dst, dstHost: 'lb.github.com',
+    threat: { source: 'urlhaus', tag: 'URLhaus: malware hosted on github.com (shared service)', confidence: 'low' },
+  });
+  let logged;
+  beforeEach(() => {
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01', cooldownMinutes: 60 });
+    notifier._setHttpPost(async () => ({ ok: true }));
+    logged = [];
+    notifier.setLogCallback((entry, type, slackSent, options) => logged.push({ dst: entry.dst, slackSent, record: options.record }));
+  });
+
+  it('同じ送り元・同じ一覧は、宛先IPが変わっても1日1回だけ記録して送る', async () => {
+    assert.equal(await notifier.notify(low('140.82.112.21')), true);
+    assert.equal(await notifier.notify(low('140.82.113.22')), false);
+    assert.equal(await notifier.notify(low('185.199.110.133')), false);
+    assert.deepEqual(logged.map(l => l.record), [true, false, false], '2件目からは検出ログに残さない');
+    assert.equal(logged.length, 3, 'AIの脅威のルールにはすべて渡す');
+  });
+
+  it('別の送り元なら記録し、確度が高い一致はこれまでどおり毎回記録する', async () => {
+    await notifier.notify(low('140.82.112.21'));
+    await notifier.notify(low('140.82.112.21', '10.0.0.5'));
+    await notifier.notify(makeEntry({ dst: '1.2.3.4' }));
+    await notifier.notify(makeEntry({ dst: '5.6.7.8' }));
+    assert.deepEqual(logged.map(l => l.record), [true, true, true, true]);
+  });
+
+  it('再起動の後も、検出ログの直近1日分から制限を引き継ぐ', async () => {
+    const now = Date.now();
+    notifier.setThreatHistoryLoader(() => [{
+      src: '192.168.1.10', threatSource: 'urlhaus', threatConfidence: 'low',
+      threatTag: 'URLhaus: malware hosted on github.com (shared service)', detectedAt: now - 3_600_000,
+    }]);
+    assert.equal(await notifier.notify(low('140.82.112.21')), false);
+    assert.equal(logged[0].record, false);
+  });
+
+  it('データベースがまだ開いていなければ、開いてから読み直す', async () => {
+    let open = false;
+    const now = Date.now();
+    notifier.setThreatHistoryLoader(() => (open ? [{
+      src: '192.168.1.10', threatSource: 'urlhaus', threatConfidence: 'low',
+      threatTag: 'URLhaus: malware hosted on github.com (shared service)', detectedAt: now - 60_000,
+    }] : null));
+    assert.equal(await notifier.notify(low('140.82.112.21', '10.9.9.9')), true, '別の送り元');
+    open = true;
+    assert.equal(await notifier.notify(low('140.82.112.21')), false);
+  });
+});
+
 describe('notify — Slack API error handling', () => {
   beforeEach(() => {
     notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });

@@ -737,7 +737,7 @@ function logNotification(entry, type, slackSent) {
 function getRecentNotifications(type, since) {
   if (!db) return null;
   return db.prepare(`
-    SELECT src, threatSource, threatTag, detectedAt FROM notification_log
+    SELECT src, threatSource, threatTag, threatConfidence, detectedAt FROM notification_log
     WHERE detectedAt >= ? AND type = ?
     ORDER BY detectedAt
   `).all(since, type);
