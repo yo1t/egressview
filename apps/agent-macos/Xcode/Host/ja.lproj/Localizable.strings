@@ -243,7 +243,7 @@
 "Oldest pending: %@" = "最も古い送信待ち：%@";
 "Last acknowledged: %@" = "最終受理：%@";
 "none" = "なし";
-"never" = "未送信";
+"never" = "まだなし";
 "Local history" = "ローカル履歴";
 "Choose how long this Mac keeps connection metadata." = "このMacに通信メタデータを保持する期間を選びます。";
 "Retention" = "保持期間";
@@ -496,7 +496,6 @@
 "Network monitoring System Extension is not installed." = "ネットワーク監視のSystem Extensionがインストールされていません。";
 
 /* Standalone threat feeds: partial results and terms */
-"%lld indicators, but %@ could not be read. Destinations are checked against the rest." = "指標 %lld 件。ただし %@ は取得できませんでした。通信先は残りの指標とだけ照合しています。";
 "abuse.ch terms" = "abuse.ch 利用条件";
 "Spamhaus terms" = "Spamhaus 利用条件";
 "%lld countries are shaded from all-time local history." = "ローカルの全期間履歴にある%lldか国を薄く表示しています。";
@@ -870,3 +869,19 @@
 "Monitoring has stopped and local cleanup is complete. macOS removes the network extension when the app is moved to Trash; restart the Mac afterwards to finish." = "監視を止め、このMacの後片付けが完了しました。アプリをゴミ箱に入れると、macOSがネットワーク機能拡張を外します。そのあとMacを再起動すると完了です。";
 "Collection method" = "収集方式";
 "LAN probes (packet counting): counted packets %lld · UDP replies set aside %lld · senders reported %lld (last %@) · waiting %lld · sent to Hub %lld · dropped %lld" = "LAN内からの探索（パケットのカウント）：数えたパケット %lld・返事として除いたUDP %lld・報告した送り元 %lld（最後 %@）・送信待ち %lld・Hubへ送った %lld・捨てた %lld";
+
+/* abuse.ch Auth-Key for ThreatFox and URLhaus */
+"abuse.ch Auth-Key (ThreatFox and URLhaus)" = "abuse.chのAuth-Key（ThreatFoxとURLhaus用）";
+"abuse.ch requires a free Auth-Key for ThreatFox and URLhaus. Without one, public-feed downloads read only Feodo Tracker and Spamhaus. The key is stored only in the Keychain and is sent only to abuse.ch, as part of the download address." = "ThreatFoxとURLhausの取得には、abuse.chの無料のAuth-Keyが必要です。キーがないと、公開フィードからはFeodo TrackerとSpamhausだけを取得します。キーはKeychainにだけ保存し、abuse.chへ取得先アドレスの一部としてだけ送ります。";
+"Get a free Auth-Key at auth.abuse.ch" = "auth.abuse.chで無料のAuth-Keyを取得";
+"abuse.ch Auth-Key" = "abuse.chのAuth-Key";
+"Save Auth-Key" = "Auth-Keyを保存";
+"Remove Auth-Key" = "Auth-Keyを削除";
+"The Auth-Key could not be saved to the Keychain." = "Auth-KeyをKeychainに保存できませんでした。";
+"The Auth-Key could not be removed from the Keychain." = "Auth-KeyをKeychainから削除できませんでした。";
+"%lld indicators." = "指標 %lld 件。";
+"%@ need a free abuse.ch Auth-Key (set it below)." = "%@ はabuse.chの無料のAuth-Keyが必要です（下で設定できます）。";
+"abuse.ch refused the Auth-Key for %@. Check the key below." = "%@ でabuse.chがAuth-Keyを受け付けませんでした。下のキーを確認してください。";
+"%@ could not be read." = "%@ は取得できませんでした。";
+"Destinations are checked against the rest." = "通信先は残りの指標と照合しています。";
+"The list held before is still used for %@." = "%@ は、それまで持っていた一覧で照合を続けています。";

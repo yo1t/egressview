@@ -23,7 +23,7 @@
 |---|---|---|---|
 | **あなたのHub**（入力したアドレス） | 登録後、かつ送信が有効なときのみ | このMacのホスト名と、観測した接続メタデータ（ローカル／リモートアドレスとポート、プロトコル、プロセス名とID、取得できた場合のbundle ID、時刻、バイト数、収集方式と確度、取得できた場合の宛先ホスト名） | 受領応答、脅威フィードデータ、既に観測済みのアドレスの地図上の位置 |
 | **`dl.egressview.com`** | 定期的な更新チェックと、「更新を確認」を押したとき | AgentとOSのバージョンを含むHTTPS GET。識別子もアカウントも観測データも含みません | リリースのmanifest、インストールを選んだ場合は `.pkg` |
-| **`feodotracker.abuse.ch` / `threatfox.abuse.ch` / `urlhaus.abuse.ch` / `www.spamhaus.org`** | **フィードの直接ダウンロードを有効にした場合のみ**（Hubがフィードを供給するときは無効） | 公開リスト全体を取得する通常のHTTPS GET。**あなたの観測結果は送りません** — 照合はダウンロードしたリストに対してMac上で行います | 公開されている指標リスト |
+| **`feodotracker.abuse.ch` / `threatfox-api.abuse.ch` / `urlhaus-api.abuse.ch` / `www.spamhaus.org`** | **フィードの直接ダウンロードを有効にした場合のみ**（Hubがフィードを供給するときは無効）。ThreatFoxとURLhausは、abuse.chのAuth-Keyを保存した場合だけ取得します | 公開リスト全体を取得する通常のHTTPS GET。ThreatFoxとURLhausでは、保存したabuse.chのAuth-Keyがアドレスの一部になります。**あなたの観測結果は送りません** — 照合はダウンロードしたリストに対してMac上で行います | 公開されている指標リスト |
 | **`download.maxmind.com`** | ローカルのGeoLite2国別テーブルを設定した場合のみ | MaxMindのアカウントIDとライセンスキー。観測した宛先IPは送りません | GeoLite2データベース |
 | **`ipwho.is`** | 位置情報の補完照会を有効にした場合のみ | 観測した宛先IPアドレス。1日最大500件 | 問い合わせたアドレスの位置 |
 | **`api.openai.com` / `api.anthropic.com`** | 対象のクラウドAIを設定し、質問を送信した場合のみ | 画面でプレビューした範囲の情報、質問、会話の文脈 | モデルの回答 |

@@ -49,18 +49,34 @@ final class ThreatIntelController: ObservableObject {
         case failed(String)
         /// Fetched, but not from everywhere. The count is real and incomplete,
         /// and saying only the count would hide that.
-        case partial(count: Int, missing: [String], at: Date)
+        case partial(count: Int, shortfall: Shortfall, at: Date)
+    }
+
+    /// Which feeds contributed nothing to a download, and why. The reasons
+    /// differ in what the user can do about them: a missing key is theirs to
+    /// add, a refused key theirs to check, a failed feed nobody's.
+    struct Shortfall: Equatable {
+        var failed: [String]
+        var needingKey: [String]
+        var rejectingKey: [String]
+        /// Of those, the ones whose previously held indicators are still used.
+        var kept: [String]
     }
 
     @Published private(set) var status: Status = .idle
     @Published private(set) var availability: ThreatIntelAvailability = .notFetchedYet
     @Published private(set) var activeSource: ActiveSource = .none
     @Published private(set) var lastUpdatedAt: Date?
+    /// Whether an abuse.ch Auth-Key is in the Keychain. Read off the main
+    /// thread at start and after each change, for the same reason as `hasHub`.
+    @Published private(set) var hasAbuseChKey = false
+    @Published private(set) var abuseChKeyError: String?
 
     private let store: ObservationStore?
     private let credentialStore: any AgentCredentialStoring
     private let agentVersion: String
     private let preferences = ThreatIntelPreferences()
+    private let abuseChKeys = AbuseChKeyStore()
     private let timer = PeriodicWork()
     private var isRefreshing = false
 
@@ -162,6 +178,7 @@ final class ThreatIntelController: ObservableObject {
             // Before anything reads it, so the settings screen never sees the
             // assumed value for longer than it takes to answer.
             await refreshHubState()
+            hasAbuseChKey = await abuseChKeys.load() != nil
             await refresh()
         }
         timer.start(every: Self.refreshInterval) { [weak self] in
@@ -178,6 +195,34 @@ final class ThreatIntelController: ObservableObject {
         availability = .checked(indicatorCount: count, fetchedAt: preferences.lastFetch)
         lastUpdatedAt = preferences.lastFetch
         activeSource = .cache
+    }
+
+    /// Stores the user's abuse.ch Auth-Key. A Mac downloading the feeds itself
+    /// fetches straight away, so the key is tried while the user is looking; a
+    /// Hub-enrolled Mac keeps it for its fallback and fetches nothing now.
+    func saveAbuseChKey(_ key: String) async {
+        let clean = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        do {
+            try await abuseChKeys.save(clean)
+            abuseChKeyError = nil
+        } catch {
+            abuseChKeyError = L("The Auth-Key could not be saved to the Keychain.")
+            return
+        }
+        hasAbuseChKey = true
+        if source == .directDownload { await refresh() }
+    }
+
+    func removeAbuseChKey() async {
+        do {
+            try await abuseChKeys.clear()
+            abuseChKeyError = nil
+        } catch {
+            abuseChKeyError = L("The Auth-Key could not be removed from the Keychain.")
+            return
+        }
+        hasAbuseChKey = false
     }
 
     /// A deliberate one-time exception to Hub-first delivery. The button and
@@ -293,27 +338,42 @@ final class ThreatIntelController: ObservableObject {
     private func refreshFromFeeds(store: ObservationStore) async {
         status = .fetching
         do {
-            let result = try await ThreatFeedDownloader().download()
+            let key = await abuseChKeys.load()
+            hasAbuseChKey = key != nil
+            let result = try await ThreatFeedDownloader(abuseChAuthKey: key).download()
+            // A feed not read this time keeps what is already held for it,
+            // rather than being dropped by the replace below.
+            let previous = (try? store.threatIndicators()) ?? []
+            let merged = result.keepingPrevious(previous)
             logger.notice(
                 """
                 feeds: downloaded indicators=\(result.indicators.count, privacy: .public) \
                 missing=\(result.missingSources.joined(separator: ","), privacy: .public) \
+                needsKey=\(result.sourcesNeedingKey.joined(separator: ","), privacy: .public) \
+                keyRefused=\(result.sourcesRejectingKey.joined(separator: ","), privacy: .public) \
+                kept=\(merged.keptSources.joined(separator: ","), privacy: .public) \
+                stored=\(merged.indicators.count, privacy: .public) \
                 complete=\(result.isComplete, privacy: .public)
                 """
             )
-            try store.replaceThreatIndicators(result.indicators)
+            try store.replaceThreatIndicators(merged.indicators)
             // Force a full Hub response after reconnection. A Hub 304 must not
             // leave a public-feed snapshot labelled as Hub data.
             preferences.etag = nil
             preferences.lastFetch = Date()
             lastUpdatedAt = preferences.lastFetch
             activeSource = .publicFeeds
-            availability = .checked(indicatorCount: result.indicators.count, fetchedAt: Date())
+            availability = .checked(indicatorCount: merged.indicators.count, fetchedAt: Date())
             status = result.isComplete
-                ? .updated(count: result.indicators.count, at: Date())
+                ? .updated(count: merged.indicators.count, at: Date())
                 : .partial(
-                    count: result.indicators.count,
-                    missing: result.missingSources,
+                    count: merged.indicators.count,
+                    shortfall: Shortfall(
+                        failed: result.missingSources,
+                        needingKey: result.sourcesNeedingKey,
+                        rejectingKey: result.sourcesRejectingKey,
+                        kept: merged.keptSources
+                    ),
                     at: Date()
                 )
         } catch {

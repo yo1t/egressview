@@ -3,20 +3,57 @@ import Foundation
 /// Downloads the same public threat feeds the Hub reads, for agents that have
 /// no Hub.
 ///
-/// These are plain list downloads, not lookup services: no key, no query, and
-/// **no destination from this Mac is sent anywhere**. What it does reveal is
-/// that this Mac asked at all, which is why it stays something the user turns
-/// on rather than something done for them.
+/// These are plain list downloads, not lookup services: no query, and **no
+/// destination from this Mac is sent anywhere**. What it does reveal is that
+/// this Mac asked at all, which is why it stays something the user turns on
+/// rather than something done for them.
+///
+/// ThreatFox and URLhaus need the user's own abuse.ch Auth-Key. abuse.ch
+/// retired the keyless downloads on 2026-10-22 (they answer 410 Gone), so
+/// without a key those two are not requested at all and are reported as
+/// needing one, not as failed.
 public struct ThreatFeedDownloader: Sendable {
-    /// The same four feeds `src/threat-intel.js` uses. Kept identical on
-    /// purpose: a standalone agent and a Hub-connected one should not disagree
-    /// about what is dangerous.
-    public static let feeds: [(url: URL, kind: FeedKind, source: String)] = [
-        (URL(string: "https://feodotracker.abuse.ch/downloads/ipblocklist.csv")!, .feodo, "feodo"),
-        (URL(string: "https://threatfox.abuse.ch/export/csv/ip-port/recent/")!, .threatfox, "threatfox"),
-        (URL(string: "https://urlhaus.abuse.ch/downloads/csv_recent/")!, .urlhaus, "urlhaus"),
-        (URL(string: "https://www.spamhaus.org/drop/drop.txt")!, .spamhausDrop, "spamhaus"),
+    public struct Feed: Sendable {
+        public let kind: FeedKind
+        public let source: String
+        /// Set for feeds anyone can download.
+        let publicURL: URL?
+        /// Set for the abuse.ch exports that take the Auth-Key in the path.
+        let abuseChExportHost: String?
+
+        public var requiresAbuseChKey: Bool { abuseChExportHost != nil }
+
+        /// The address to fetch, or nil when this feed needs a key and there
+        /// is none.
+        public func url(abuseChAuthKey: String?) -> URL? {
+            if let publicURL { return publicURL }
+            guard let host = abuseChExportHost,
+                  let key = abuseChAuthKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !key.isEmpty,
+                  let encoded = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics)
+            else { return nil }
+            return URL(string: "https://\(host)/v2/files/exports/\(encoded)/recent.csv")
+        }
+    }
+
+    /// The same four feeds `src/threat-intel.js` uses, at the same addresses.
+    /// Kept identical on purpose: a standalone agent and a Hub-connected one
+    /// should not disagree about what is dangerous.
+    public static let feeds: [Feed] = [
+        Feed(kind: .feodo, source: "feodo",
+             publicURL: URL(string: "https://feodotracker.abuse.ch/downloads/ipblocklist.csv")!,
+             abuseChExportHost: nil),
+        Feed(kind: .threatfox, source: "threatfox", publicURL: nil,
+             abuseChExportHost: "threatfox-api.abuse.ch"),
+        Feed(kind: .urlhaus, source: "urlhaus", publicURL: nil,
+             abuseChExportHost: "urlhaus-api.abuse.ch"),
+        Feed(kind: .spamhausDrop, source: "spamhaus",
+             publicURL: URL(string: "https://www.spamhaus.org/drop/drop.txt")!,
+             abuseChExportHost: nil),
     ]
+
+    /// Where to get a free abuse.ch Auth-Key.
+    public static let abuseChAuthKeyURL = URL(string: "https://auth.abuse.ch/")!
 
     public enum FeedKind: Sendable {
         case feodo
@@ -26,11 +63,12 @@ public struct ThreatFeedDownloader: Sendable {
     }
 
     public enum DownloadError: Error, Equatable {
-        /// Every feed failed. One failing is normal and is not reported.
+        /// Every feed that was requested failed. One failing is normal and is
+        /// not reported this way.
         case allFeedsFailed
     }
 
-    /// What came back, including which feeds did not.
+    /// What came back, including which feeds did not, and why.
     ///
     /// The count alone is not enough to judge by. Three of the four feeds
     /// returned nothing for the whole life of this code and the screen went on
@@ -41,35 +79,85 @@ public struct ThreatFeedDownloader: Sendable {
         /// Feeds that failed outright, or returned something that parsed to
         /// nothing. Named so they can be said out loud.
         public let missingSources: [String]
+        /// Feeds not requested because there is no abuse.ch Auth-Key.
+        public let sourcesNeedingKey: [String]
+        /// Feeds where abuse.ch refused the Auth-Key (401/403).
+        public let sourcesRejectingKey: [String]
 
-        public init(indicators: [ThreatIndicator], missingSources: [String]) {
+        public init(
+            indicators: [ThreatIndicator],
+            missingSources: [String],
+            sourcesNeedingKey: [String] = [],
+            sourcesRejectingKey: [String] = []
+        ) {
             self.indicators = indicators
             self.missingSources = missingSources
+            self.sourcesNeedingKey = sourcesNeedingKey
+            self.sourcesRejectingKey = sourcesRejectingKey
         }
 
-        public var isComplete: Bool { missingSources.isEmpty }
+        /// Every feed that contributed nothing this time, whatever the reason.
+        public var unreadSources: [String] {
+            missingSources + sourcesRejectingKey + sourcesNeedingKey
+        }
+
+        public var isComplete: Bool { unreadSources.isEmpty }
+
+        /// This download, with the indicators already held for any feed that
+        /// was not read this time.
+        ///
+        /// A download replaces the stored set, so without this a partial one
+        /// threw away what it could not replace. On 2026-10-24 a fallback
+        /// download on a Hub-enrolled Mac swapped the Hub's 11,438 indicators
+        /// for 1,693 -- Feodo and Spamhaus only -- because ThreatFox and
+        /// URLhaus answered 410. The fallback meant to cover for an absent Hub
+        /// narrowed the check to about a seventh of what it had been.
+        public func keepingPrevious(_ previous: [ThreatIndicator]) -> (
+            indicators: [ThreatIndicator], keptSources: [String]
+        ) {
+            let unread = Set(unreadSources)
+            let kept = previous.filter { $0.source.map(unread.contains) ?? false }
+            let keptSources = unreadSources.filter { source in kept.contains { $0.source == source } }
+            return (indicators + kept, keptSources)
+        }
     }
 
     private let transport: any GeoCacheTransport
+    private let abuseChAuthKey: String?
 
-    public init(transport: any GeoCacheTransport = URLSessionGeoCacheTransport(timeout: 60)) {
+    public init(
+        transport: any GeoCacheTransport = URLSessionGeoCacheTransport(timeout: 60),
+        abuseChAuthKey: String? = nil
+    ) {
         self.transport = transport
+        self.abuseChAuthKey = abuseChAuthKey
     }
 
     public func download() async throws -> DownloadResult {
         var indicators: [ThreatIndicator] = []
         var missing: [String] = []
+        var needingKey: [String] = []
+        var rejectingKey: [String] = []
         var anySucceeded = false
         for feed in Self.feeds {
-            var request = URLRequest(url: feed.url)
+            guard let url = feed.url(abuseChAuthKey: abuseChAuthKey) else {
+                needingKey.append(feed.source)
+                continue
+            }
+            var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.httpShouldHandleCookies = false
-            guard let (data, response) = try? await transport.fetch(request),
-                  response.statusCode == 200,
-                  let text = String(data: data, encoding: .utf8)
-            else {
+            guard let (data, response) = try? await transport.fetch(request) else {
                 // One feed being down is ordinary, so the refresh continues --
                 // but it is recorded rather than shrugged off.
+                missing.append(feed.source)
+                continue
+            }
+            if feed.requiresAbuseChKey, response.statusCode == 401 || response.statusCode == 403 {
+                rejectingKey.append(feed.source)
+                continue
+            }
+            guard response.statusCode == 200, let text = String(data: data, encoding: .utf8) else {
                 missing.append(feed.source)
                 continue
             }
@@ -85,7 +173,10 @@ public struct ThreatFeedDownloader: Sendable {
             indicators.append(contentsOf: parsed)
         }
         guard anySucceeded else { throw DownloadError.allFeedsFailed }
-        return DownloadResult(indicators: indicators, missingSources: missing)
+        return DownloadResult(
+            indicators: indicators, missingSources: missing,
+            sourcesNeedingKey: needingKey, sourcesRejectingKey: rejectingKey
+        )
     }
 
     /// Feeds that legitimately publish nothing for long stretches, so an empty
@@ -121,22 +212,88 @@ public struct ThreatFeedDownloader: Sendable {
         }
     }
 
-    /// `first_seen_utc,ioc_id,ioc_value(ip:port),ioc_type,threat_type,…,malware`
+    /// `first_seen_utc,ioc_id,ioc_value,ioc_type,threat_type,fk_malware,malware_alias,malware_printable,…`
+    ///
+    /// Read the way the Hub reads it (`parseThreatFox` in `src/threat-intel.js`):
+    /// ip:port IOCs become addresses; domain and url IOCs become names keyed by
+    /// host (a url on an IPv4 address becomes that address); hashes are
+    /// skipped. A compromised legitimate site, a file on a shared service, or
+    /// an IOC ThreatFox rates below 75 is low confidence.
     static func parseThreatFox(_ text: String, source: String) -> [ThreatIndicator] {
-        lines(text).compactMap { line in
-            guard !line.hasPrefix("#") else { return nil }
+        // Column positions come from the header when there is one; the keyed
+        // export added columns that moved confidence_level.
+        var confidenceColumn: Int?
+        var compromisedColumn: Int?
+        var indicators: [ThreatIndicator] = []
+        for line in lines(text) {
+            var header = Substring(line)
+            if header.hasPrefix("#") { header = header.dropFirst().drop { $0 == " " } }
+            if header.hasPrefix("\"first_seen") {
+                let names = csvFields(String(header))
+                confidenceColumn = names.firstIndex(of: "confidence_level")
+                compromisedColumn = names.firstIndex(of: "is_compromised")
+                continue
+            }
+            guard !line.hasPrefix("#") else { continue }
             let fields = csvFields(String(line))
-            guard fields.count > 2 else { return nil }
-            // Strips the port: the indicator is the host, and keeping the port
-            // would stop it matching the same host reached on another one.
-            let value = fields[2].split(separator: ":").first.map(String.init) ?? fields[2]
-            guard isPlausibleIPv4(value) else { return nil }
-            let malware = fields.count > 5 ? fields[5] : ""
-            return ThreatIndicator(
-                kind: .ip, value: value, source: source,
-                tag: malware.isEmpty ? "malware infrastructure" : malware
-            )
+            guard fields.count > 2 else { continue }
+            let ioc = fields[2]
+            let type = fields.count > 3 ? fields[3] : "ip:port"
+            let malware = [6, 7, 5].lazy
+                .compactMap { fields.count > $0 ? fields[$0] : nil }
+                .first { !$0.isEmpty && $0 != "None" } ?? ""
+
+            switch type {
+            case "domain", "url":
+                let rawHost = type == "url" ? URL(string: ioc)?.host : ioc
+                guard var host = rawHost?.lowercased(), host.contains(".") else { continue }
+                if host.hasSuffix(".") { host.removeLast() }
+                let field = { (column: Int?) -> String in
+                    guard let column, fields.count > column else { return "" }
+                    return fields[column]
+                }
+                let compromised = field(compromisedColumn) == "True"
+                let level = Int(field(confidenceColumn))
+                let sharedHosting = Self.confidence(forHost: host) == .low
+                let low = compromised || sharedHosting || (level.map { $0 < 75 } ?? false)
+                let name = malware.isEmpty ? "malware infrastructure" : malware
+                let note = compromised ? " (compromised legitimate site)"
+                    : sharedHosting ? " (file hosting service)" : ""
+                let isAddress = isPlausibleIPv4(host)
+                indicators.append(ThreatIndicator(
+                    kind: isAddress ? .ip : .domain, value: host, source: source,
+                    tag: name + note, confidence: low ? .low : .high
+                ))
+            case "ip:port":
+                // Strips the port: the indicator is the host, and keeping the
+                // port would stop it matching the same host reached on another.
+                let value = ioc.split(separator: ":").first.map(String.init) ?? ioc
+                guard isPlausibleIPv4(value) else { continue }
+                indicators.append(ThreatIndicator(
+                    kind: .ip, value: value, source: source,
+                    tag: malware.isEmpty ? "malware infrastructure" : malware
+                ))
+            default:
+                continue
+            }
         }
+        // One indicator can appear as several IOCs. The stronger reading wins,
+        // so a C2 address is never downgraded by a weaker report of the same
+        // host -- the same rule as the Hub.
+        var kept: [String: Int] = [:]
+        var result: [ThreatIndicator] = []
+        for indicator in indicators {
+            let key = "\(indicator.kind.rawValue):\(indicator.value)"
+            if let index = kept[key] {
+                if result[index].confidence == .low, indicator.confidence == .high {
+                    result[index] = indicator
+                }
+                continue
+            }
+            kept[key] = result.count
+            result.append(indicator)
+        }
+        return result
     }
 
     /// `id,dateadded,url,url_status,…,threat,…`
@@ -249,5 +406,33 @@ public struct ThreatFeedDownloader: Sendable {
 
     static func isPlausibleIPv4(_ text: String) -> Bool {
         ThreatMatcher.ipv4ToNumber(text) != nil
+    }
+}
+
+/// Where the user's abuse.ch Auth-Key lives: the Keychain, beside the other
+/// credentials the agent holds, and never in preferences.
+public struct AbuseChKeyStore: Sendable {
+    static let account = "abuse-ch-auth-key"
+
+    private let keys: any AgentAPIKeyStoring
+
+    public init(keys: any AgentAPIKeyStoring = KeychainAgentAPIKeyStore(
+        service: "com.egressview.agent.abuse-ch"
+    )) {
+        self.keys = keys
+    }
+
+    /// Off the caller's thread: a keychain call can stall (see
+    /// `AgentCredentialStoring.loadDetached`).
+    public func load() async -> String? {
+        (try? await keys.loadDetached(provider: Self.account)) ?? nil
+    }
+
+    public func save(_ key: String) async throws {
+        try await keys.saveDetached(key, provider: Self.account)
+    }
+
+    public func clear() async throws {
+        try await keys.deleteDetached(provider: Self.account)
     }
 }

@@ -732,6 +732,7 @@ private struct AgentSettingsView: View {
     @State private var confirmRepair = false
     @State private var confirmLocalOnlyUninstall = false
     @State private var anthropicAPIKey = ""
+    @State private var abuseChKeyInput = ""
     @State private var anthropicCloudConsent = false
     @State private var openAIAPIKey = ""
     @State private var openAICloudConsent = false
@@ -1607,7 +1608,58 @@ private struct AgentSettingsView: View {
                     .foregroundStyle(.secondary)
                 threatFeedTerms
             }
+            abuseChKeySection
         }
+    }
+
+    /// ThreatFox and URLhaus need the user's own abuse.ch Auth-Key since
+    /// 2026-10-22. Without it, a public-feed download reads only Feodo Tracker
+    /// and Spamhaus, and the screen says so rather than calling it a failure.
+    private var abuseChKeySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L("abuse.ch Auth-Key (ThreatFox and URLhaus)"))
+            Text(L("abuse.ch requires a free Auth-Key for ThreatFox and URLhaus. Without one, public-feed downloads read only Feodo Tracker and Spamhaus. The key is stored only in the Keychain and is sent only to abuse.ch, as part of the download address."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Link(L("Get a free Auth-Key at auth.abuse.ch"), destination: ThreatFeedDownloader.abuseChAuthKeyURL)
+                .font(.caption)
+            HStack(spacing: 8) {
+                SecureField(
+                    threats.hasAbuseChKey ? L("Key stored in Keychain · enter only to replace") : L("abuse.ch Auth-Key"),
+                    text: $abuseChKeyInput
+                )
+                .textFieldStyle(.roundedBorder)
+                Button(L("Save Auth-Key")) {
+                    let key = abuseChKeyInput
+                    abuseChKeyInput = ""
+                    Task { await threats.saveAbuseChKey(key) }
+                }
+                .disabled(abuseChKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if threats.hasAbuseChKey {
+                    Button(L("Remove Auth-Key"), role: .destructive) {
+                        abuseChKeyInput = ""
+                        Task { await threats.removeAbuseChKey() }
+                    }
+                }
+            }
+            if let error = threats.abuseChKeyError {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+
+    private static func feedName(_ source: String) -> String {
+        switch source {
+        case "feodo": return "Feodo Tracker"
+        case "threatfox": return "ThreatFox"
+        case "urlhaus": return "URLhaus"
+        case "spamhaus": return "Spamhaus DROP"
+        default: return source
+        }
+    }
+
+    private static func feedNames(_ sources: [String]) -> String {
+        sources.map(feedName).joined(separator: ", ")
     }
 
     private var threatFeedTerms: some View {
@@ -1636,15 +1688,24 @@ private struct AgentSettingsView: View {
         case .idle: return ""
         case .fetching: return L("Fetching...")
         case let .updated(count, _): return L("%lld indicators", count)
-        case let .partial(count, missing, _):
+        case let .partial(count, shortfall, _):
             // The count on its own would read as success. Which lists are
-            // missing is the part that lets someone judge what the check is
-            // worth right now.
-            return L(
-                "%lld indicators, but %@ could not be read. Destinations are checked against the rest.",
-                count,
-                missing.joined(separator: ", ")
-            )
+            // missing, and why, is the part that lets someone judge what the
+            // check is worth right now -- and whether it is theirs to fix.
+            var parts = [L("%lld indicators.", count)]
+            if !shortfall.needingKey.isEmpty {
+                parts.append(L("%@ need a free abuse.ch Auth-Key (set it below).", Self.feedNames(shortfall.needingKey)))
+            }
+            if !shortfall.rejectingKey.isEmpty {
+                parts.append(L("abuse.ch refused the Auth-Key for %@. Check the key below.", Self.feedNames(shortfall.rejectingKey)))
+            }
+            if !shortfall.failed.isEmpty {
+                parts.append(L("%@ could not be read.", Self.feedNames(shortfall.failed)))
+            }
+            parts.append(shortfall.kept.isEmpty
+                ? L("Destinations are checked against the rest.")
+                : L("The list held before is still used for %@.", Self.feedNames(shortfall.kept)))
+            return parts.joined(separator: " ")
         case .unchanged: return L("Already up to date")
         case .hubHasNoFeeds: return L("The Hub is not running threat feeds")
         case .notEnabled: return L("Not switched on")
