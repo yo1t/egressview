@@ -230,8 +230,8 @@ function recordFeed(name, { count = null, error = null } = {}) {
 // CIDR ranges: Spamhaus DROP
 const threatCidrs = []; // [{ network, mask, source, tag }]
 
-// Domain set: URLhaus
-const threatDomains = new Map(); // domain → { source, tag }
+// Domain set: URLhaus, ThreatFox
+const threatDomains = new Map(); // domain → { source, tag, url?, confidence? }
 
 let lastFetch = 0;
 let fetching = false;
@@ -281,20 +281,68 @@ function parseFeodoTracker(text) {
 
 function parseThreatFox(text) {
   // CSV: skip comments (#), fields: first_seen_utc,ioc_id,ioc_value,ioc_type,...,malware,tags
+  //
+  // ip:port IOCs become IP entries. Since the keyed export (2026-10-22) the
+  // same file also carries domain and url IOCs -- about 3,000 of 7,600 rows on
+  // 2026-10-24 -- which become domain entries keyed by host (a url whose host
+  // is an IPv4 address becomes an IP entry). Hash IOCs say nothing about a
+  // connection and are skipped.
   const entries = [];
+  // Column positions come from the header when there is one; the keyed export
+  // added last_seen_utc and is_compromised, which moved confidence_level.
+  let columns = null;
   for (const line of text.split('\n')) {
-    if (!line || line.startsWith('#') || line.startsWith('"first_seen')) continue;
+    if (!line) continue;
+    const header = line.replace(/^#\s*/, '');
+    if (header.startsWith('"first_seen')) {
+      const names = parseCsvLine(header).map(v => v.trim());
+      columns = { confidence: names.indexOf('confidence_level'), compromised: names.indexOf('is_compromised') };
+      continue;
+    }
+    if (line.startsWith('#')) continue;
     const parts = parseCsvLine(line);
     if (parts.length < 7) continue;
-    // ioc_value is quoted: "ip:port"
     const iocRaw = (parts[2] || '').trim();
-    const [ip, portStr] = iocRaw.split(':');
-    if (!ip || !ip.match(/^\d+\.\d+\.\d+\.\d+$/)) continue;
-    const port = parseInt(portStr, 10) || null;
+    const iocType = (parts[3] || '').trim();
     // malware_alias, or in the keyed recent.csv (where the alias is often
     // "None") malware_printable, the column after it.
     const malware = [parts[6], parts[7]].map(v => (v || '').trim()).find(v => v && v !== 'None') || '';
-    entries.push({ ip, port, source: 'threatfox', tag: `ThreatFox: ${malware || 'malware IOC'}` });
+    const name = malware || 'malware IOC';
+
+    if (iocType === 'domain' || iocType === 'url') {
+      let host = iocRaw;
+      if (iocType === 'url') {
+        try { host = new URL(iocRaw).hostname; } catch { continue; }
+      }
+      host = host.toLowerCase().replace(/\.$/, '');
+      if (!host || !host.includes('.')) continue;
+      const field = (key) => (columns && columns[key] >= 0 ? (parts[columns[key]] || '').trim() : '');
+      const compromised = field('compromised') === 'True';
+      const level = parseInt(field('confidence'), 10);
+      const parentDomain = host.split('.').slice(-2).join('.');
+      const sharedHosting = LOW_CONFIDENCE_DOMAINS.has(host) || LOW_CONFIDENCE_DOMAINS.has(parentDomain);
+      // A compromised legitimate site, a file on a shared service, or a
+      // report ThreatFox itself rates below 75: worth a warning, not the same
+      // alarm as a C2 server.
+      const low = compromised || sharedHosting || (Number.isFinite(level) && level < 75);
+      const note = compromised ? ' (改ざんされた正規サイト)'
+        : sharedHosting ? ` (正規サービス上 — 要パス確認)` : '';
+      const entry = {
+        source: 'threatfox',
+        tag: `ThreatFox: ${name}${note}`,
+        confidence: low ? 'low' : 'high',
+      };
+      if (iocType === 'url') entry.url = iocRaw;
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) entries.push({ ip: host, port: null, ...entry });
+      else entries.push({ domain: host, ...entry });
+      continue;
+    }
+
+    // ioc_value is quoted: "ip:port"
+    const [ip, portStr] = iocRaw.split(':');
+    if (!ip || !ip.match(/^\d+\.\d+\.\d+\.\d+$/)) continue;
+    const port = parseInt(portStr, 10) || null;
+    entries.push({ ip, port, source: 'threatfox', tag: `ThreatFox: ${name}` });
   }
   return entries;
 }
@@ -402,13 +450,33 @@ function _applyFeedResults(results, { deferCache = false, parsed = {} } = {}) {
   // ThreatFox
   if (results[1].status === 'fulfilled') {
     const entries = parsed.threatfox ?? parseThreatFox(results[1].value.data);
-    for (const [ip, v] of newIps) { if (v.source === 'threatfox') newIps.delete(ip); }
-    for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
-    logger.info(`[threat-intel] ThreatFox: ${entries.length} IOCs`);
-    recordFeed('threatfox', { count: entries.length });
-    cacheJobs.push({ source: 'threatfox', rows: entries.map(e => ({
-      kind: 'ip', value: e.ip, meta: { tag: e.tag, port: e.port },
-    })) });
+    for (const [ip,  v] of newIps)     { if (v.source === 'threatfox') newIps.delete(ip); }
+    for (const [dom, v] of newDomains) { if (v.source === 'threatfox') newDomains.delete(dom); }
+    // One indicator can appear as several IOCs (an ip:port and a url on the
+    // same address, a domain reported both as compromised and not). The
+    // stronger reading wins, so a C2 address is never downgraded by a
+    // weaker report of the same host.
+    const kept = new Map();
+    for (const e of entries) {
+      const key = e.domain ? `d:${e.domain}` : `i:${e.ip}`;
+      const previous = kept.get(key);
+      if (previous && previous.confidence !== 'low' && e.confidence === 'low') continue;
+      kept.set(key, e);
+    }
+    const rows = [];
+    for (const e of kept.values()) {
+      const meta = { tag: e.tag };
+      if (e.port) meta.port = e.port;
+      if (e.url) meta.url = e.url;
+      if (e.confidence) meta.confidence = e.confidence;
+      if (e.domain) newDomains.set(e.domain, { source: e.source, ...meta });
+      else newIps.set(e.ip, { source: e.source, ...meta });
+      rows.push({ kind: e.domain ? 'domain' : 'ip', value: e.domain || e.ip, meta });
+    }
+    const domainCount = rows.filter(r => r.kind === 'domain').length;
+    logger.info(`[threat-intel] ThreatFox: ${entries.length} IOCs (${rows.length - domainCount} IPs, ${domainCount} domains)`);
+    recordFeed('threatfox', { count: rows.length });
+    cacheJobs.push({ source: 'threatfox', rows });
   } else {
     logger.error('[threat-intel] ThreatFox fetch failed:', results[1].reason?.message);
     recordFeed('threatfox', { error: results[1].reason?.message || 'unknown error' });
