@@ -53,7 +53,29 @@ public enum AgentIngestSenderState: Equatable, Sendable {
     case sending
     case retryScheduled(Date)
     case authorizationRequired
-    case failed(String)
+    case failed(AgentIngestFailure)
+}
+
+/// Why delivery stopped, for the app to put in the person's language.
+///
+/// It used to be an English sentence, which the app showed as it was: on a
+/// Japanese screen the one message that says "nothing will be sent until you
+/// update" was the one message in English (P3-7, 2026-10-25).
+public enum AgentIngestFailure: Equatable, Sendable {
+    /// The queue on disk could not be written.
+    case queueNotStored
+    /// The Hub answered and accepts no schema version this agent sends.
+    case hubIncompatible(hubVersions: [Int], agentVersions: [Int])
+    /// The Hub refused the batch with a status a retry will not change.
+    case rejected(statusCode: Int)
+
+    /// Whether the Hub only accepts versions newer than any this agent sends,
+    /// so it is the agent that needs updating rather than the Hub.
+    public var hubIsNewer: Bool {
+        guard case let .hubIncompatible(hubVersions, agentVersions) = self,
+              let hubOldest = hubVersions.min(), let agentNewest = agentVersions.max() else { return false }
+        return hubOldest > agentNewest
+    }
 }
 
 public enum AgentIngestSenderError: Error, Equatable {
@@ -193,7 +215,7 @@ public actor AgentIngestSender {
             }
             triggerSend()
         } catch {
-            publish(.failed("Pending observations could not be stored"))
+            publish(.failed(.queueNotStored))
         }
     }
 
@@ -275,11 +297,11 @@ public actor AgentIngestSender {
                 schemaVersion = version
             case let .unknown(fallback):
                 schemaVersion = fallback
-            case .incompatible:
+            case let .incompatible(hubVersions, agentVersions):
                 // Retrying is pointless and the user has something to do. This
                 // is the one capability answer that stops delivery.
                 sendTask = nil
-                publish(.failed("This Hub does not accept anything this agent can send. Update the Hub or the agent."))
+                publish(.failed(.hubIncompatible(hubVersions: hubVersions, agentVersions: agentVersions)))
                 return
             }
             let limit = AgentCapabilityNegotiation.batchSize(
@@ -358,7 +380,7 @@ public actor AgentIngestSender {
                     }
                 } else {
                     sendTask = nil
-                    publish(.failed("Hub rejected the pending batch (HTTP \(response.statusCode))"))
+                    publish(.failed(.rejected(statusCode: response.statusCode)))
                 }
                 return
             }

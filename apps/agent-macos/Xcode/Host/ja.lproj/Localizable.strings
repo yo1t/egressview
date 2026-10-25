@@ -238,6 +238,10 @@
 "Sending a bounded batch..." = "上限付きバッチを送信しています...";
 "Hub unavailable; next low-frequency retry %@" = "Hubへ接続できません。次回の低頻度再試行：%@";
 "Hub authorization expired or was revoked" = "Hubの認証が期限切れまたは失効しました";
+"Pending observations could not be stored" = "送信待ちの観測を保存できませんでした";
+"Hub rejected the pending batch (HTTP %lld)" = "Hubが送信待ちの観測を受け取りませんでした（HTTP %lld）";
+"This Hub only accepts a newer format than this agent sends. Update the agent." = "このHubは、このAgentより新しい形式しか受け取りません。Agentを更新してください。";
+"This Hub only accepts an older format than this agent sends. Update the Hub." = "このHubは、このAgentより古い形式しか受け取りません。Hubを更新してください。";
 "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld" = "送信待ち：%lld件・形式不適合：%lld件・上限超過：%lld件・過去（分類不能）：%lld件";
 "given up on: %lld (after %lld split)" = "断念：%lld件（%lld回に分割したのち）";
 "Oldest pending: %@" = "最も古い送信待ち：%@";
