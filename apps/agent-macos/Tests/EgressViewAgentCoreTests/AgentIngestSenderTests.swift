@@ -336,6 +336,54 @@ final class AgentIngestSenderTests: XCTestCase {
         }
     }
 
+    /// P3-7, 2026-10-25: against a Hub that speaks no version in common, the
+    /// sender stopped and said so in an English sentence the app showed as
+    /// it was. It now says why in a form the app puts into the person's
+    /// language, and still sends nothing.
+    func testAHubWithNoSharedVersionStopsWithAReasonTheAppCanWord() async throws {
+        let transport = SenderTransport { request in
+            let body = request.url?.path.hasSuffix("capabilities") == true
+                ? Data(#"{"schemaVersions":[2],"maxObservationsPerBatch":200,"maxBodyBytes":524288,"requestsPerMinute":30,"compression":[]}"#.utf8)
+                : Data()
+            return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let states = LockedValue<[AgentIngestSenderState]>([])
+        let (sender, _, _) = try makeSender(
+            transport: transport,
+            statusHandler: { state, _ in states.value.append(state) }
+        )
+        await sender.enqueue([observation()])
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        let expected = AgentIngestSenderState.failed(.hubIncompatible(hubVersions: [2], agentVersions: [1]))
+        try await waitUntil { states.value.contains(expected) }
+
+        let ingestCount = await transport.ingestCount()
+        XCTAssertEqual(ingestCount, 0)
+        XCTAssertTrue(AgentIngestFailure.hubIncompatible(hubVersions: [2], agentVersions: [1]).hubIsNewer)
+    }
+
+    func testOnlyAHubAheadOfTheAgentAsksForTheAgentToBeUpdated() {
+        XCTAssertFalse(AgentIngestFailure.hubIncompatible(hubVersions: [0], agentVersions: [1, 2]).hubIsNewer)
+        XCTAssertFalse(AgentIngestFailure.hubIncompatible(hubVersions: [], agentVersions: [1]).hubIsNewer)
+        XCTAssertFalse(AgentIngestFailure.rejected(statusCode: 404).hubIsNewer)
+    }
+
+    func testARefusalThatARetryWillNotChangeCarriesItsStatus() async throws {
+        let transport = SenderTransport { request in
+            (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+        }
+        let states = LockedValue<[AgentIngestSenderState]>([])
+        let (sender, _, _) = try makeSender(
+            transport: transport,
+            statusHandler: { state, _ in states.value.append(state) }
+        )
+        await sender.enqueue([observation()])
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        try await waitUntil { states.value.contains(.failed(.rejected(statusCode: 404))) }
+    }
+
     func testRetryPolicyIsBoundedFullJitter() {
         let policy = AgentRetryPolicy()
         XCTAssertEqual(policy.delay(failureCount: 1, randomUnit: 1), 5)

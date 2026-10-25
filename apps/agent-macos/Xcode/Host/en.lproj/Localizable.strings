@@ -240,6 +240,10 @@
 "Sending a bounded batch..." = "Sending a bounded batch...";
 "Hub unavailable; next low-frequency retry %@" = "Hub unavailable; next low-frequency retry %@";
 "Hub authorization expired or was revoked" = "Hub authorization expired or was revoked";
+"Pending observations could not be stored" = "Pending observations could not be stored";
+"Hub rejected the pending batch (HTTP %lld)" = "Hub rejected the pending batch (HTTP %lld)";
+"This Hub only accepts a newer format than this agent sends. Update the agent." = "This Hub only accepts a newer format than this agent sends. Update the agent.";
+"This Hub only accepts an older format than this agent sends. Update the Hub." = "This Hub only accepts an older format than this agent sends. Update the Hub.";
 "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld" = "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld";
 "given up on: %lld (after %lld split)" = "given up on: %lld (after %lld split)";
 "Oldest pending: %@" = "Oldest pending: %@";

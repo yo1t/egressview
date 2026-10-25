@@ -285,7 +285,20 @@ final class HubDeliveryController: ObservableObject {
         case .sending: return L("Sending a bounded batch...")
         case .retryScheduled(let date): return L("Hub unavailable; next low-frequency retry %@", format(date, fallback: ""))
         case .authorizationRequired: return L("Hub authorization expired or was revoked")
-        case .failed(let message): return message
+        case .failed(let failure): return Self.describe(failure)
+        }
+    }
+
+    static func describe(_ failure: AgentIngestFailure) -> String {
+        switch failure {
+        case .queueNotStored:
+            return L("Pending observations could not be stored")
+        case let .rejected(statusCode):
+            return L("Hub rejected the pending batch (HTTP %lld)", statusCode)
+        case .hubIncompatible:
+            return failure.hubIsNewer
+                ? L("This Hub only accepts a newer format than this agent sends. Update the agent.")
+                : L("This Hub only accepts an older format than this agent sends. Update the Hub.")
         }
     }
 
