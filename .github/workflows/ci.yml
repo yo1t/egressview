@@ -489,17 +489,36 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # `--with-deps` runs apt-get, which is where this hung for six hours on
-      # 2026-08-19: no output, no failure, just a job that never ended while
+      # The OS packages come from apt, which is where this hung for six hours
+      # on 2026-08-19: no output, no failure, just a job that never ended while
       # the pull request sat unmergeable. Bounded and retried, so a slow
-      # package mirror costs a minute instead of an afternoon.
+      # package mirror costs minutes instead of an afternoon.
+      #
+      # The browser itself comes from Playwright's CDN and is quick, so it is
+      # fetched on its own and only the apt half gets the long bound. On
+      # 2026-10-26 the Ubuntu mirror served the 26 MB of packages at tens of
+      # KB/s: `timeout` stopped npx but not the apt-get it had started, which
+      # kept the dpkg lock, so every retry failed within a second. apt now
+      # waits for that lock instead.
       - name: Install Playwright browser
         run: |
+          printf '%s\n' 'DPkg::Lock::Timeout "300";' 'Acquire::Retries "3";' 'Acquire::http::Timeout "30";' \
+            | sudo tee /etc/apt/apt.conf.d/99ci-playwright > /dev/null
           for attempt in 1 2 3; do
-            if timeout 300 npx playwright install --with-deps chromium; then
+            if timeout 120 npx playwright install chromium; then
+              break
+            fi
+            echo "playwright browser download attempt $attempt failed or timed out"
+            if [ "$attempt" = 3 ]; then
+              exit 1
+            fi
+            sleep 10
+          done
+          for attempt in 1 2; do
+            if timeout 600 npx playwright install-deps chromium; then
               exit 0
             fi
-            echo "playwright install attempt $attempt failed or timed out"
+            echo "playwright OS package install attempt $attempt failed or timed out"
             sleep 10
           done
           exit 1
