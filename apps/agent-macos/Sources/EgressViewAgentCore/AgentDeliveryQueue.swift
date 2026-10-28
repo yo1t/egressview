@@ -289,6 +289,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         includeInboundProbes: Bool = false
     ) throws -> AgentIngestEnvelope? {
         try lock.withLock {
+            try discardStampedAfter(sentAt.addingTimeInterval(AgentIngestSender.hubFutureBound))
             guard !state.pending.isEmpty else { return nil }
             let active: ActiveBatch
             if let existing = state.activeBatch {
@@ -328,6 +329,38 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                     ? active.inboundProbes : nil
             )
         }
+    }
+
+    /// Drops what was stamped later than `limit`, counted under its rule.
+    ///
+    /// Checked when a batch is about to go rather than when an observation
+    /// arrives: while the clock is wrong, its observations look current to it,
+    /// and only once it has been corrected do the ones it stamped look like
+    /// what they are. Sent, each would be refused and halved down to alone
+    /// before being given up on -- a dozen requests apiece (P3-148,
+    /// 2026-10-29). Caller holds the lock.
+    private func discardStampedAfter(_ limit: Date) throws {
+        let late = Set(state.pending.compactMap { entry -> UUID? in
+            entry.observation.firstObservedAt > limit || entry.observation.lastObservedAt > limit
+                ? entry.observationID : nil
+        })
+        guard !late.isEmpty else { return }
+        state.pending.removeAll { late.contains($0.observationID) }
+        if state.activeBatch?.observationIDs.contains(where: late.contains) == true {
+            // A batch is re-sent as it was, so one that held any of them
+            // would keep being refused. Its other observations go back to
+            // waiting and are batched again, and so do the summaries riding
+            // with it.
+            if let probes = state.activeBatch?.inboundProbes, !probes.isEmpty {
+                state.pendingInboundProbes = probes + (state.pendingInboundProbes ?? [])
+            }
+            state.activeBatch = nil
+        }
+        state.contractRejectedCount = (state.contractRejectedCount ?? 0) + late.count
+        var reasonCounts = state.contractRejectionReasons ?? [:]
+        reasonCounts[ContractRejection.stampedInFuture.rawValue, default: 0] += late.count
+        state.contractRejectionReasons = reasonCounts
+        try persist()
     }
 
     /// What happened to a batch the Hub would not take.
@@ -563,6 +596,10 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         case processNameUnusable
         case bundleIDUnusable
         case timesReversed
+        /// Stamped more than a day after the moment it was about to be sent.
+        /// Only a clock that was wrong when it was recorded does this, and the
+        /// Hub refuses it (P3-148).
+        case stampedInFuture
     }
 
     static func contractRejection(_ observation: ConnectionObservation) -> ContractRejection? {

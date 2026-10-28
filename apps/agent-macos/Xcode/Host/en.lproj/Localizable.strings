@@ -244,6 +244,8 @@
 "Hub rejected the pending batch (HTTP %lld)" = "Hub rejected the pending batch (HTTP %lld)";
 "This Hub only accepts a newer format than this agent sends. Update the agent." = "This Hub only accepts a newer format than this agent sends. Update the agent.";
 "This Hub only accepts an older format than this agent sends. Update the Hub." = "This Hub only accepts an older format than this agent sends. Update the Hub.";
+"This Mac's clock is %@ ahead of the Hub's. Correct the date and time; sending resumes on its own." = "This Mac's clock is %@ ahead of the Hub's. Correct the date and time; sending resumes on its own.";
+"This Mac's clock is %@ behind the Hub's. Correct the date and time; sending resumes on its own." = "This Mac's clock is %@ behind the Hub's. Correct the date and time; sending resumes on its own.";
 "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld" = "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld";
 "given up on: %lld (after %lld split)" = "given up on: %lld (after %lld split)";
 "Oldest pending: %@" = "Oldest pending: %@";

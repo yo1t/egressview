@@ -92,6 +92,13 @@ public struct AgentDiagnosticsReport: Sendable {
         public var abandonedCount: Int
         /// How many times a refused batch was halved. Not a loss.
         public var splitCount: Int
+        /// What delivery is doing now, when it will try again, and the last
+        /// time it did not go through. The counts above say what was lost;
+        /// these say why delivery is where it is. Before 2026-10-29 a report
+        /// taken while delivery was stuck could not say either (P3-148).
+        public var deliveryState: String
+        public var nextDeliveryRetryAt: Date?
+        public var lastDeliveryFailure: AgentDeliveryFailureRecord?
         /// The schema the store is on, the copies taken before past
         /// migrations, and whether the last migration finished (P3-161).
         /// Nothing showed any of this, so a user asking why their disk is
@@ -120,6 +127,9 @@ public struct AgentDiagnosticsReport: Sendable {
             oldestPendingAt: Date?, lastAcknowledgedAt: Date?, unreadableStateResetAt: Date?,
             threatIntelSource: String, contractRejections: [String: Int] = [:],
             abandonedCount: Int = 0, splitCount: Int = 0,
+            deliveryState: String = "unknown",
+            nextDeliveryRetryAt: Date? = nil,
+            lastDeliveryFailure: AgentDeliveryFailureRecord? = nil,
             schemaVersion: Int = 0,
             migrationBackups: [MigrationBackup] = [],
             interruptedMigration: MigrationProgress? = nil,
@@ -148,6 +158,9 @@ public struct AgentDiagnosticsReport: Sendable {
             self.contractRejections = contractRejections
             self.abandonedCount = abandonedCount
             self.splitCount = splitCount
+            self.deliveryState = deliveryState
+            self.nextDeliveryRetryAt = nextDeliveryRetryAt
+            self.lastDeliveryFailure = lastDeliveryFailure
             self.schemaVersion = schemaVersion
             self.migrationBackups = migrationBackups
             self.interruptedMigration = interruptedMigration
@@ -338,6 +351,16 @@ public struct AgentDiagnosticsReport: Sendable {
         lines.append("== Hub")
         lines.append(row("enrolled", "\(inputs.isEnrolledWithHub ? "yes" : "no")"))
         lines.append(row("delivery", "\(inputs.deliveryEnabled ? "on" : "off")"))
+        lines.append(row("state", inputs.deliveryState))
+        if let retry = inputs.nextDeliveryRetryAt {
+            lines.append(row("next retry", "\(when(retry))"))
+        }
+        if let failure = inputs.lastDeliveryFailure {
+            let status = failure.statusCode.map { "HTTP \($0)" } ?? "no HTTP answer"
+            lines.append(row("last failure", "\(when(failure.at)) \(status): \(failure.what)"))
+        } else {
+            lines.append(row("last failure", "none this run"))
+        }
         lines.append(row("pending", "\(inputs.pendingDeliveryCount)"))
         lines.append(row("oldest pending", "\(when(inputs.oldestPendingAt))"))
         lines.append(row("last acknowledged", "\(when(inputs.lastAcknowledgedAt))"))

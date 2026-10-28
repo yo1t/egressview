@@ -35,6 +35,10 @@ final class HubDeliveryController: ObservableObject {
     /// already holds -- which would fail exactly when the agent is already in
     /// the state the export exists to explain.
     private(set) var latestQueueStatus: AgentDeliveryQueueStatus?
+    /// For the diagnostics export, for the same reason: what delivery is
+    /// doing and the last time it did not go through (P3-148).
+    var senderStateForDiagnostics: AgentIngestSenderState { senderState }
+    private(set) var latestDeliveryFailure: AgentDeliveryFailureRecord?
     @Published var errorMessage: String?
     @Published private(set) var notificationState: NotificationState = .inactive
 
@@ -160,6 +164,9 @@ final class HubDeliveryController: ObservableObject {
             metadata: metadata,
             statusHandler: { [weak self] state, queueStatus in
                 Task { @MainActor in self?.render(state: state, queueStatus: queueStatus) }
+            },
+            failureHandler: { [weak self] failure in
+                Task { @MainActor in self?.latestDeliveryFailure = failure }
             }
         )
     }
@@ -299,6 +306,15 @@ final class HubDeliveryController: ObservableObject {
             return failure.hubIsNewer
                 ? L("This Hub only accepts a newer format than this agent sends. Update the agent.")
                 : L("This Hub only accepts an older format than this agent sends. Update the Hub.")
+        case let .clockOff(seconds):
+            let formatter = DateComponentsFormatter()
+            formatter.unitsStyle = .full
+            formatter.allowedUnits = abs(seconds) >= 2 * 86_400 ? [.day] : [.hour]
+            formatter.maximumUnitCount = 1
+            let amount = formatter.string(from: TimeInterval(abs(seconds))) ?? "\(abs(seconds))s"
+            return seconds > 0
+                ? L("This Mac's clock is %@ ahead of the Hub's. Correct the date and time; sending resumes on its own.", amount)
+                : L("This Mac's clock is %@ behind the Hub's. Correct the date and time; sending resumes on its own.", amount)
         }
     }
 

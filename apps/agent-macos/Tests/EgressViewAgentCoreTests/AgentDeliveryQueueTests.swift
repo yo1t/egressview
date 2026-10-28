@@ -199,6 +199,51 @@ final class AgentDeliveryQueueTests: XCTestCase {
         XCTAssertEqual(next.observations.count, 3)
     }
 
+    // P3-148, 2026-10-29. Observations stamped while this Mac's clock ran
+    // days ahead look current until the clock is corrected; then they are
+    // more than the Hub's day ahead and it refuses each one. Dropped when the
+    // batch is made, they cost nothing and are counted under their own rule.
+    func testObservationsStampedMoreThanADayAheadAreDroppedWhenTheBatchIsMade() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        let now = Date()
+        let ahead = now.addingTimeInterval(2 * 86_400)
+        let stampedAhead = ConnectionObservation(
+            networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: 49_153,
+            remoteAddress: "203.0.113.10", remotePort: 443, processID: 42, processName: "TestApp",
+            firstObservedAt: ahead, lastObservedAt: ahead,
+            collector: .networkExtension, confidence: .exact
+        )
+        try queue.enqueue([observation(remotePort: 1), stampedAhead, observation(remotePort: 2)])
+        XCTAssertEqual(queue.status().pendingCount, 3, "kept until it is about to be sent")
+
+        let batch = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: now, metadata: metadata()))
+        XCTAssertEqual(batch.observations.count, 2)
+        XCTAssertEqual(queue.status().pendingCount, 2)
+        XCTAssertEqual(queue.status().contractRejectedCount, 1)
+        XCTAssertEqual(queue.status().contractRejectionReasons["stampedInFuture"], 1)
+        XCTAssertEqual(queue.status().abandonedCount, 0)
+    }
+
+    func testABatchAlreadyInFlightIsRemadeWithoutTheObservationStampedAhead() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        let now = Date()
+        let ahead = now.addingTimeInterval(2 * 86_400)
+        let stampedAhead = ConnectionObservation(
+            networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: 49_153,
+            remoteAddress: "203.0.113.10", remotePort: 443, processID: 42, processName: "TestApp",
+            firstObservedAt: ahead, lastObservedAt: ahead,
+            collector: .networkExtension, confidence: .exact
+        )
+        try queue.enqueue([observation(remotePort: 1), stampedAhead])
+        // Made while the clock still agreed with the stamp.
+        let first = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: ahead, metadata: metadata()))
+        XCTAssertEqual(first.observations.count, 2)
+
+        let remade = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: now, metadata: metadata()))
+        XCTAssertEqual(remade.observations.count, 1)
+        XCTAssertNotEqual(remade.batchId, first.batchId)
+    }
+
     // A reply about a batch that is no longer in flight -- a slow 400 arriving
     // after the batch it names was acknowledged -- must not cut the batch that
     // replaced it.
