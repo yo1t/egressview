@@ -68,6 +68,11 @@ public enum AgentIngestFailure: Equatable, Sendable {
     case hubIncompatible(hubVersions: [Int], agentVersions: [Int])
     /// The Hub refused the batch with a status a retry will not change.
     case rejected(statusCode: Int)
+    /// The Hub refused observations for their times, and its own clock says
+    /// this Mac's is wrong by this many seconds -- positive when the Mac is
+    /// ahead. Nothing is cut or given up on: every observation carries this
+    /// clock's time, so halving would throw them away one at a time (P3-148).
+    case clockOff(seconds: Int)
 
     /// Whether the Hub only accepts versions newer than any this agent sends,
     /// so it is the agent that needs updating rather than the Hub.
@@ -75,6 +80,50 @@ public enum AgentIngestFailure: Equatable, Sendable {
         guard case let .hubIncompatible(hubVersions, agentVersions) = self,
               let hubOldest = hubVersions.min(), let agentNewest = agentVersions.max() else { return false }
         return hubOldest > agentNewest
+    }
+}
+
+/// The last time delivery did not go through, for the diagnostics report.
+///
+/// The app shows the current state; the report needs what happened, because
+/// by the time someone exports it the state may already be a retry countdown
+/// that names no status at all (P3-148, 2026-10-29).
+public struct AgentDeliveryFailureRecord: Equatable, Sendable {
+    public let at: Date
+    /// Nil when no HTTP answer came back.
+    public let statusCode: Int?
+    /// A short English phrase for the report. No address, host or process.
+    public let what: String
+
+    public init(at: Date, statusCode: Int?, what: String) {
+        self.at = at
+        self.statusCode = statusCode
+        self.what = what
+    }
+}
+
+extension AgentIngestSenderState {
+    /// English, for the diagnostics report; the app words it separately.
+    public var diagnosticsDescription: String {
+        switch self {
+        case .off: return "off"
+        case .paused: return "paused"
+        case .waitingForNetwork: return "waiting for a network path"
+        case .idle: return "idle"
+        case .sending: return "sending"
+        case .retryScheduled: return "retry scheduled"
+        case .authorizationRequired: return "authorization required"
+        case .failed(.queueNotStored): return "stopped: queue could not be stored"
+        case let .failed(.hubIncompatible(hubVersions, agentVersions)):
+            return "stopped: no shared schema version (Hub \(hubVersions), agent \(agentVersions))"
+        case let .failed(.rejected(statusCode)): return "stopped: Hub refused with HTTP \(statusCode)"
+        case let .failed(.clockOff(seconds)): return "held: this Mac's clock is off from the Hub's by \(seconds)s"
+        }
+    }
+
+    public var nextRetryAt: Date? {
+        if case let .retryScheduled(date) = self { return date }
+        return nil
     }
 }
 
@@ -95,6 +144,7 @@ public actor AgentIngestSender {
     private let randomUnit: @Sendable () -> Double
     private let now: @Sendable () -> Date
     private let statusHandler: StatusHandler
+    private let failureHandler: @Sendable (AgentDeliveryFailureRecord) -> Void
     private var enabled = false
     private var connected = false
     private var failureCount = 0
@@ -158,7 +208,8 @@ public actor AgentIngestSender {
         randomUnit: @escaping @Sendable () -> Double = { Double.random(in: 0 ... 1) },
         now: @escaping @Sendable () -> Date = { Date() },
         minimumSendSpacing: TimeInterval = 5,
-        statusHandler: @escaping StatusHandler = { _, _ in }
+        statusHandler: @escaping StatusHandler = { _, _ in },
+        failureHandler: @escaping @Sendable (AgentDeliveryFailureRecord) -> Void = { _ in }
     ) {
         self.queue = queue
         self.credentialStore = credentialStore
@@ -169,6 +220,7 @@ public actor AgentIngestSender {
         self.now = now
         self.minimumSendSpacing = minimumSendSpacing
         self.statusHandler = statusHandler
+        self.failureHandler = failureHandler
     }
 
     public func setEnabled(_ value: Bool) {
@@ -215,6 +267,7 @@ public actor AgentIngestSender {
             }
             triggerSend()
         } catch {
+            recordFailure(statusCode: nil, "queue could not be stored")
             publish(.failed(.queueNotStored))
         }
     }
@@ -278,7 +331,13 @@ public actor AgentIngestSender {
     }
 
     private func sendNextBatch() async {
-        guard enabled, connected, !Task.isCancelled else {
+        // A cancelled attempt leaves everything alone. Whoever cancelled it
+        // has already cleared `sendTask` and may have started the next one;
+        // touching it from here, or scheduling a retry, ran a second attempt
+        // beside that one and recorded the cancellation as a failure
+        // (P3-148, 2026-10-29).
+        guard !Task.isCancelled else { return }
+        guard enabled, connected else {
             sendTask = nil
             return
         }
@@ -301,6 +360,7 @@ public actor AgentIngestSender {
                 // Retrying is pointless and the user has something to do. This
                 // is the one capability answer that stops delivery.
                 sendTask = nil
+                recordFailure(statusCode: nil, "no shared schema version")
                 publish(.failed(.hubIncompatible(hubVersions: hubVersions, agentVersions: agentVersions)))
                 return
             }
@@ -332,26 +392,32 @@ public actor AgentIngestSender {
             lastBatchSentAt = now()
             let request = try makeRequest(credential: credential, envelope: envelope)
             let (data, response) = try await transport.send(request)
-            guard !Task.isCancelled else {
-                sendTask = nil
-                return
-            }
+            guard !Task.isCancelled else { return }
             if response.statusCode == 401 || response.statusCode == 403 {
+                recordFailure(statusCode: response.statusCode, "authorization refused")
                 sendTask = nil
                 authorizationBlocked = true
                 publish(.authorizationRequired)
                 return
             }
             if response.statusCode == 429 {
+                recordFailure(statusCode: 429, "rate limited")
                 let retryAfter = TimeInterval(response.value(forHTTPHeaderField: "Retry-After") ?? "")
                 scheduleRetry(minimumDelay: retryAfter)
                 return
             }
             guard response.statusCode == 200 else {
                 if response.statusCode >= 500 {
+                    recordFailure(statusCode: response.statusCode, "Hub error")
                     scheduleRetry()
+                } else if Self.refusesThePayload(response.statusCode),
+                          let skew = Self.clockSkew(
+                              body: data, hubDate: response.value(forHTTPHeaderField: "Date"), now: now()
+                          ) {
+                    holdForClock(skew: skew, statusCode: response.statusCode)
                 } else if Self.refusesThePayload(response.statusCode) {
                     if Self.refusesTheVersion(data) {
+                        recordFailure(statusCode: response.statusCode, "schema version refused")
                         // Not about any observation, so nothing is cut. The
                         // next attempt asks the Hub what it takes; if the
                         // answer shares no version, that path tells the user.
@@ -371,6 +437,7 @@ public actor AgentIngestSender {
                         // now takes. Only a refusal of a payload shaped by a
                         // fresh answer is about the observations, and only
                         // that one cuts.
+                        recordFailure(statusCode: response.statusCode, "batch refused; asking the Hub again")
                         forgetCapabilities()
                         logger.notice("delivery-refused: asking the Hub again before cutting the batch")
                         failureCount = 0
@@ -379,6 +446,7 @@ public actor AgentIngestSender {
                         try handleRefusal(of: envelope, statusCode: response.statusCode)
                     }
                 } else {
+                    recordFailure(statusCode: response.statusCode, "batch refused")
                     sendTask = nil
                     publish(.failed(.rejected(statusCode: response.statusCode)))
                 }
@@ -397,11 +465,89 @@ public actor AgentIngestSender {
             if queue.status().pendingCount > 0 {
                 scheduleRetry(minimumDelay: 2.1)
             }
+        } catch where Task.isCancelled {
+            return
         } catch is CancellationError {
             sendTask = nil
             return
         } catch {
+            recordFailure(statusCode: nil, Self.describeForDiagnostics(error))
             scheduleRetry()
+        }
+    }
+
+    /// The error's kind and code, never its message: a URLError's text can
+    /// carry the URL, and the URL is the Hub's address.
+    static func describeForDiagnostics(_ error: Error) -> String {
+        if let urlError = error as? URLError { return "no answer (URLError \(urlError.code.rawValue))" }
+        if let senderError = error as? AgentIngestSenderError { return "unusable answer (\(senderError))" }
+        let nsError = error as NSError
+        return "failed (\(nsError.domain) \(nsError.code))"
+    }
+
+    private func recordFailure(statusCode: Int?, _ what: String) {
+        failureHandler(AgentDeliveryFailureRecord(at: now(), statusCode: statusCode, what: what))
+    }
+
+    /// The Hub's bound on how far ahead an observation may be, mirrored for
+    /// the queue's own check. The Hub refuses anything later with 422.
+    static let hubFutureBound: TimeInterval = 24 * 60 * 60
+    /// How far apart the two clocks must be before a time refusal is blamed
+    /// on this Mac's clock rather than on the observations.
+    static let clockSkewThreshold: TimeInterval = 60 * 60
+
+    /// How far this Mac's clock is from the Hub's, when that is what a refusal
+    /// is about.
+    ///
+    /// On 2026-10-29 a batch with timestamps two days ahead was refused and
+    /// halved down to one observation at a time; with the whole clock ahead,
+    /// every observation would be given up on that way, at about two a minute
+    /// under the Hub's rate limit. The Hub names the reason per observation
+    /// and dates its answer, so the two together say whose clock is wrong.
+    /// Nil unless every reason is about time and the clocks disagree in the
+    /// direction that explains it.
+    static func clockSkew(body: Data, hubDate: String?, now: Date) -> TimeInterval? {
+        struct Refusal: Decodable {
+            struct Item: Decodable { let reason: String? }
+            let rejected: [Item]?
+        }
+        guard let hubDate, let hubNow = httpDateFormatter.date(from: hubDate),
+              let items = (try? JSONDecoder().decode(Refusal.self, from: body))?.rejected, !items.isEmpty else {
+            return nil
+        }
+        let reasons = Set(items.map { $0.reason ?? "" })
+        guard reasons.isSubset(of: ["future_timestamp", "outside_retention"]) else { return nil }
+        let skew = now.timeIntervalSince(hubNow)
+        if reasons.contains("future_timestamp"), skew >= clockSkewThreshold { return skew }
+        if reasons.contains("outside_retention"), skew <= -clockSkewThreshold { return skew }
+        return nil
+    }
+
+    private static let httpDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter
+    }()
+
+    /// Keep everything and try again later, saying why in the meantime.
+    ///
+    /// Not `scheduleRetry`, which would replace the reason with a countdown,
+    /// and not a stop, because correcting the clock is all it takes and
+    /// nobody should have to come back and press anything.
+    private func holdForClock(skew: TimeInterval, statusCode: Int) {
+        let seconds = Int(skew.rounded())
+        recordFailure(statusCode: statusCode, "refused for its times; this Mac's clock is off by \(seconds)s")
+        logger.notice("delivery-held-for-clock: status=\(statusCode, privacy: .public) skew=\(seconds, privacy: .public)s")
+        failureCount += 1
+        let delay = min(retryPolicy.maximumDelay,
+                        max(60, retryPolicy.delay(failureCount: failureCount, randomUnit: randomUnit())))
+        publish(.failed(.clockOff(seconds: seconds)))
+        sendTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            await self?.sendNextBatch()
         }
     }
 
@@ -527,10 +673,12 @@ public actor AgentIngestSender {
         let outcome = try queue.recordRejection(batchID: envelope.batchId)
         switch outcome {
         case .split(let remaining):
+            recordFailure(statusCode: statusCode, "batch refused; split to \(remaining)")
             logger.notice(
                 "delivery-batch-split: status=\(statusCode, privacy: .public) remaining=\(remaining, privacy: .public)"
             )
         case .abandoned:
+            recordFailure(statusCode: statusCode, "observation refused alone; given up")
             // The identifier is not logged: it names one of the user's own
             // connections. The count is in the delivery status.
             logger.notice(

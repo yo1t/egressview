@@ -17,6 +17,9 @@ const keys = [
   'Hub rejected the pending batch (HTTP %lld)',
   'This Hub only accepts a newer format than this agent sends. Update the agent.',
   'This Hub only accepts an older format than this agent sends. Update the Hub.',
+  // P3-148, 2026-10-29: refused for its times because this Mac's clock is off.
+  "This Mac's clock is %@ ahead of the Hub's. Correct the date and time; sending resumes on its own.",
+  "This Mac's clock is %@ behind the Hub's. Correct the date and time; sending resumes on its own.",
 ];
 
 // On 2026-10-25 a Hub with no version in common stopped delivery, and the
@@ -39,5 +42,6 @@ describe('Hubへの送信が止まった理由は、画面の言語で出る', (
     }
     assert.ok(strings('ja').includes('Agentを更新してください。'));
     assert.ok(strings('ja').includes('Hubを更新してください。'));
+    assert.ok(strings('ja').includes('日付と時刻を直すと、送信は自動で再開します。'));
   });
 });

@@ -145,6 +145,9 @@ final class AgentDiagnosticsExporter {
             contractRejections: queue?.contractRejectionReasons ?? [:],
             abandonedCount: queue?.abandonedCount ?? 0,
             splitCount: queue?.splitCount ?? 0,
+            deliveryState: hubDelivery.senderStateForDiagnostics.diagnosticsDescription,
+            nextDeliveryRetryAt: hubDelivery.senderStateForDiagnostics.nextRetryAt,
+            lastDeliveryFailure: hubDelivery.latestDeliveryFailure,
             // Read from the file system, not held: the copies beside the
             // database are what the user's disk is carrying right now, and a
             // list taken at launch would miss one made since.

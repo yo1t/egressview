@@ -217,4 +217,35 @@ final class AgentDiagnosticsReportTests: XCTestCase {
             XCTAssertTrue(text.contains(required), "missing \(required)")
         }
     }
+
+    // P3-148, 2026-10-29. A report taken while delivery was stuck said how
+    // many observations were given up on and nothing about why delivery was
+    // where it was: no state, no status, no next attempt.
+    func testTheReportSaysWhatDeliveryIsDoingAndWhyItLastFailed() {
+        var input = inputs()
+        input.deliveryState = AgentIngestSenderState.retryScheduled(Date(timeIntervalSince1970: 1_770_000_300))
+            .diagnosticsDescription
+        input.nextDeliveryRetryAt = Date(timeIntervalSince1970: 1_770_000_300)
+        input.lastDeliveryFailure = AgentDeliveryFailureRecord(
+            at: Date(timeIntervalSince1970: 1_769_999_990), statusCode: 422, what: "batch refused; split to 50"
+        )
+        let text = AgentDiagnosticsReport(input).render()
+
+        XCTAssertTrue(text.contains("state             retry scheduled"), text)
+        XCTAssertTrue(text.contains("next retry"))
+        XCTAssertTrue(text.contains("HTTP 422: batch refused; split to 50"))
+    }
+
+    func testAReportWithNoFailureSaysSoRatherThanLeavingTheLineOut() {
+        let text = AgentDiagnosticsReport(inputs()).render()
+        XCTAssertTrue(text.contains("last failure      none this run"))
+        XCTAssertFalse(text.contains("next retry"))
+    }
+
+    func testAHeldClockNamesTheGapInTheState() {
+        XCTAssertEqual(
+            AgentIngestSenderState.failed(.clockOff(seconds: 172_800)).diagnosticsDescription,
+            "held: this Mac's clock is off from the Hub's by 172800s"
+        )
+    }
 }

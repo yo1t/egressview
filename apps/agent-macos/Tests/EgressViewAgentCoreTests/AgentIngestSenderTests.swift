@@ -384,6 +384,125 @@ final class AgentIngestSenderTests: XCTestCase {
         try await waitUntil { states.value.contains(.failed(.rejected(statusCode: 404))) }
     }
 
+    // P3-148, 2026-10-29. Against a real Hub, a batch carrying times two days
+    // ahead was halved down to one observation at a time. With this Mac's
+    // whole clock ahead, every observation would go that way. The Hub's own
+    // date says whose clock is wrong: hold everything and say so.
+    func testAClockAheadOfTheHubHoldsTheBatchAndSaysByHowMuch() async throws {
+        let hubDate = Self.httpDate(Date().addingTimeInterval(-2 * 86_400))
+        let transport = SenderTransport { request in
+            if request.url?.path.hasSuffix("capabilities") == true {
+                return (Data(#"{"schemaVersions":[1],"maxObservationsPerBatch":200,"maxBodyBytes":524288,"requestsPerMinute":30,"compression":[]}"#.utf8),
+                        HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }
+            return (Data(#"{"error":"Observation window validation failed","rejected":[{"index":0,"reason":"future_timestamp"},{"index":1,"reason":"future_timestamp"}]}"#.utf8),
+                    HTTPURLResponse(url: request.url!, statusCode: 422, httpVersion: nil, headerFields: ["Date": hubDate])!)
+        }
+        let states = LockedValue<[AgentIngestSenderState]>([])
+        let failures = LockedValue<[AgentDeliveryFailureRecord]>([])
+        let (sender, _, queue) = try makeSender(
+            transport: transport,
+            statusHandler: { state, _ in states.value.append(state) },
+            failureHandler: { failures.value.append($0) }
+        )
+        await sender.enqueue([observation(), observation(remotePort: 8443)])
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        try await waitUntil {
+            states.value.contains { if case .failed(.clockOff) = $0 { return true }; return false }
+        }
+
+        guard case let .failed(.clockOff(seconds)) = states.value.last else { return XCTFail("\(states.value)") }
+        XCTAssertEqual(Double(seconds), 2 * 86_400, accuracy: 5)
+        let ingests = await transport.ingestCount()
+        XCTAssertEqual(ingests, 1, "not re-sent, not halved")
+        XCTAssertEqual(queue.status().pendingCount, 2)
+        XCTAssertEqual(queue.status().splitCount, 0)
+        XCTAssertEqual(queue.status().abandonedCount, 0)
+        XCTAssertEqual(failures.value.last?.statusCode, 422)
+    }
+
+    func testOnlyATimeRefusalWithClocksApartIsBlamedOnTheClock() {
+        let now = Date()
+        let future = Data(#"{"rejected":[{"index":0,"reason":"future_timestamp"}]}"#.utf8)
+        let old = Data(#"{"rejected":[{"index":0,"reason":"outside_retention"}]}"#.utf8)
+        let mixed = Data(#"{"rejected":[{"index":0,"reason":"future_timestamp"},{"index":1,"reason":"something_else"}]}"#.utf8)
+        let hubBehind = Self.httpDate(now.addingTimeInterval(-2 * 86_400))
+        let hubAhead = Self.httpDate(now.addingTimeInterval(40 * 86_400))
+        let hubSame = Self.httpDate(now)
+
+        XCTAssertEqual(AgentIngestSender.clockSkew(body: future, hubDate: hubBehind, now: now) ?? 0, 2 * 86_400, accuracy: 2)
+        XCTAssertEqual(AgentIngestSender.clockSkew(body: old, hubDate: hubAhead, now: now) ?? 0, -40 * 86_400, accuracy: 2)
+        XCTAssertNil(AgentIngestSender.clockSkew(body: future, hubDate: hubSame, now: now), "the observation, not the clock")
+        XCTAssertNil(AgentIngestSender.clockSkew(body: future, hubDate: hubAhead, now: now), "the wrong direction explains nothing")
+        XCTAssertNil(AgentIngestSender.clockSkew(body: mixed, hubDate: hubBehind, now: now))
+        XCTAssertNil(AgentIngestSender.clockSkew(body: future, hubDate: nil, now: now))
+        XCTAssertNil(AgentIngestSender.clockSkew(body: Data(), hubDate: hubBehind, now: now))
+    }
+
+    func testAServerErrorIsRecordedWithItsStatusForTheReport() async throws {
+        let failures = LockedValue<[AgentDeliveryFailureRecord]>([])
+        let (sender, _, _) = try makeSender(failureHandler: { failures.value.append($0) })
+        await sender.enqueue([observation()])
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        try await waitUntil { failures.value.contains { $0.statusCode == 500 } }
+        XCTAssertEqual(failures.value.first { $0.statusCode == 500 }?.what, "Hub error")
+    }
+
+    func testANetworkErrorIsRecordedWithoutItsMessage() {
+        let described = AgentIngestSender.describeForDiagnostics(URLError(.cannotConnectToHost))
+        XCTAssertEqual(described, "no answer (URLError -1004)")
+    }
+
+    // "Send now" cancels the attempt in flight and starts another. The
+    // cancelled one used to schedule a retry of its own when its request
+    // came back cancelled, so two attempts ran and the report named the
+    // cancellation as the last failure (URLError -999).
+    func testSendNowDuringAnAttemptLeavesNoFailureAndNoSecondAttempt() async throws {
+        let transport = SlowFirstTransport()
+        let states = LockedValue<[AgentIngestSenderState]>([])
+        let failures = LockedValue<[AgentDeliveryFailureRecord]>([])
+        let queue = try AgentDeliveryQueue(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("egressview-sender-\(UUID().uuidString).json")
+        )
+        let sender = AgentIngestSender(
+            queue: queue,
+            credentialStore: SenderCredentialStore(AgentCredential(
+                hubURL: URL(string: "https://hub.example")!, agentID: UUID(),
+                token: "egva_" + String(repeating: "a", count: 64)
+            )),
+            transport: transport,
+            metadata: AgentIngestMetadata(hostName: "test-mac", platform: .macOS, osVersion: "26.5.2", agentVersion: "0.1.14"),
+            minimumSendSpacing: 0,
+            statusHandler: { state, _ in states.value.append(state) },
+            failureHandler: { failures.value.append($0) }
+        )
+        await sender.enqueue([observation()])
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        for _ in 0 ..< 100 where await transport.ingestCount() == 0 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await sender.sendNow()
+        try await waitUntil { queue.status().pendingCount == 0 }
+        try await Task.sleep(for: .milliseconds(300))
+
+        XCTAssertTrue(failures.value.isEmpty, "\(failures.value)")
+        XCTAssertFalse(states.value.contains { if case .retryScheduled = $0 { return true }; return false })
+        let ingests = await transport.ingestCount()
+        XCTAssertEqual(ingests, 2, "the cancelled attempt and the one that replaced it, and no third")
+    }
+
+    private static func httpDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.string(from: date)
+    }
+
     func testRetryPolicyIsBoundedFullJitter() {
         let policy = AgentRetryPolicy()
         XCTAssertEqual(policy.delay(failureCount: 1, randomUnit: 1), 5)
@@ -394,7 +513,8 @@ final class AgentIngestSenderTests: XCTestCase {
     private func makeSender(
         transport: SenderTransport? = nil,
         minimumSendSpacing: TimeInterval = 0,
-        statusHandler: @escaping AgentIngestSender.StatusHandler = { _, _ in }
+        statusHandler: @escaping AgentIngestSender.StatusHandler = { _, _ in },
+        failureHandler: @escaping @Sendable (AgentDeliveryFailureRecord) -> Void = { _ in }
     ) throws -> (AgentIngestSender, SenderTransport, AgentDeliveryQueue) {
         let selectedTransport = transport ?? SenderTransport { request in
             (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
@@ -420,7 +540,8 @@ final class AgentIngestSenderTests: XCTestCase {
                     agentVersion: "0.1.14"
                 ),
                 minimumSendSpacing: minimumSendSpacing,
-                statusHandler: statusHandler
+                statusHandler: statusHandler,
+                failureHandler: failureHandler
             ),
             selectedTransport,
             queue
@@ -485,4 +606,29 @@ private extension NSLock {
         defer { unlock() }
         return operation()
     }
+}
+
+/// Holds the first ingest until it is cancelled, as URLSession does, then
+/// acknowledges everything after it.
+private actor SlowFirstTransport: AgentIngestTransport {
+    private var ingests = 0
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        guard request.url?.path.hasSuffix("ingest") ?? false else {
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+        }
+        ingests += 1
+        if ingests == 1 {
+            while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
+            throw URLError(.cancelled)
+        }
+        let envelope = try JSONDecoder.iso8601.decode(AgentIngestEnvelope.self, from: XCTUnwrap(request.httpBody))
+        let data = try JSONEncoder().encode(AgentIngestAcknowledgementFixture(
+            batchId: envelope.batchId, accepted: envelope.observations.count,
+            duplicate: 0, rejected: 0, replayed: false
+        ))
+        return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+
+    func ingestCount() -> Int { ingests }
 }
