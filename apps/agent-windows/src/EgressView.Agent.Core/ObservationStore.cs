@@ -1752,6 +1752,9 @@ public sealed partial class ObservationStore : IDisposable
                 var coverage = DeleteBatch("coverage_sessions", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
                 var sleeps = DeleteBatch("sleep_periods", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
                 PruneBaselineLocked(now.ToUniversalTime().AddDays(-retentionDays));
+                // The windows of an anomaly carry who sent it, so they keep to
+                // the chosen retention like the rest of the history.
+                Execute($"DELETE FROM outbound_traffic_windows WHERE window_start<'{aggregateCutoff}'");
                 Execute("COMMIT");
                 return new(observations, flows, summaries, coverage, chartSummaries, sleeps);
             }
@@ -1847,6 +1850,7 @@ public sealed partial class ObservationStore : IDisposable
                     coverage = result.CoverageSessionsDeleted;
                     sleeps = result.SleepPeriodsDeleted;
                     DeleteBaselineLocked(null);
+                    Execute("DELETE FROM outbound_traffic_windows");
                 }
                 else
                 {
@@ -1862,6 +1866,7 @@ public sealed partial class ObservationStore : IDisposable
                     Execute($"UPDATE sleep_periods SET started_at='{value}' WHERE started_at<'{value}' AND (ended_at IS NULL OR ended_at>='{value}')");
                     RefoldDeletionBoundary(cutoff);
                     DeleteBaselineLocked(cutoff);
+                    Execute($"DELETE FROM outbound_traffic_windows WHERE window_start<'{value}'");
                 }
                 Execute("COMMIT");
                 return new(observations, flows, hourly, chart, coverage, sleeps);
@@ -2257,9 +2262,20 @@ public sealed partial class ObservationStore : IDisposable
             $"fault='{Sql(SafeTypeName(faultType))}' WHERE id={runId} AND ending='running'");
     }
 
-    /// Captures the last completed fifteen-minute window and returns the seven
-    /// days before it. A window this run or an earlier one already captured
-    /// returns null, so a restart cannot raise the same alert twice.
+    /// How far back the fifteen-minute windows are kept and compared.
+    ///
+    /// It was seven days, and the detector needs 96 measured windows inside
+    /// it. A PC awake a couple of hours a day never got there: on 2026-10-31
+    /// one had 12 windows in seven days and had never judged anything. Only
+    /// monitored windows are ever captured, so a longer reach costs a quiet
+    /// machine nothing and lets a sleepy one learn; the detector still
+    /// compares against at most a week of them (MaximumBaselineWindows).
+    public static readonly TimeSpan OutboundWindowLookback = TimeSpan.FromDays(30);
+
+    /// Captures the last completed fifteen-minute window and returns the
+    /// windows before it, as far back as <see cref="OutboundWindowLookback"/>.
+    /// A window this run or an earlier one already captured returns null, so a
+    /// restart cannot raise the same alert twice.
     public (OutboundTrafficWindow Current, IReadOnlyList<OutboundTrafficWindow> Baseline)? CaptureOutboundTrafficWindow(DateTimeOffset now)
     {
         var duration = TimeSpan.FromMinutes(15);
@@ -2276,7 +2292,7 @@ public sealed partial class ObservationStore : IDisposable
                     "observations_with_bytes,application_count,destination_count,largest_application_bytes_out) " +
                     $"VALUES('{start:O}',{current.BytesOut},{current.ObservationCount},{current.ObservationsWithBytes}," +
                     $"{current.ApplicationCount},{current.DestinationCount},{current.LargestApplicationBytesOut});");
-                var cutoff = start - TimeSpan.FromDays(7);
+                var cutoff = start - OutboundWindowLookback;
                 var baseline = ReadOutboundWindows(cutoff, start);
                 Execute($"DELETE FROM outbound_traffic_windows WHERE window_start < '{cutoff:O}';");
                 Execute("COMMIT;");
@@ -2453,7 +2469,8 @@ public sealed partial class ObservationStore : IDisposable
     /// bytes were never measured is not evidence of a quiet fifteen minutes.
     private int ReadUsableBaselineWindowsLocked() => (int)ScalarInt64(
         "SELECT COUNT(*) FROM outbound_traffic_windows WHERE observation_count >= 10 " +
-        "AND observations_with_bytes * 10 >= observation_count * 8");
+        "AND observations_with_bytes * 10 >= observation_count * 8 " +
+        $"AND window_start >= '{DateTimeOffset.UtcNow - OutboundWindowLookback:O}'");
 
     private int ReadOutboundAnomalyCountLocked(DateTimeOffset from, DateTimeOffset to) => (int)ScalarInt64("SELECT COUNT(*) FROM outbound_traffic_windows " +
             $"WHERE window_start >= '{from:O}' AND window_start < '{to:O}' AND anomaly_kind IS NOT NULL");

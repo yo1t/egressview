@@ -48,6 +48,11 @@ public sealed class OutboundAnomalyDetector(OutboundAnomalyDetector.Configuratio
         /// 96 fifteen-minute windows: a full day. Less than that and "normal"
         /// has not been observed, only guessed at.
         public int MinimumBaselineWindows { get; init; } = 96;
+        /// At most a week of measured windows, the newest: the baseline is
+        /// found by monitored time rather than by calendar, so a PC that
+        /// sleeps reaches it later instead of never, and one that is always
+        /// on compares against the same week it always did.
+        public int MaximumBaselineWindows { get; init; } = 7 * 96;
         public int MinimumObservations { get; init; } = 10;
         public double MinimumByteCoverage { get; init; } = 0.8;
         public ulong AbsoluteBytesFloor { get; init; } = 100UL * 1024 * 1024;
@@ -74,6 +79,8 @@ public sealed class OutboundAnomalyDetector(OutboundAnomalyDetector.Configuratio
         var usable = baseline
             .Where(window => window.ObservationCount >= Settings.MinimumObservations
                 && window.ByteCoverage >= Settings.MinimumByteCoverage)
+            .OrderBy(window => window.StartedAt)
+            .TakeLast(Settings.MaximumBaselineWindows)
             .ToArray();
         if (usable.Length < Settings.MinimumBaselineWindows) return null;
 
