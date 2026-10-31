@@ -142,10 +142,12 @@ public struct AgentOutboundAnomalyDetail: View {
 public struct AgentOutboundAnomalyList: View {
     let records: [OutboundAnomalyRecord]
     let total: Int
+    let usual: OutboundBaselineSummary?
 
-    public init(records: [OutboundAnomalyRecord], total: Int) {
+    public init(records: [OutboundAnomalyRecord], total: Int, usual: OutboundBaselineSummary? = nil) {
         self.records = records
         self.total = total
+        self.usual = usual
     }
 
     public var body: some View {
@@ -168,6 +170,68 @@ public struct AgentOutboundAnomalyList: View {
             Text(L("This is a behavioural anomaly, not a malware verdict."))
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let usual {
+                Divider()
+                AgentOutboundBaselineView(usual: usual)
+            }
         }
+    }
+}
+
+/// What the Agent has learned about this Mac's usual traffic, and how well it
+/// can measure here (P3-192 phase 1).
+///
+/// Counted in monitored hours, because that is what the learning is made of:
+/// a Mac that sleeps most of the week has a few hours, and saying "seven
+/// days" would claim history it does not have. The share of destinations
+/// with a name is shown beside it because it differs by machine -- 82.5% on
+/// one Mac, 44.6% on a Windows PC -- and it decides how well "a destination
+/// this app has not used before" can be told.
+public struct AgentOutboundBaselineView: View {
+    let usual: OutboundBaselineSummary
+
+    public init(usual: OutboundBaselineSummary) { self.usual = usual }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L("Usual on this Mac")).font(.headline)
+            if usual.hoursRecorded == 0 {
+                Text(L("Nothing learned yet. The Agent counts only the hours it was monitoring, an hour at a time."))
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                row(L("Learned from"), L(
+                    "%1$@ monitored hours (since %2$@)",
+                    usual.monitoredHours.formatted(.number.precision(.fractionLength(1))),
+                    usual.since.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—"
+                ))
+                row(L("Sent per hour"), usual.fullyMonitoredHours == 0
+                    ? L("No fully monitored hour yet")
+                    : L(
+                        "median %1$@, 99th percentile %2$@ (over %3$lld fully monitored hours)",
+                        Self.bytes(usual.hourlyMedianBytesOut), Self.bytes(usual.hourlyP99BytesOut),
+                        usual.fullyMonitoredHours
+                    ))
+                row(L("Destinations with a name"),
+                    usual.namedShare.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
+                row(L("App and destination pairs seen"), usual.pairsKnown.formatted())
+            }
+            Text(L("Measured only. Nothing is judged against this yet."))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text(value).multilineTextAlignment(.trailing)
+        }
+        .font(.callout)
+    }
+
+    static func bytes(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .file)
     }
 }

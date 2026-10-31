@@ -891,3 +891,15 @@
 "%@ could not be read." = "%@ は取得できませんでした。";
 "Destinations are checked against the rest." = "通信先は残りの指標と照合しています。";
 "The list held before is still used for %@." = "%@ は、それまで持っていた一覧で照合を続けています。";
+
+/* This Mac's usual outbound traffic (P3-192 phase 1) */
+"Usual on this Mac" = "このMacの普段";
+"Nothing learned yet. The Agent counts only the hours it was monitoring, an hour at a time." = "まだ何も学習していません。監視していた時間だけを、1時間ごとに数えます。";
+"Learned from" = "学習した時間";
+"%1$@ monitored hours (since %2$@)" = "監視した %1$@ 時間分（%2$@ から）";
+"Sent per hour" = "1時間の送信量";
+"No fully monitored hour yet" = "全体を監視できた1時間はまだありません";
+"median %1$@, 99th percentile %2$@ (over %3$lld fully monitored hours)" = "中央値 %1$@・上位1%% %2$@（全体を監視できた %3$lld 時間）";
+"Destinations with a name" = "宛先名が取れた割合";
+"App and destination pairs seen" = "見たことのあるアプリと宛先の組";
+"Measured only. Nothing is judged against this yet." = "測っているだけで、まだこれと比べた判定はしていません。";

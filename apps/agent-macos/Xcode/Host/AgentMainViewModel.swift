@@ -18,6 +18,9 @@ struct AgentPeriodSummary: Equatable {
     var outboundAnomalies: [OutboundAnomalyRecord] = []
     /// How many of this period's destinations arrived with a name (P3-162).
     var destinationNames = DestinationNameCoverage.empty
+    /// What this Mac usually sends, over all it has learned rather than this
+    /// period (P3-192 phase 1). Nil when it could not be read.
+    var outboundBaseline: OutboundBaselineSummary?
 }
 
 /// What one line of the connection log stands for (P3-107 stage 3).
@@ -720,7 +723,8 @@ final class AgentMainViewModel: ObservableObject {
                         observationsWithoutBytes: traffic.observationsWithoutBytes,
                         outboundAnomalyCount: try store.outboundAnomalyCount(from: from, to: to),
                         outboundAnomalies: try store.outboundAnomalies(from: from, to: to),
-                        destinationNames: try store.destinationNameCoverage(from: from, to: to)
+                        destinationNames: try store.destinationNameCoverage(from: from, to: to),
+                        outboundBaseline: try? store.outboundBaselineSummary()
                     )
                     let buckets = try store.appTimeline(
                         from: from, to: to, buckets: VisualizationSelection.bucketCount

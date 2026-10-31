@@ -535,7 +535,17 @@ final class AgentNotificationCoordinator {
 
     private func scanForOutboundAnomaly() {
         guard let store else { return }
+        let logger = logger
         scanQueue.async { [weak self] in
+            // This Mac's usual traffic, an hour at a time (P3-192 phase 1).
+            // Before the window, and failing on its own: a baseline that
+            // cannot be written must not cost the detector.
+            do {
+                let hours = try store.captureBaselineHours()
+                if hours > 0 { logger.info("baseline: read hours=\(hours, privacy: .public)") }
+            } catch {
+                logger.error("baseline: failed \(String(describing: error), privacy: .public)")
+            }
             let result: Result<OutboundAnomalyReport?, Error> = Result {
                 guard let captured = try store.captureOutboundTrafficWindow() else { return nil }
                 let finding = OutboundAnomalyDetector().evaluate(

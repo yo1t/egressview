@@ -18,8 +18,11 @@ extension.
 ## The short version
 
 - **Observations are stored on your hardware by default.** Connection metadata
-  is written to a store inside the app group container on your Mac. Enrolment
-  with your own Hub, optional destination-location lookups, and cloud AI can
+  is written to a store inside the app group container on your Mac. The same
+  store keeps a summary of this Mac's usual outbound traffic (bytes per hour,
+  and application and destination-domain pairs with their bytes per day). The
+  summary never leaves the Mac, and follows the local history's retention and
+  deletion. Enrolment with your own Hub, optional destination-location lookups, and cloud AI can
   send selected data off-device as described below.
 - **There is no developer telemetry.** The agent has no analytics endpoint or
   crash reporter. Optional third-party lookups and cloud AI have separate,
