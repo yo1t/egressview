@@ -96,7 +96,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test Swift package on Intel
         working-directory: apps/agent-macos
-        run: swift test
+        # The Intel runner is a VM without a Metal device, and ImageRenderer
+        # aborts the whole test process there. The chart pixel tests run in
+        # build-and-test on Apple silicon.
+        run: swift test --skip ChartRenderingTests
       - name: Build universal host app and System Extension without signing
         working-directory: apps/agent-macos
         run: >-
