@@ -146,9 +146,15 @@ public sealed partial class ObservationStore
     {
         var end = hour.AddHours(1);
         var monitored = MonitoredSecondsLocked(hour, end);
-        CheckOperation(WinSqlite.Prepare(db, "SELECT remote_address,MAX(remote_hostname),COALESCE(process_name,''),COUNT(*),COUNT(bytes_sent)," +
-            "COUNT(remote_hostname),COALESCE(SUM(bytes_sent),0) FROM observations " +
-            $"WHERE observed_at >= {hour.UtcTicks} AND observed_at < {end.UtcTicks} GROUP BY 1,3", -1, out var statement, 0));
+        // The name on the row, or else the one its connection learned: a name
+        // arrives with one event and the connection keeps it, but the rows
+        // before it stay nameless. Measured on 2026-10-31, rows alone named
+        // 39.1% of what went outside this network, rows with their connection
+        // 62.6%. Most of the rest has no name to find -- DNS servers
+        // themselves (port 53) and peer-to-peer STUN (3478).
+        CheckOperation(WinSqlite.Prepare(db, "SELECT o.remote_address,MAX(COALESCE(o.remote_hostname,f.remote_hostname)),COALESCE(o.process_name,''),COUNT(*),COUNT(o.bytes_sent)," +
+            "COUNT(COALESCE(o.remote_hostname,f.remote_hostname)),COALESCE(SUM(o.bytes_sent),0) FROM observations o LEFT JOIN flows f ON f.rowid=o.flow_id " +
+            $"WHERE o.observed_at >= {hour.UtcTicks} AND o.observed_at < {end.UtcTicks} GROUP BY 1,3", -1, out var statement, 0));
         var pairs = new Dictionary<(string Application, string Destination), ulong>();
         long observations = 0, withBytes = 0, named = 0;
         ulong bytesOut = 0;

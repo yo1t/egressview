@@ -3334,6 +3334,14 @@ try
             "no opinion is offered before a full day of measured baseline");
 
         var steady = Enumerable.Range(0, 96).Select(index => Window(index, 20)).ToArray();
+
+        // At most a week of measured windows, the newest. Older ones reach the
+        // detector now that it looks back 30 days, and must not outvote the
+        // last week: 700 busy windows from long ago, then a quiet week.
+        var olderBusy = Enumerable.Range(0, 700).Select(index => Window(index, 200)).ToArray();
+        var quietWeek = Enumerable.Range(700, 672).Select(index => Window(index, 1)).ToArray();
+        Assert(detector.Evaluate(Window(1372, 150), [.. olderBusy, .. quietWeek]) is { BaselineMedianBytesOut: 1 * mib },
+            "the baseline is the newest week of measured windows, not everything the lookback reaches");
         var large = detector.Evaluate(Window(96, 200), steady);
         Assert(large is { Kind: OutboundAnomalyKind.LargeTransfer } &&
             large.BaselineMedianBytesOut == 20 * mib && large.AlertThresholdBytesOut == 100 * mib,
@@ -3454,6 +3462,41 @@ try
                 Assert(store.ReadOutboundBaselineSummary() is { HoursRecorded: 0, PairsKnown: 0 },
                     "the baseline keeps to the retention the person chose, like the rest of the history");
             }
+        }
+
+        // The fifteen-minute windows are kept and compared by monitored time
+        // up to 30 days back, and follow the history's retention and deletion.
+        {
+            var windowsDatabase = Path.Combine(directory, "outbound-lookback.db");
+            using var store = new ObservationStore(windowsDatabase);
+            var now = DateTimeOffset.UtcNow;
+            store.CaptureOutboundTrafficWindow(now.AddDays(-10));
+            var captured = store.CaptureOutboundTrafficWindow(now);
+            Assert(captured is { } latest && latest.Baseline.Count == 1 && latest.Baseline[0].StartedAt < now.AddDays(-9),
+                "a window ten days old is still part of the baseline: a PC that sleeps learns later instead of never");
+            store.SetRetentionDays(7);
+            store.PruneRetentionBatch(now);
+            Assert(store.CaptureOutboundTrafficWindow(now.AddMinutes(15)) is { Baseline.Count: 1 },
+                "a window older than the chosen retention is removed with the rest of the history");
+            store.DeleteLocalHistory(null, now.AddMinutes(16));
+            Assert(store.CaptureOutboundTrafficWindow(now.AddMinutes(30)) is { Baseline.Count: 0 },
+                "deleting all history deletes the windows, which can carry who sent an anomaly");
+
+            // A name that arrived on a later event belongs to the earlier ones too.
+            // Its own database: the deletion above rightly moved the baseline past this hour.
+            using var named = new ObservationStore(Path.Combine(directory, "baseline-flow-names.db"));
+            var at = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero).AddHours(-3);
+            var coverage = named.BeginCoverage([], at);
+            named.EndCoverage(coverage, at.AddHours(1));
+            named.WriteBatch([
+                new NetworkObservation(at.AddMinutes(1), 900, "TCP", "10.0.0.5", 51_000, "203.0.113.40", 443, 1_000, 0,
+                    ObservationLayer.Logical, null, "etw", "app"),
+                new NetworkObservation(at.AddMinutes(2), 900, "TCP", "10.0.0.5", 51_000, "203.0.113.40", 443, 1_000, 0,
+                    ObservationLayer.Logical, null, "etw", "app", "late.example.org"),
+            ]);
+            named.CaptureBaselineHours(now, maxHours: 1000);
+            Assert(named.ReadOutboundBaselineSummary() is { NamedShare: 1.0, PairsKnown: 1 },
+                "an event without a name counts as named when its connection learned one");
         }
 
         // The detector is only worth having if something calls it. A store
