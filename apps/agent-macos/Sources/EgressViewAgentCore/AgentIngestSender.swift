@@ -463,7 +463,7 @@ public actor AgentIngestSender {
             sendTask = nil
             publish(.idle)
             if queue.status().pendingCount > 0 {
-                scheduleRetry(minimumDelay: 2.1)
+                scheduleNextBatch()
             }
         } catch where Task.isCancelled {
             return
@@ -692,6 +692,22 @@ public actor AgentIngestSender {
         failureCount = 0
         scheduleRetry(minimumDelay: 1)
     }
+
+    /// More is waiting after an accepted batch. That is delivery going well,
+    /// so it is not published as a retry and not counted as a failure. It was
+    /// both, which put "Hub unavailable" on the settings screen and
+    /// `retry scheduled` in the report while the queue drained normally, and
+    /// started the next real failure's backoff one step late (2026-10-31).
+    private func scheduleNextBatch() {
+        sendTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.drainSpacing))
+            guard !Task.isCancelled else { return }
+            await self?.sendNextBatch()
+        }
+    }
+
+    /// Keeps a draining queue under the Hub's thirty requests a minute.
+    static let drainSpacing: TimeInterval = 2.1
 
     private func scheduleRetry(minimumDelay: TimeInterval? = nil) {
         sendTask = nil
