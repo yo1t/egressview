@@ -18,7 +18,9 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
 OUTPUT_DIR=${EGRESSVIEW_RELEASE_OUTPUT_DIR:-"$PROJECT_DIR/dist"}
 SIGN_IDENTITY=${EGRESSVIEW_SIGN_IDENTITY:-Developer ID Application}
-ARCHS=${EGRESSVIEW_ARCHS:-arm64}
+# Apple silicon and Intel in one package, so an Intel Mac gets the same
+# installer and the same update as everyone else.
+ARCHS=${EGRESSVIEW_ARCHS:-arm64 x86_64}
 SCRIPT_DIR_FOR_NOTARY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=notary-auth.sh
 source "$SCRIPT_DIR_FOR_NOTARY/notary-auth.sh"
@@ -58,10 +60,23 @@ xcodebuild -quiet \
   EGRESSVIEW_HOST_PROFILE="$EGRESSVIEW_HOST_PROFILE" \
   EGRESSVIEW_FILTER_PROFILE="$EGRESSVIEW_FILTER_PROFILE" \
   ARCHS="$ARCHS" \
+  ONLY_ACTIVE_ARCH=NO \
   archive
 
 [[ -d "$APP_PATH" ]] || { printf 'Host app missing from archive\n' >&2; exit 1; }
 [[ -d "$EXTENSION_PATH" ]] || { printf 'System Extension missing from archive\n' >&2; exit 1; }
+# Every executable in the bundle carries every requested architecture. A
+# missing slice installs fine and then fails to launch on that kind of Mac.
+while IFS= read -r -d '' binary; do
+  file "$binary" | grep -q 'Mach-O' || continue
+  have=" $(lipo -archs "$binary") "
+  for arch in $ARCHS; do
+    [[ "$have" == *" $arch "* ]] || {
+      printf '%s lacks %s (has%s)\n' "${binary#"$APP_PATH"/}" "$arch" "$have" >&2
+      exit 1
+    }
+  done
+done < <(find "$APP_PATH" -type f -perm -u+x -print0)
 EXTENSION_BUILD=$(plutil -extract CFBundleVersion raw "$EXTENSION_PATH/Contents/Info.plist")
 HOST_BUILD=$(plutil -extract CFBundleVersion raw "$APP_PATH/Contents/Info.plist")
 # Each side derives the XPC service name from its own build number, so a

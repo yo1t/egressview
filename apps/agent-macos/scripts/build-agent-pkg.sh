@@ -280,7 +280,7 @@ cat > "$DISTRIBUTION" <<DISTXML
 <installer-gui-script minSpecVersion="1">
     <title>EgressView Agent</title>
     <organization>com.egressview</organization>
-    <options customize="never" require-scripts="true" hostArchitectures="arm64" rootVolumeOnly="true"/>
+    <options customize="never" require-scripts="true" hostArchitectures="arm64,x86_64" rootVolumeOnly="true"/>
     <allowed-os-versions><os-version min="13.0"/></allowed-os-versions>
     <conclusion file="conclusion.txt"/>
     <pkg-ref id="$BUNDLE_ID"/>
