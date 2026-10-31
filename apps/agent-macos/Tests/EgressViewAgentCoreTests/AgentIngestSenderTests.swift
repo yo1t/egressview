@@ -319,6 +319,83 @@ final class AgentIngestSenderTests: XCTestCase {
         XCTAssertEqual(sent, 3)
     }
 
+    /// 2026-10-31: a queue holding more than one batch drained normally, yet
+    /// between batches the sender said it was waiting to retry, which the
+    /// settings screen words as "Hub unavailable".
+    func testDrainingMoreThanOneBatchIsNotAnnouncedAsARetry() async throws {
+        let transport = Self.acknowledgingTransport()
+        let states = LockedValue<[AgentIngestSenderState]>([])
+        let (sender, _, queue) = try makeSender(
+            transport: transport,
+            statusHandler: { state, _ in states.value.append(state) }
+        )
+        await sender.enqueue((0 ..< AgentIngestSender.agentBatchLimit + 5).map { observation(remotePort: UInt16(1_000 + $0)) })
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        try await waitUntil(timeout: 10) { queue.status().pendingCount == 0 }
+
+        let sent = await transport.ingestCount()
+        XCTAssertEqual(sent, 2)
+        XCTAssertFalse(states.value.contains { if case .retryScheduled = $0 { return true }; return false })
+        guard case .idle = states.value.last else {
+            return XCTFail("a drained queue ends ready, not \(String(describing: states.value.last))")
+        }
+    }
+
+    /// The batch after a drain is not a failure, so a real failure that
+    /// follows starts from the first step of the backoff.
+    func testAFailureAfterADrainStartsTheBackoffFromTheFirstStep() async throws {
+        let ingests = LockedValue(0)
+        let acknowledging = Self.acknowledgingTransport()
+        let transport = SenderTransport { request in
+            guard request.url?.path.hasSuffix("ingest") ?? false else {
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+            }
+            ingests.value += 1
+            if ingests.value > 1 { throw URLError(.cannotConnectToHost) }
+            return try acknowledging.response(request)
+        }
+        let states = LockedValue<[(AgentIngestSenderState, Date)]>([])
+        let queue = try AgentDeliveryQueue(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("egressview-drain-backoff-\(UUID().uuidString).json")
+        )
+        let sender = AgentIngestSender(
+            queue: queue,
+            credentialStore: SenderCredentialStore(AgentCredential(
+                hubURL: URL(string: "https://hub.example")!,
+                agentID: UUID(),
+                token: "egva_" + String(repeating: "a", count: 64)
+            )),
+            transport: transport,
+            metadata: AgentIngestMetadata(
+                hostName: "test-mac",
+                platform: .macOS,
+                osVersion: "26.5.2",
+                agentVersion: "0.1.14"
+            ),
+            retryPolicy: AgentRetryPolicy(initialDelay: 100, maximumDelay: 900),
+            randomUnit: { 1 },
+            minimumSendSpacing: 0,
+            statusHandler: { state, _ in states.value.append((state, Date())) }
+        )
+        await sender.enqueue((0 ..< AgentIngestSender.agentBatchLimit + 5).map { observation(remotePort: UInt16(1_000 + $0)) })
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        // The second batch is the one that fails. Before the fix it never
+        // went within the test: the drain itself waited out the backoff.
+        try await waitUntil(timeout: 10) { ingests.value == 2 }
+        try await waitUntil {
+            if case .retryScheduled = states.value.last?.0 { return true }
+            return false
+        }
+
+        guard let (state, at) = states.value.last, case let .retryScheduled(retryAt) = state else {
+            return XCTFail("the failure schedules a retry")
+        }
+        XCTAssertEqual(retryAt.timeIntervalSince(at), 100, accuracy: 5, "the first step of the backoff, not the second (200)")
+    }
+
     private static func acknowledgingTransport() -> SenderTransport {
         SenderTransport { request in
             guard request.url?.path.hasSuffix("ingest") ?? false else {
@@ -564,8 +641,8 @@ final class AgentIngestSenderTests: XCTestCase {
         )
     }
 
-    private func waitUntil(_ condition: @escaping () -> Bool) async throws {
-        for _ in 0 ..< 100 where !condition() {
+    private func waitUntil(timeout: TimeInterval = 1, _ condition: @escaping () -> Bool) async throws {
+        for _ in 0 ..< Int(timeout * 100) where !condition() {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertTrue(condition())
