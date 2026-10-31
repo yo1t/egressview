@@ -487,6 +487,15 @@ internal sealed class AgentWindowsService : ServiceBase
                 // Capturing is idempotent per window, so checking more often
                 // than the window length costs a COUNT and finds the window
                 // sooner after a restart.
+                // This machine's usual traffic, an hour at a time (P3-192
+                // phase 1). Before the window, and failing on its own: a
+                // baseline that cannot be written must not cost the detector.
+                try
+                {
+                    var hours = store.CaptureBaselineHours(DateTimeOffset.UtcNow);
+                    if (hours > 0) store.AddCounter("baseline-hours-read", hours);
+                }
+                catch { store.AddCounter("baseline-failure", 1); }
                 if (store.CaptureOutboundTrafficWindow(DateTimeOffset.UtcNow) is { } captured)
                 {
                     store.AddCounter("outbound-windows-captured", 1);

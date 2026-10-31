@@ -94,4 +94,14 @@
   <system:String x:Key="FeedShortfallFailed">{0} could not be read.</system:String>
   <system:String x:Key="FeedShortfallRest">Destinations are checked against the rest.</system:String>
   <system:String x:Key="FeedShortfallKept">The list held before is still used for {0}.</system:String>
+  <system:String x:Key="UsualOnThisPc">Usual on this PC</system:String>
+  <system:String x:Key="UsualNotLearnedYet">Nothing learned yet. The Agent counts only the hours it was monitoring, an hour at a time.</system:String>
+  <system:String x:Key="UsualLearned">Learned from</system:String>
+  <system:String x:Key="UsualLearnedFormat">{0:N1} monitored hours (since {1})</system:String>
+  <system:String x:Key="UsualPerHour">Sent per hour</system:String>
+  <system:String x:Key="UsualPerHourFormat">median {0}, 99th percentile {1} (over {2:N0} fully monitored hours)</system:String>
+  <system:String x:Key="UsualNoFullHourYet">No fully monitored hour yet</system:String>
+  <system:String x:Key="UsualNamed">Destinations with a name</system:String>
+  <system:String x:Key="UsualPairs">App and destination pairs seen</system:String>
+  <system:String x:Key="UsualNotJudgedYet">Measured only. Nothing is judged against this yet.</system:String>
 </ResourceDictionary>
