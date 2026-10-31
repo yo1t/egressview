@@ -891,3 +891,15 @@
 "%@ could not be read." = "%@ could not be read.";
 "Destinations are checked against the rest." = "Destinations are checked against the rest.";
 "The list held before is still used for %@." = "The list held before is still used for %@.";
+
+/* This Mac's usual outbound traffic (P3-192 phase 1) */
+"Usual on this Mac" = "Usual on this Mac";
+"Nothing learned yet. The Agent counts only the hours it was monitoring, an hour at a time." = "Nothing learned yet. The Agent counts only the hours it was monitoring, an hour at a time.";
+"Learned from" = "Learned from";
+"%1$@ monitored hours (since %2$@)" = "%1$@ monitored hours (since %2$@)";
+"Sent per hour" = "Sent per hour";
+"No fully monitored hour yet" = "No fully monitored hour yet";
+"median %1$@, 99th percentile %2$@ (over %3$lld fully monitored hours)" = "median %1$@, 99th percentile %2$@ (over %3$lld fully monitored hours)";
+"Destinations with a name" = "Destinations with a name";
+"App and destination pairs seen" = "App and destination pairs seen";
+"Measured only. Nothing is judged against this yet." = "Measured only. Nothing is judged against this yet.";
