@@ -393,7 +393,7 @@ public partial class MainWindow : Window
         // Which windows, how much against the usual, and who sent it -- where
         // the pointer rests on the card, not only how many (P3-180).
         AnomalyDetailView.Attach(OutboundAnomalyCard,
-            AnomalyDetailView.List(data.OutboundAnomalyDetails, data.OutboundAnomalies, data.OutboundBaselineReady));
+            AnomalyDetailView.List(data.OutboundAnomalyDetails, data.OutboundAnomalies, data.OutboundBaselineReady, data.OutboundBaseline));
         SetCoverage(data.CoverageRatio);
         StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.StorageBytes));
         MonitoringSince.Text = data.MonitoringStartedAt is { } started ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MonitoringSince"), started.LocalDateTime.ToString("g")) : string.Empty;

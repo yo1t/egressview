@@ -1421,7 +1421,7 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 31, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 32, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
@@ -1847,7 +1847,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 31, "v1 database migrates through v2-v31");
+        Assert(migrated.SchemaVersion == 32, "v1 database migrates through v2-v32");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -1899,7 +1899,7 @@ try
     Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v29.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 31, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 32, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -3380,6 +3380,82 @@ try
                 "a fresh database says it cannot judge yet rather than reporting no anomalies");
         }
 
+        // P3-192/193 phase 1: each Agent measures its own machine, an hour at
+        // a time, counting only the time it was monitoring.
+        {
+            Assert(OutboundBaselineKeys.Destination("a.cdn.example.com.", "203.0.113.5") == "example.com"
+                   && OutboundBaselineKeys.Destination("www.shop.co.jp", "203.0.113.5") == "shop.co.jp"
+                   && OutboundBaselineKeys.Destination(null, "2001:DB8::1") == "2001:db8::1"
+                   && OutboundBaselineKeys.Application(null) == "(unknown)",
+                "destinations are counted by registrable domain, as the measurement scripts count them, or by address without a name");
+
+            static DateTimeOffset Hour(DateTimeOffset value) => new(value.Year, value.Month, value.Day, value.Hour, 0, 0, TimeSpan.Zero);
+            NetworkObservation Sent(DateTimeOffset at, string address, long bytes, string? process, string? host = null, int pid = 700) =>
+                new(at, pid, "TCP", "10.0.0.5", 50_000, address, 443, bytes, 0, ObservationLayer.Logical, null, "etw", process, host);
+
+            void Fill(ObservationStore store, DateTimeOffset start)
+            {
+                var coverage = store.BeginCoverage([], start);
+                store.EndCoverage(coverage, start.AddHours(2));
+                // Half of the second hour asleep: monitored, but only 30 minutes of it.
+                store.BeginSleepPeriod(start.AddMinutes(70));
+                store.EndSleepPeriod(start.AddMinutes(100));
+                store.WriteBatch([
+                    Sent(start.AddMinutes(5), "203.0.113.5", 1_048_576, "chrome", "a.cdn.example.com"),
+                    Sent(start.AddMinutes(6), "203.0.113.6", 2_097_152, "chrome", "b.example.com"),
+                    Sent(start.AddMinutes(7), "198.51.100.7", 500, null),
+                    // A receive: no bytes sent, still an observation of the pair.
+                    new NetworkObservation(start.AddMinutes(8), 700, "TCP", "10.0.0.5", 50_001, "203.0.113.5", 443, 0, 9_000,
+                        ObservationLayer.Logical, null, "etw", "chrome", "a.cdn.example.com"),
+                    // The LAN is not outbound, as for the fifteen-minute windows.
+                    Sent(start.AddMinutes(9), "192.168.1.20", 100L * 1024 * 1024, "System"),
+                    Sent(start.AddMinutes(65), "203.0.113.5", 4_194_304, "chrome", "a.cdn.example.com"),
+                ]);
+            }
+
+            var baselineDatabase = Path.Combine(directory, "baseline.db");
+            using (var store = new ObservationStore(baselineDatabase))
+            {
+                Assert(store.SchemaVersion == 32 && store.ReadOutboundBaselineSummary().HoursRecorded == 0,
+                    "a new database starts with an empty baseline");
+                var now = DateTimeOffset.UtcNow;
+                var start = Hour(now).AddHours(-5);
+                Fill(store, start);
+                var read = store.CaptureBaselineHours(now, maxHours: 1000);
+                var usual = store.ReadOutboundBaselineSummary();
+                Assert(read >= 4 && usual.HoursRecorded == 2 && Math.Abs(usual.MonitoredHours - 1.5) < 0.01
+                       && usual.FullyMonitoredHours == 1 && usual.Since == start,
+                    "only hours that were monitored are written, and sleep is taken out of them");
+                Assert(usual.HourlyMedianBytesOut == 3_146_228UL && usual.LargestHourBytesOut == 3_146_228UL,
+                    "an hour's bytes are what left for outside this network; the copy to the LAN is not counted");
+                Assert(usual.PairsKnown == 2 && usual.NamedShare is > 0.79 and < 0.81 && usual.BytesShare == 1.0,
+                    "two hosts of one domain are one pair, a nameless sender is its own, and the share with a name is measured");
+                Assert(store.CaptureBaselineHours(now, maxHours: 1000) == 0 && store.ReadOutboundBaselineSummary() == usual,
+                    "capturing again counts no hour twice");
+
+                store.DeleteLocalHistory(start.AddHours(1), now);
+                var trimmed = store.ReadOutboundBaselineSummary();
+                Assert(trimmed.HoursRecorded == 1 && trimmed.PairsKnown == 0,
+                    "deleting the history before a time deletes the hours before it and every pair that was already known then");
+                store.DeleteLocalHistory(null, now);
+                Assert(store.ReadOutboundBaselineSummary() is { HoursRecorded: 0, PairsKnown: 0 },
+                    "deleting all history deletes the whole baseline");
+            }
+
+            var baselineRetentionDatabase = Path.Combine(directory, "baseline-retention.db");
+            using (var store = new ObservationStore(baselineRetentionDatabase))
+            {
+                var now = DateTimeOffset.UtcNow;
+                Fill(store, Hour(now).AddHours(-30));
+                store.CaptureBaselineHours(now, maxHours: 1000);
+                Assert(store.ReadOutboundBaselineSummary().HoursRecorded == 2, "a day-old hour is learned from the raw history");
+                store.SetRetentionDays(1);
+                store.PruneRetentionBatch(now);
+                Assert(store.ReadOutboundBaselineSummary() is { HoursRecorded: 0, PairsKnown: 0 },
+                    "the baseline keeps to the retention the person chose, like the rest of the history");
+            }
+        }
+
         // The detector is only worth having if something calls it. A store
         // that captures windows, a caller that evaluates them and a row that
         // records the verdict are three separate things, and the last time
@@ -4755,7 +4831,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 31 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 32 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }

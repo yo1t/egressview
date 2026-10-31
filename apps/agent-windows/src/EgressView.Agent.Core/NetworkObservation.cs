@@ -147,6 +147,11 @@ public sealed record PeriodAnalysis(
     /// meaning the second.
     public bool OutboundBaselineReady { get; init; }
 
+    /// This machine's usual outbound traffic, counted in monitored hours
+    /// (P3-192 phase 1). Not judged against yet; shown so the person can see
+    /// what the Agent has learned and how well it can measure here.
+    public OutboundBaselineSummary? OutboundBaseline { get; init; }
+
     public IReadOnlyList<SleepPeriod> SleepPeriods { get; init; } = [];
     public double SleepSeconds => SleepPeriods.Sum(period => Math.Max(0, (period.End - period.Start).TotalSeconds));
 

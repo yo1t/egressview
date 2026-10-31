@@ -600,6 +600,11 @@ internal static class Entry
                 ThemeManager.ApplyTheme(application.Resources, dark, Color.FromRgb(0x4D, 0x94, 0xFF));
                 SaveDetail(AnomalyDetailView.List([explained, unexplained], 7, true), Path.Combine(output, $"anomaly-card-detail-{suffix}.png"));
                 SaveDetail(AnomalyDetailView.List([], 0, false), Path.Combine(output, $"anomaly-card-learning-{suffix}.png"));
+                SaveDetail(AnomalyDetailView.List([], 0, false, new OutboundBaselineSummary(3.5, 5, 2, at.AddDays(-12),
+                    13UL * 1024 * 1024, 57UL * 1024 * 1024, 317UL * 1024 * 1024, 0.446, 1.0, 1_249)),
+                    Path.Combine(output, $"anomaly-card-usual-{suffix}.png"));
+                SaveDetail(AnomalyDetailView.List([], 0, false, new OutboundBaselineSummary(0, 0, 0, null, 0, 0, 0, null, null, 0)),
+                    Path.Combine(output, $"anomaly-card-usual-empty-{suffix}.png"));
                 SaveDetail(AnomalyDetailView.Notice(new NotificationHistoryEntry(at.AddMinutes(20), "OutboundAnomaly", "EgressView Agent",
                     "17:00 に通常と異なる外向き通信がありました。送信 396.7 MiB。このPCの通常より大幅に多い量です。Agentを開いて確認してください。",
                     true, Anomaly: explained)), Path.Combine(output, $"notice-anomaly-{suffix}.png"));

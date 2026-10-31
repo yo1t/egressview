@@ -8,7 +8,11 @@ centre of this page.
 ## The short version
 
 - **Observations are stored on this PC by default.** Connection metadata is
-  written to a SQLite database here. Enrolment with your own Hub, optional
+  written to a SQLite database here. The same database keeps a summary of
+  this PC's usual outbound traffic (bytes per hour, and application and
+  destination-domain pairs with their bytes per day). The summary never leaves
+  the PC, and follows the local history's retention and deletion. Enrolment
+  with your own Hub, optional
   location lookups, and cloud AI can send selected data off-device as below.
 - **There is no developer telemetry.** There is no analytics endpoint or crash
   reporter. Optional third-party lookups and cloud AI are listed below.
