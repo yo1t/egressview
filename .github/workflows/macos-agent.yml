@@ -97,9 +97,12 @@ jobs:
       - name: Test Swift package on Intel
         working-directory: apps/agent-macos
         # The Intel runner is a VM without a Metal device, and ImageRenderer
-        # aborts the whole test process there. The chart pixel tests run in
+        # aborts the whole test process there. The tests that render run in
         # build-and-test on Apple silicon.
-        run: swift test --skip ChartRenderingTests
+        run: >-
+          swift test
+          --skip ChartRenderingTests
+          --skip 'OutboundAnomalyBreakdownTests/test詳細の一覧が描ける'
       - name: Build universal host app and System Extension without signing
         working-directory: apps/agent-macos
         run: >-
