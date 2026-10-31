@@ -108,6 +108,9 @@ public struct AgentDiagnosticsReport: Sendable {
         public var migrationBackups: [MigrationBackup]
         public var interruptedMigration: MigrationProgress?
         public var threatIntelSource: String
+        /// What this Mac usually sends, as numbers only: no application, no
+        /// destination (P3-192 phase 1). Nil when it could not be read.
+        public var outboundBaseline: OutboundBaselineSummary?
         /// What happened to the runs before this one. Empty on a Mac where the
         /// App Group container could not be opened, which the report says
         /// elsewhere.
@@ -133,6 +136,7 @@ public struct AgentDiagnosticsReport: Sendable {
             schemaVersion: Int = 0,
             migrationBackups: [MigrationBackup] = [],
             interruptedMigration: MigrationProgress? = nil,
+            outboundBaseline: OutboundBaselineSummary? = nil,
             runHistory: AgentRunHistory = AgentRunHistory(),
             installLog: InstallLog
         ) {
@@ -164,6 +168,7 @@ public struct AgentDiagnosticsReport: Sendable {
             self.schemaVersion = schemaVersion
             self.migrationBackups = migrationBackups
             self.interruptedMigration = interruptedMigration
+            self.outboundBaseline = outboundBaseline
             self.runHistory = runHistory
             self.installLog = installLog
         }
@@ -347,6 +352,25 @@ public struct AgentDiagnosticsReport: Sendable {
         lines.append(row("oldest", "\(when(inputs.storage.oldestObservationAt))"))
         lines.append(row("newest", "\(when(inputs.storage.newestObservationAt))"))
         lines.append(row("threat source", "\(inputs.threatIntelSource)"))
+        lines.append("")
+        lines.append("== Usual outbound traffic")
+        if let usual = inputs.outboundBaseline {
+            func share(_ value: Double?) -> String {
+                value.map { String(format: "%.1f%%", $0 * 100) } ?? "none"
+            }
+            lines.append(row("monitored hours", String(format: "%.1f", usual.monitoredHours)))
+            lines.append(row("hours recorded", "\(usual.hoursRecorded)"))
+            lines.append(row("fully monitored", "\(usual.fullyMonitoredHours)"))
+            lines.append(row("since", "\(when(usual.since))"))
+            lines.append(row("per hour median", "\(usual.hourlyMedianBytesOut) bytes"))
+            lines.append(row("per hour p99", "\(usual.hourlyP99BytesOut) bytes"))
+            lines.append(row("largest hour", "\(usual.largestHourBytesOut) bytes"))
+            lines.append(row("with a name", share(usual.namedShare)))
+            lines.append(row("with bytes", share(usual.bytesShare)))
+            lines.append(row("pairs known", "\(usual.pairsKnown)"))
+        } else {
+            lines.append(row("baseline", "unreadable"))
+        }
         lines.append("")
         lines.append("== Hub")
         lines.append(row("enrolled", "\(inputs.isEnrolledWithHub ? "yes" : "no")"))

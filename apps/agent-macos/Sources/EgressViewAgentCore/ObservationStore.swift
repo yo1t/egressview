@@ -338,7 +338,7 @@ public final class ObservationStore: @unchecked Sendable {
     ///
     /// Named rather than counted from the code so the backup and the progress
     /// file can say where the migration is heading before it starts.
-    static let latestSchemaVersion = 18
+    static let latestSchemaVersion = 19
 
     private func migrate() throws {
         let version = try scalar("PRAGMA user_version") ?? 0
@@ -779,6 +779,56 @@ public final class ObservationStore: @unchecked Sendable {
             }
             try execute("PRAGMA user_version=18")
             reportMigrationStep(18)
+        }
+        if version < 19 {
+            // What each Agent keeps about its own machine (P3-192, P3-193
+            // phase 1). The same tables and keys as the Windows Agent's
+            // schema 32; times are epoch seconds, as everywhere in this file.
+            //
+            // Derived from the history, so they follow it: retention bounds
+            // them and deleting history deletes them. Bounded on their own
+            // as well -- hours by the retention, pair-days by 35 days, pairs
+            // by `baselinePairCapacity`.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS baseline_hours (
+                hour_start REAL PRIMARY KEY,
+                monitored_seconds INTEGER NOT NULL,
+                bytes_out INTEGER NOT NULL,
+                observations INTEGER NOT NULL,
+                observations_with_bytes INTEGER NOT NULL,
+                named_observations INTEGER NOT NULL
+            )
+            """)
+            try execute("""
+            CREATE TABLE IF NOT EXISTS baseline_pair_days (
+                day REAL NOT NULL,
+                application TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                bytes_out INTEGER NOT NULL,
+                PRIMARY KEY (day, application, destination)
+            ) WITHOUT ROWID
+            """)
+            try execute("""
+            CREATE TABLE IF NOT EXISTS baseline_pairs (
+                application TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                first_seen REAL NOT NULL,
+                last_seen REAL NOT NULL,
+                PRIMARY KEY (application, destination)
+            ) WITHOUT ROWID
+            """)
+            try execute(
+                "CREATE INDEX IF NOT EXISTS baseline_pairs_last_seen ON baseline_pairs(last_seen)"
+            )
+            try execute("""
+            CREATE TABLE IF NOT EXISTS baseline_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                captured_through REAL
+            )
+            """)
+            try execute("INSERT OR IGNORE INTO baseline_state (id) VALUES (1)")
+            try execute("PRAGMA user_version=19")
+            reportMigrationStep(19)
         }
     }
 
@@ -2351,6 +2401,295 @@ public final class ObservationStore: @unchecked Sendable {
         }
     }
 
+    // MARK: - This Mac's usual outbound traffic (P3-192, P3-193 phase 1)
+
+    /// More pairs than this and the ones seen longest ago are forgotten first.
+    public static let baselinePairCapacity = 50_000
+    /// A completed hour is read this long after it ends, so the observations
+    /// still on their way to the database are in it.
+    public static let baselineSettleDelay: TimeInterval = 120
+    private static let baselinePairDays: Double = 35
+
+    /// Writes the completed hours not yet written, oldest first, at most
+    /// `maxHours` per call.
+    ///
+    /// Idempotent: where it got to is kept in the same transaction as what it
+    /// wrote, so a restart neither skips an hour nor counts one twice. The
+    /// first run reaches back as far as the raw history goes, so a Mac starts
+    /// with what it already has rather than from nothing.
+    ///
+    /// An observation belongs to the hour of its last sighting, as in the
+    /// fifteen-minute windows: a flow's bytes arrive when it ends, so a long
+    /// upload lands in the hour it finished.
+    ///
+    /// An hour with no monitoring and no observations is not written. A
+    /// missing hour means "not watched", which is not the same as "quiet",
+    /// and the summary must not average the two together.
+    ///
+    /// The lock is taken an hour at a time, so a first run reading back
+    /// fourteen days does not hold up the collector writing the present.
+    /// - Returns: How many hours were read.
+    @discardableResult
+    public func captureBaselineHours(now: Date = Date(), maxHours: Int = 24) throws -> Int {
+        let settledEnd = Self.floorHour(now.timeIntervalSince1970 - Self.baselineSettleDelay)
+        var read = 0
+        while read < maxHours {
+            let wrote = try lock.withLock { () -> Bool in
+                let earliest = Self.floorHour(
+                    now.timeIntervalSince1970 - Double(retention.rawDays) * 86_400
+                )
+                let hour = max(
+                    earliest,
+                    try scalarDouble("SELECT captured_through FROM baseline_state WHERE id = 1") ?? earliest
+                )
+                guard hour + 3600 <= settledEnd else { return false }
+                try captureBaselineHourLocked(hour)
+                return true
+            }
+            guard wrote else { break }
+            read += 1
+        }
+        if read > 0 { try lock.withLock { try forgetBaselinePairsOverCapacityLocked() } }
+        return read
+    }
+
+    private func captureBaselineHourLocked(_ hour: Double) throws {
+        let end = hour + 3600
+        let monitored = try monitoredSecondsLocked(from: hour, to: end)
+        // Grouped by name as well as address: one CDN address serves many
+        // names, and taking one of them would file every other site's
+        // traffic under it -- the measurement scripts key each observation
+        // by its own name.
+        //
+        // "Outside this network" is the fifteen-minute windows' rule, asked
+        // once per address after grouping rather than of every row in SQL.
+        // Asked of every row, reading back fourteen days of a real Mac's
+        // history took up to 3.8 s for 24 hours; asked once per address, the
+        // slowest single hour took 38 ms.
+        let statement = try prepare("""
+        SELECT remote_address, NULLIF(remote_hostname, ''), bundle_id, process_name,
+               COUNT(*), COUNT(bytes_out), COUNT(NULLIF(remote_hostname, '')),
+               COALESCE(SUM(bytes_out), 0)
+        FROM observations
+        WHERE last_observed_at >= ? AND last_observed_at < ?
+        GROUP BY remote_address, NULLIF(remote_hostname, ''), bundle_id, process_name
+        """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, hour)
+        sqlite3_bind_double(statement, 2, end)
+        struct PairKey: Hashable { let application: String; let destination: String }
+        var pairs: [PairKey: UInt64] = [:]
+        var observations = 0, withBytes = 0, named = 0
+        var bytesOut: UInt64 = 0
+        var external: [String: Bool] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let address = text(statement, 0) ?? ""
+            let isExternal = external[address] ?? {
+                let value = !NonPublicAddress.isExcludedFromOutboundAnomaly(address)
+                external[address] = value
+                return value
+            }()
+            guard isExternal else { continue }
+            let key = PairKey(
+                application: OutboundBaselineKeys.application(
+                    bundleID: text(statement, 2), processName: text(statement, 3)
+                ),
+                destination: OutboundBaselineKeys.destination(
+                    hostname: text(statement, 1), address: address
+                )
+            )
+            let sent = UInt64(max(0, sqlite3_column_int64(statement, 7)))
+            pairs[key, default: 0] &+= sent
+            observations += Int(sqlite3_column_int64(statement, 4))
+            withBytes += Int(sqlite3_column_int64(statement, 5))
+            named += Int(sqlite3_column_int64(statement, 6))
+            bytesOut &+= sent
+        }
+
+        try execute("BEGIN IMMEDIATE")
+        do {
+            if monitored > 0 || observations > 0 {
+                try execute("""
+                INSERT OR REPLACE INTO baseline_hours (
+                    hour_start, monitored_seconds, bytes_out, observations,
+                    observations_with_bytes, named_observations
+                ) VALUES (\(hour), \(monitored), \(Int64(clamping: bytesOut)), \(observations),
+                          \(withBytes), \(named))
+                """)
+                let day = (hour / 86_400).rounded(.down) * 86_400
+                let pair = try prepare("""
+                INSERT INTO baseline_pairs (application, destination, first_seen, last_seen)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(application, destination) DO UPDATE SET
+                    first_seen = MIN(first_seen, excluded.first_seen),
+                    last_seen = MAX(last_seen, excluded.last_seen)
+                """)
+                defer { sqlite3_finalize(pair) }
+                let daily = try prepare("""
+                INSERT INTO baseline_pair_days (day, application, destination, bytes_out)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(day, application, destination) DO UPDATE SET
+                    bytes_out = bytes_out + excluded.bytes_out
+                """)
+                defer { sqlite3_finalize(daily) }
+                for (key, sent) in pairs {
+                    bindText(pair, 1, key.application)
+                    bindText(pair, 2, key.destination)
+                    sqlite3_bind_double(pair, 3, hour)
+                    sqlite3_bind_double(pair, 4, hour)
+                    guard sqlite3_step(pair) == SQLITE_DONE else {
+                        throw ObservationStoreError.statement(lastMessage)
+                    }
+                    sqlite3_reset(pair)
+                    sqlite3_clear_bindings(pair)
+                    guard sent > 0 else { continue }
+                    sqlite3_bind_double(daily, 1, day)
+                    bindText(daily, 2, key.application)
+                    bindText(daily, 3, key.destination)
+                    sqlite3_bind_int64(daily, 4, Int64(clamping: sent))
+                    guard sqlite3_step(daily) == SQLITE_DONE else {
+                        throw ObservationStoreError.statement(lastMessage)
+                    }
+                    sqlite3_reset(daily)
+                    sqlite3_clear_bindings(daily)
+                }
+            }
+            try execute("UPDATE baseline_state SET captured_through = \(end) WHERE id = 1")
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    /// Covered seconds in the hour, with sleep taken out.
+    ///
+    /// Both lists are merged before they are measured, so two sessions or two
+    /// sleeps that overlap cannot count the same minute twice. A session still
+    /// open is covering the hour up to its end.
+    private func monitoredSecondsLocked(from: Double, to: Double) throws -> Int {
+        func intervals(_ table: String) throws -> [(Double, Double)] {
+            let statement = try prepare("""
+            SELECT started_at, COALESCE(ended_at, \(to)) FROM \(table)
+            WHERE started_at < \(to) AND COALESCE(ended_at, \(to)) > \(from)
+            ORDER BY started_at
+            """)
+            defer { sqlite3_finalize(statement) }
+            var merged: [(Double, Double)] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let start = max(from, sqlite3_column_double(statement, 0))
+                let end = min(to, sqlite3_column_double(statement, 1))
+                guard end > start else { continue }
+                if let last = merged.last, start <= last.1 {
+                    merged[merged.count - 1].1 = max(last.1, end)
+                } else {
+                    merged.append((start, end))
+                }
+            }
+            return merged
+        }
+        let covered = try intervals("coverage_sessions")
+        guard !covered.isEmpty else { return 0 }
+        let sleeps = try intervals("sleep_periods")
+        var seconds = 0.0
+        for (start, end) in covered {
+            seconds += end - start
+            for (sleepStart, sleepEnd) in sleeps {
+                let overlap = min(end, sleepEnd) - max(start, sleepStart)
+                if overlap > 0 { seconds -= overlap }
+            }
+        }
+        return Int(min(max(0, seconds.rounded()), to - from))
+    }
+
+    private func forgetBaselinePairsOverCapacityLocked() throws {
+        let excess = (try scalar("SELECT COUNT(*) FROM baseline_pairs") ?? 0) - Self.baselinePairCapacity
+        guard excess > 0 else { return }
+        try execute("""
+        DELETE FROM baseline_pairs WHERE (application, destination) IN (
+            SELECT application, destination FROM baseline_pairs ORDER BY last_seen LIMIT \(excess)
+        )
+        """)
+    }
+
+    /// Keeps the baseline within the retention the person chose, as the rest
+    /// of the history is kept. A pair first seen before the cutoff is kept
+    /// with its first sighting moved to the cutoff: that it existed then is
+    /// within what may be kept; when it began is not.
+    private func pruneBaselineLocked(cutoff: Double, now: Date) throws {
+        let pairDayCutoff = max(cutoff, now.timeIntervalSince1970 - Self.baselinePairDays * 86_400)
+        try execute("DELETE FROM baseline_hours WHERE hour_start < \(cutoff)")
+        try execute("DELETE FROM baseline_pair_days WHERE day < \(pairDayCutoff)")
+        try execute("DELETE FROM baseline_pairs WHERE last_seen < \(cutoff)")
+        try execute("UPDATE baseline_pairs SET first_seen = \(cutoff) WHERE first_seen < \(cutoff)")
+    }
+
+    /// Deleting history deletes what was derived from it. A pair first seen
+    /// before the cutoff goes whether or not it was also seen after: its
+    /// memory is made of the deleted time too, and keeping it would keep part
+    /// of what was asked to be deleted. `nil` deletes everything.
+    private func deleteBaselineLocked(before cutoff: Double?) throws {
+        guard let cutoff else {
+            try execute("DELETE FROM baseline_hours")
+            try execute("DELETE FROM baseline_pair_days")
+            try execute("DELETE FROM baseline_pairs")
+            // Nothing left to read back to, so the next hour starts afresh.
+            try execute("""
+            UPDATE baseline_state SET captured_through = \(Self.floorHour(Date().timeIntervalSince1970))
+            WHERE id = 1
+            """)
+            return
+        }
+        try execute("DELETE FROM baseline_hours WHERE hour_start < \(cutoff)")
+        try execute("DELETE FROM baseline_pair_days WHERE day < \(cutoff)")
+        try execute("DELETE FROM baseline_pairs WHERE first_seen < \(cutoff)")
+    }
+
+    public func outboundBaselineSummary() throws -> OutboundBaselineSummary {
+        try lock.withLock {
+            let statement = try prepare("""
+            SELECT hour_start, monitored_seconds, bytes_out, observations,
+                   observations_with_bytes, named_observations
+            FROM baseline_hours ORDER BY hour_start
+            """)
+            defer { sqlite3_finalize(statement) }
+            var summary = OutboundBaselineSummary()
+            var monitored = 0, observations = 0, withBytes = 0, named = 0
+            var full: [UInt64] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if summary.since == nil {
+                    summary.since = Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))
+                }
+                let seconds = Int(sqlite3_column_int64(statement, 1))
+                monitored += seconds
+                observations += Int(sqlite3_column_int64(statement, 3))
+                withBytes += Int(sqlite3_column_int64(statement, 4))
+                named += Int(sqlite3_column_int64(statement, 5))
+                summary.hoursRecorded += 1
+                if seconds >= OutboundBaselineSummary.fullyMonitoredSeconds {
+                    full.append(UInt64(max(0, sqlite3_column_int64(statement, 2))))
+                }
+            }
+            full.sort()
+            func percentile(_ p: Double) -> UInt64 {
+                full.isEmpty ? 0 : full[min(full.count - 1, Int((p * Double(full.count)).rounded(.down)))]
+            }
+            summary.monitoredHours = Double(monitored) / 3600
+            summary.fullyMonitoredHours = full.count
+            summary.hourlyMedianBytesOut = percentile(0.5)
+            summary.hourlyP99BytesOut = percentile(0.99)
+            summary.largestHourBytesOut = full.last ?? 0
+            summary.namedShare = observations == 0 ? nil : Double(named) / Double(observations)
+            summary.bytesShare = observations == 0 ? nil : Double(withBytes) / Double(observations)
+            summary.pairsKnown = try scalar("SELECT COUNT(*) FROM baseline_pairs") ?? 0
+            return summary
+        }
+    }
+
+    private static func floorHour(_ seconds: Double) -> Double {
+        (seconds / 3600).rounded(.down) * 3600
+    }
+
     // MARK: - Retention
 
     /// Folds raw rows older than the raw window into hourly totals, then drops
@@ -2396,6 +2735,7 @@ public final class ObservationStore: @unchecked Sendable {
                 // `chart_hourly` was never pruned here, and grew by a measured
                 // 1.5 MB a day for as long as the agent ran.
                 try deleteHistoryLocked(before: retentionCutoff.timeIntervalSince1970)
+                try pruneBaselineLocked(cutoff: retentionCutoff.timeIntervalSince1970, now: now)
                 try execute("COMMIT")
                 return folded
             } catch {
@@ -2586,6 +2926,7 @@ public final class ObservationStore: @unchecked Sendable {
             do {
                 try execute("DELETE FROM observations WHERE last_observed_at < \(seconds)")
                 try deleteHistoryLocked(before: seconds)
+                try deleteBaselineLocked(before: seconds)
                 try refoldBoundaryHourLocked(cutoff: seconds)
                 try execute("COMMIT")
             } catch {
@@ -2607,6 +2948,7 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("DELETE FROM chart_hourly_state")
             try execute("DELETE FROM traffic_hourly")
             try execute("DELETE FROM outbound_traffic_windows")
+            try deleteBaselineLocked(before: nil)
             try execute("DELETE FROM country_visit_summary")
             try execute("DELETE FROM pending_destination_country")
             try execute("DELETE FROM country_visit_state")
