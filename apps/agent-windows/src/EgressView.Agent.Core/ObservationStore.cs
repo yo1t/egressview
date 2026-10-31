@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 31;
+    private const int CurrentSchemaVersion = 32;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -565,7 +565,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); {Version29Schema} {Version30Schema} {Version31Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); {Version29Schema} {Version30Schema} {Version31Schema} {Version32Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -607,7 +607,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 27) { MigrateVersion27To28(); version = 28; }
         if (version == 28) { MigrateVersion28To29(); version = 29; }
         if (version == 29) { MigrateVersion29To30(); version = 30; }
-        if (version == 30) MigrateVersion30To31();
+        if (version == 30) { MigrateVersion30To31(); version = 31; }
+        if (version == 31) MigrateVersion31To32();
         ValidateSchema();
         }
         catch { ReportMigrationFailed(startedAt); throw; }
@@ -1616,6 +1617,7 @@ public sealed partial class ObservationStore : IDisposable
         // moment the process has no time left to handle it.
         if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='run_history' AND sql LIKE '%system-shutdown%'") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema cannot record a system shutdown ending.");
+        ValidateBaselineSchema();
     }
 
     public void WriteBatch(IReadOnlyList<NetworkObservation> observations, bool queueForDelivery = false)
@@ -1749,6 +1751,7 @@ public sealed partial class ObservationStore : IDisposable
                     + DeleteBatch("chart_hourly_destination", "rowid", "bucket_start", aggregateCutoff, batchSize);
                 var coverage = DeleteBatch("coverage_sessions", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
                 var sleeps = DeleteBatch("sleep_periods", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
+                PruneBaselineLocked(now.ToUniversalTime().AddDays(-retentionDays));
                 Execute("COMMIT");
                 return new(observations, flows, summaries, coverage, chartSummaries, sleeps);
             }
@@ -1843,6 +1846,7 @@ public sealed partial class ObservationStore : IDisposable
                     chart = result.ChartSummariesDeleted;
                     coverage = result.CoverageSessionsDeleted;
                     sleeps = result.SleepPeriodsDeleted;
+                    DeleteBaselineLocked(null);
                 }
                 else
                 {
@@ -1857,6 +1861,7 @@ public sealed partial class ObservationStore : IDisposable
                     sleeps = DeleteWhere("sleep_periods", $"ended_at IS NOT NULL AND ended_at<'{value}'");
                     Execute($"UPDATE sleep_periods SET started_at='{value}' WHERE started_at<'{value}' AND (ended_at IS NULL OR ended_at>='{value}')");
                     RefoldDeletionBoundary(cutoff);
+                    DeleteBaselineLocked(cutoff);
                 }
                 Execute("COMMIT");
                 return new(observations, flows, hourly, chart, coverage, sleeps);
@@ -3541,6 +3546,7 @@ public sealed partial class ObservationStore : IDisposable
                 OutboundAnomalies = ReadOutboundAnomalyCountLocked(from, to),
                 OutboundAnomalyDetails = ReadOutboundAnomaliesLocked(from, to, 5),
                 OutboundBaselineReady = ReadUsableBaselineWindowsLocked() >= 96,
+                OutboundBaseline = ReadOutboundBaselineSummaryLocked(),
                 SleepPeriods = ReadSleepPeriodsLocked(from, to),
                 MonitoringGaps = ReadMonitoringGaps(from, to),
             };

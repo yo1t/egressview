@@ -94,4 +94,14 @@
   <system:String x:Key="FeedShortfallFailed">{0} は取得できませんでした。</system:String>
   <system:String x:Key="FeedShortfallRest">通信先は残りの指標と照合しています。</system:String>
   <system:String x:Key="FeedShortfallKept">{0} は、それまで持っていた一覧で照合を続けています。</system:String>
+  <system:String x:Key="UsualOnThisPc">このPCの普段</system:String>
+  <system:String x:Key="UsualNotLearnedYet">まだ何も学習していません。監視していた時間だけを、1時間ごとに数えます。</system:String>
+  <system:String x:Key="UsualLearned">学習した時間</system:String>
+  <system:String x:Key="UsualLearnedFormat">監視した {0:N1} 時間分（{1} から）</system:String>
+  <system:String x:Key="UsualPerHour">1時間の送信量</system:String>
+  <system:String x:Key="UsualPerHourFormat">中央値 {0}・上位1% {1}（全体を監視できた {2:N0} 時間）</system:String>
+  <system:String x:Key="UsualNoFullHourYet">全体を監視できた1時間はまだありません</system:String>
+  <system:String x:Key="UsualNamed">宛先名が取れた割合</system:String>
+  <system:String x:Key="UsualPairs">見たことのあるアプリと宛先の組</system:String>
+  <system:String x:Key="UsualNotJudgedYet">測っているだけで、まだこれと比べた判定はしていません。</system:String>
 </ResourceDictionary>

@@ -93,6 +93,8 @@ public static class DiagnosticsReport
             database = new { observationCount = count, storageBytes = store.ReadStorageBytes(), integrity, integrityCheckedAt, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
             flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, processNames = new { resolved = processNames.Resolved, unresolved = processNames.Unresolved }, byOrigin = store.ReadFlowOrigins() },
             coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
+            // Numbers only: no application, no destination (P3-192 phase 1).
+            outboundBaseline = SafeBaseline(store),
             monitoringEnabled,
             delivery = new { pending = delivery.Pending, contractRejected = delivery.ContractRejected, queueOverflow = delivery.QueueOverflow, oldestPendingAt = delivery.OldestPendingAt, lastAcknowledgedAt = delivery.LastAcknowledgedAt, capability = capabilityStatus, runtime = SafeDeliveryRuntime(deliveryRuntime) },
             deliveryEnabled = store.DeliveryEnabled,
@@ -148,6 +150,28 @@ public static class DiagnosticsReport
     /// Reading the list and counting it are different jobs: the list is capped
     /// at 20 rows, so a count taken from it would silently describe only the
     /// part that fitted. This counts what the history holds.
+    private static object? SafeBaseline(ObservationStore store)
+    {
+        try
+        {
+            var baseline = store.ReadOutboundBaselineSummary();
+            return new
+            {
+                monitoredHours = Math.Round(baseline.MonitoredHours, 1),
+                hoursRecorded = baseline.HoursRecorded,
+                fullyMonitoredHours = baseline.FullyMonitoredHours,
+                since = baseline.Since,
+                hourlyMedianBytesOut = baseline.HourlyMedianBytesOut,
+                hourlyP99BytesOut = baseline.HourlyP99BytesOut,
+                largestHourBytesOut = baseline.LargestHourBytesOut,
+                namedShare = baseline.NamedShare is { } named ? Math.Round(named, 3) : (double?)null,
+                bytesShare = baseline.BytesShare is { } bytes ? Math.Round(bytes, 3) : (double?)null,
+                pairsKnown = baseline.PairsKnown,
+            };
+        }
+        catch (Exception) { return null; }
+    }
+
     private static object SafeRunSummary(ObservationStore store)
     {
         try

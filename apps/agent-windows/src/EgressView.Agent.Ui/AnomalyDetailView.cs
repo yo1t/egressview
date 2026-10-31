@@ -38,7 +38,8 @@ internal static class AnomalyDetailView
     }
 
     /// The period's anomalies for the overview card, newest first.
-    internal static FrameworkElement List(IReadOnlyList<OutboundAnomalyRecord> records, int total, bool baselineReady)
+    internal static FrameworkElement List(IReadOnlyList<OutboundAnomalyRecord> records, int total, bool baselineReady,
+        OutboundBaselineSummary? usual = null)
     {
         var panel = new StackPanel { Width = 420 };
         panel.Children.Add(Heading(LocalizationManager.Text("AnomaliesInPeriod"), 15));
@@ -47,6 +48,7 @@ internal static class AnomalyDetailView
             // "None found" and "cannot judge yet" are different answers, as
             // the dash on the card already says.
             panel.Children.Add(Secondary(LocalizationManager.Text(total == 0 && !baselineReady ? "AnomalyBaselineNotReady" : "NoAnomaliesInPeriod"), 6));
+            AddUsual(panel, usual);
             return panel;
         }
         for (var index = 0; index < records.Count; index++)
@@ -57,7 +59,44 @@ internal static class AnomalyDetailView
         if (total > records.Count)
             panel.Children.Add(Secondary(string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ShowingNewestFormat"), records.Count, total), 10));
         panel.Children.Add(Secondary(LocalizationManager.Text("AnomalyNotMalware"), 10));
+        AddUsual(panel, usual);
         return panel;
+    }
+
+    /// What the Agent has learned about this machine's usual traffic, and how
+    /// well it can measure here (P3-192 phase 1).
+    ///
+    /// Counted in monitored hours, because that is what the learning is made
+    /// of: a PC that sleeps most of the week has a few hours, and saying
+    /// "seven days" would claim history it does not have. The share of
+    /// destinations with a name is shown beside it because it differs by
+    /// machine -- 44.6% on one Windows PC, 82.5% on a Mac -- and it decides
+    /// how well "a destination this app has not used before" can be told.
+    private static void AddUsual(StackPanel panel, OutboundBaselineSummary? usual)
+    {
+        if (usual is null) return;
+        panel.Children.Add(Rule());
+        panel.Children.Add(Heading(LocalizationManager.Text("UsualOnThisPc"), 13));
+        if (usual.HoursRecorded == 0)
+        {
+            panel.Children.Add(Secondary(LocalizationManager.Text("UsualNotLearnedYet"), 6));
+            return;
+        }
+        var facts = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        facts.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        facts.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var culture = CultureInfo.CurrentCulture;
+        AddFact(facts, LocalizationManager.Text("UsualLearned"), string.Format(culture, LocalizationManager.Text("UsualLearnedFormat"),
+            usual.MonitoredHours, usual.Since?.ToLocalTime().ToString("d", culture) ?? "—"));
+        AddFact(facts, LocalizationManager.Text("UsualPerHour"), usual.FullyMonitoredHours == 0
+            ? LocalizationManager.Text("UsualNoFullHourYet")
+            : string.Format(culture, LocalizationManager.Text("UsualPerHourFormat"),
+                Bytes(usual.HourlyMedianBytesOut), Bytes(usual.HourlyP99BytesOut), usual.FullyMonitoredHours));
+        if (usual.NamedShare is { } named)
+            AddFact(facts, LocalizationManager.Text("UsualNamed"), named.ToString("P0", culture));
+        AddFact(facts, LocalizationManager.Text("UsualPairs"), usual.PairsKnown.ToString("N0", culture));
+        panel.Children.Add(facts);
+        panel.Children.Add(Secondary(LocalizationManager.Text("UsualNotJudgedYet"), 8));
     }
 
     /// One flagged fifteen minutes, explained as far as what was kept allows.
