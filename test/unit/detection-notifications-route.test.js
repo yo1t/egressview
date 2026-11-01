@@ -16,13 +16,15 @@ function makeNotifier() {
     threat:    { slack: true, history: true },
     newDevice: { slack: true, history: true },
     lanScan:   { slack: true, history: true },
+    agentSilent: { slack: true, history: true },
   };
   return {
     getDetectionConfig: () => ({
       threat: { ...state.threat }, newDevice: { ...state.newDevice }, lanScan: { ...state.lanScan },
+      agentSilent: { ...state.agentSilent },
     }),
     configureDetection: (input) => {
-      for (const kind of ['threat', 'newDevice', 'lanScan']) {
+      for (const kind of ['threat', 'newDevice', 'lanScan', 'agentSilent']) {
         if (!input?.[kind]) continue;
         if (typeof input[kind].slack === 'boolean') state[kind].slack = input[kind].slack;
         if (typeof input[kind].history === 'boolean') state[kind].history = input[kind].history;
@@ -96,6 +98,7 @@ describe('detection-notifications route: GET', () => {
       threat:    { slack: true, history: true },
       newDevice: { slack: true, history: true },
       lanScan:   { slack: true, history: true },
+      agentSilent: { slack: true, history: true },
     });
   });
 
@@ -107,6 +110,16 @@ describe('detection-notifications route: GET', () => {
     });
     assert.equal(status, 200);
     assert.deepEqual(body.config.lanScan, { slack: false, history: true });
+  });
+
+  // P3-103.
+  it('Agentから届かない通知の切り替えを保存して返す', async () => {
+    const app = makeApp();
+    const { status, body } = await req(app, 'POST', '/api/config/detection-notifications', {
+      agentSilent: { slack: false },
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body.config.agentSilent, { slack: false, history: true });
   });
 
   it('未知のクエリを拒否する', async () => {
