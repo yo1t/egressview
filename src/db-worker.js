@@ -20,6 +20,7 @@ const agentIngest = require('./agent-ingest-store');
 const { ensureHistoryIndexes } = require('./history-indexes');
 const { buildGeoCacheFromDb } = require('./agent-geo-cache');
 const { findLanScans } = require('./lan-scan-detector');
+const { findSilentAgents } = require('./agent-silence-detector');
 const { createHistoryQueries } = require('./history-queries');
 const { createNotificationLogQuery } = require('./notification-log-query');
 const { createAgentAttribution } = require('./agent-attribution');
@@ -178,6 +179,11 @@ const operations = {
   'lanScan.find': ({ from }) => {
     if (!reader) throw new Error('The read thread has no database open');
     return findLanScans(reader.db, { from });
+  },
+  // Agents quiet while a router still sees their computer (P3-103).
+  'agentSilence.find': ({ now }) => {
+    if (!reader) throw new Error('The read thread has no database open');
+    return findSilentAgents(reader.db, { now });
   },
   'agentGeoCache.build': () => {
     if (!reader) throw new Error('The read thread has no database open');

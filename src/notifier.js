@@ -19,12 +19,14 @@ let _language = 'ja';
 // network is worth recording even when the operator does not want a DM for it.
 // Defaults are true so that an upgrade never silently drops a notification the
 // operator was already receiving.
-const DETECTION_KINDS = ['threat', 'newDevice', 'lanScan'];
+const DETECTION_KINDS = ['threat', 'newDevice', 'lanScan', 'agentSilent'];
 const _detection = {
   threat:    { slack: true, history: true },
   newDevice: { slack: true, history: true },
   // A program on an Agent's computer looking around the LAN (P3-191).
   lanScan:   { slack: true, history: true },
+  // An Agent quiet while a router still sees its computer (P3-103).
+  agentSilent: { slack: true, history: true },
 };
 
 function configureDetection(input = {}) {
@@ -41,6 +43,7 @@ function getDetectionConfig() {
     threat:    { ..._detection.threat },
     newDevice: { ..._detection.newDevice },
     lanScan:   { ..._detection.lanScan },
+    agentSilent: { ..._detection.agentSilent },
   };
 }
 
@@ -415,6 +418,70 @@ async function notifyLanScan(finding) {
   return slackSent;
 }
 
+const _AGENT_SILENT_MSG = {
+  ja: {
+    title:  host => `⚠️ *Agentから届いていません* — ${host}`,
+    what:   (host, minutes, n) => `*内容:* ${host} のAgentから${minutes}分届いていません。その間もルーターはこの機械の新しい接続を${n}件記録しているので、機械は動いていてAgentだけが止まっている可能性があります。止まっている間の通信は記録されません。`,
+    advice: host => `*確認すること:* ${host} でEgressView Agentが動いているか（Macはメニューバーのアイコン、Windowsはタスクトレイ）を確認し、動いていなければ開いてください。`,
+    last:   ts => `*最後に届いた時刻:* ${new Date(ts).toLocaleString('ja-JP')}`,
+  },
+  en: {
+    title:  host => `⚠️ *No reports from an Agent* — ${host}`,
+    what:   (host, minutes, n) => `*What happened:* the Agent on ${host} has sent nothing for ${minutes} minutes, while a router recorded ${n} new connections from that computer. The computer is on, so the Agent itself may have stopped; traffic is not recorded until it runs again.`,
+    advice: host => `*What to check:* whether EgressView Agent is running on ${host} (the menu bar icon on a Mac, the system tray on Windows), and open it if not.`,
+    last:   ts => `*Last report:* ${new Date(ts).toLocaleString('en-US')}`,
+  },
+};
+
+/**
+ * An Agent quiet while a router still sees its computer
+ * (agent-silence-detector.js). The history row names the computer as the
+ * source and keeps the details as JSON in threatTag, which the notification
+ * log renders per language.
+ */
+async function notifyAgentSilent(finding, now = Date.now()) {
+  let slackSent = false;
+  const minutes = Math.max(1, Math.floor((now - finding.lastDeliveredAt) / 60000));
+  const host = finding.hostName || finding.address || '?';
+  if (_enabled && _token && _userId && _detection.agentSilent.slack) {
+    const L = _AGENT_SILENT_MSG[_language] || _AGENT_SILENT_MSG.ja;
+    const text = [
+      L.title(host),
+      L.what(host, minutes, finding.routerConnections),
+      L.advice(host),
+      L.last(finding.lastDeliveredAt),
+    ].join('\n');
+    try {
+      const result = await _httpPost({ channel: _userId, text }, _token);
+      if (!result.ok) logger.error('[notifier] agent-silent Slack error:', result.error);
+      else slackSent = true;
+    } catch (err) {
+      logger.error('[notifier] notifyAgentSilent failed:', err.message);
+    }
+  }
+  if (_logCallback) {
+    _logCallback({
+      src: finding.address || null,
+      srcDnsName: finding.hostName || null,
+      threat: {
+        source: null,
+        tag: JSON.stringify({
+          kind: 'agent-silent',
+          // Read back at startup so a restart does not announce it again.
+          agentId: finding.agentId,
+          host: finding.hostName || null,
+          lastDeliveredAt: finding.lastDeliveredAt,
+          minutes,
+          routerConnections: finding.routerConnections,
+        }),
+        confidence: null,
+      },
+      lastSeen: now,
+    }, 'agent_silent', slackSent, { record: _detection.agentSilent.history });
+  }
+  return slackSent;
+}
+
 async function test() {
   if (!_token || !_userId) return { ok: false, error: 'token_or_userid_missing' };
   try {
@@ -514,6 +581,7 @@ async function lookupUser(username, token) {
 
 module.exports = {
   notifyLanScan,
+  notifyAgentSilent,
   configure,
   getConfig,
   notify,

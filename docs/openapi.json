@@ -7176,12 +7176,25 @@
                             }
                           },
                           "additionalProperties": false
+                        },
+                        "agentSilent": {
+                          "type": "object",
+                          "properties": {
+                            "slack": {
+                              "type": "boolean"
+                            },
+                            "history": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "threat",
                         "newDevice",
-                        "lanScan"
+                        "lanScan",
+                        "agentSilent"
                       ],
                       "additionalProperties": false
                     }

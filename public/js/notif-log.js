@@ -15,6 +15,7 @@ var nlActiveFilterCol = null;
 function nlTypeLabel(type) {
   if (type === 'threat') return t('notif-log.type.threat');
   if (type === 'lan_scan') return t('notif-log.type.lan_scan');
+  if (type === 'agent_silent') return t('notif-log.type.agent_silent');
   return t('notif-log.type.new_device');
 }
 
@@ -42,6 +43,25 @@ function nlLanScan(row) {
     sample: Array.isArray(detail.sample) ? detail.sample.join(', ') : '',
     advice: t(detail.kind === 'probed' ? 'notif-log.lanScan.probedAdvice' : 'notif-log.lanScan.advice'),
     probed: detail.kind === 'probed',
+  };
+}
+
+// A quiet-Agent row, likewise JSON in threatTag (notifier.js).
+function nlAgentSilent(row) {
+  let detail;
+  try { detail = JSON.parse(row.threatTag || ''); } catch { detail = null; }
+  if (!detail || typeof detail !== 'object') {
+    return { summary: row.threatTag || '—', last: '', advice: t('notif-log.agentSilent.advice') };
+  }
+  const last = Number(detail.lastDeliveredAt);
+  return {
+    summary: tVars('notif-log.agentSilent.summary', {
+      host: detail.host || row.srcDnsName || row.src || '?',
+      minutes: detail.minutes ?? '?',
+      n: detail.routerConnections ?? '?',
+    }),
+    last: Number.isFinite(last) ? new Date(last).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US') : '',
+    advice: t('notif-log.agentSilent.advice'),
   };
 }
 
@@ -196,8 +216,10 @@ function nlRender() {
       dstCell.appendChild(nlTextElement('span', `${row.dport}/${row.proto || ''}`, { className: 'notif-log-subtext' }));
     }
     const lanScan = row.type === 'lan_scan' ? nlLanScan(row) : null;
-    const threatText = lanScan ? lanScan.summary : (row.threatTag || row.threatSource || '—');
-    nlAppendCell(tr, threatText, lanScan || row.threatTag ? 'notif-log-threat-text' : 'notif-log-subtle-text');
+    const agentSilent = row.type === 'agent_silent' ? nlAgentSilent(row) : null;
+    const threatText = lanScan ? lanScan.summary
+      : agentSilent ? agentSilent.summary : (row.threatTag || row.threatSource || '—');
+    nlAppendCell(tr, threatText, lanScan || agentSilent || row.threatTag ? 'notif-log-threat-text' : 'notif-log-subtle-text');
     nlAppendCell(tr, row.org || '—', 'notif-log-org-cell');
     nlAppendCell(
       tr,
@@ -278,7 +300,13 @@ function nlShowDetail(row) {
     appendDetailRow(table, t('notif-log.detail.org'), row.org);
   }
   const lanScan = row.type === 'lan_scan' ? nlLanScan(row) : null;
-  if (lanScan) {
+  const agentSilent = row.type === 'agent_silent' ? nlAgentSilent(row) : null;
+  if (agentSilent) {
+    appendDetailSection(table, t('notif-log.detail.sec.agentSilent'));
+    appendDetailRow(table, t('notif-log.detail.lanScan.what'), agentSilent.summary);
+    appendDetailRow(table, t('notif-log.detail.agentSilent.last'), agentSilent.last);
+    appendDetailRow(table, t('notif-log.detail.lanScan.advice'), agentSilent.advice);
+  } else if (lanScan) {
     appendDetailSection(table, t('notif-log.detail.sec.lanScan'));
     if (!lanScan.probed) appendDetailRow(table, t('notif-log.detail.lanScan.program'), row.threatSource);
     appendDetailRow(table, t('notif-log.detail.lanScan.what'), lanScan.summary);

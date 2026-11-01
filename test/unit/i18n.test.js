@@ -63,8 +63,9 @@ describe('shared i18n catalog', () => {
     // Grew by 2 on 2026-09-22: the timeline's "no record" band and its legend (P3-157).
     // Grew by 10 on 2026-10-14: LAN-scan detection setting and notification log (P3-191).
     // Grew by 2 on 2026-10-15: LAN probing seen by an Agent (P3-191).
-    assert.equal(jaKeys.size, 959);
-    assert.equal(enKeys.size, 959);
+    // Grew by 6 on 2026-11-02: an Agent quiet while a router sees its computer (P3-103).
+    assert.equal(jaKeys.size, 965);
+    assert.equal(enKeys.size, 965);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 

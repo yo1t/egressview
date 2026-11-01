@@ -55,8 +55,9 @@ function createNotificationLogQuery({ getDb }) {
       // the computer the destination, so no observation of the Agent has the
       // sender as its local address: matched only on observations, the Agent
       // it was about never listed it (P3-191, 2026-11-01).
+      // A quiet-Agent notification names its Agent the same way (P3-103).
       conditions.push(`(
-        (notification_log.type = 'lan_scan' AND json_valid(notification_log.threatTag)
+        (notification_log.type IN ('lan_scan', 'agent_silent') AND json_valid(notification_log.threatTag)
           AND json_extract(notification_log.threatTag, '$.agentId') = ?)
         OR (notification_log.dst IS NOT NULL AND notification_log.dport IS NOT NULL AND EXISTS (
           SELECT 1 FROM agent_observations o

@@ -140,6 +140,20 @@ describe('notification log query (P3-184)', () => {
       'a router scope still matches on its own observations only');
   });
 
+  it('Agentから届かない通知は、記録に名前のあるAgentに絞っても出る（P3-103）', () => {
+    const db = fixture();
+    // Matched by the Agent named in the note: its observations from that
+    // address may already be pruned, which is the case here.
+    db.prepare('INSERT INTO notification_log (type, src, detectedAt, threatTag) VALUES (?, ?, ?, ?)')
+      .run('agent_silent', '192.0.2.99', 3000,
+        JSON.stringify({ kind: 'agent-silent', agentId: 'mac-a', lastDeliveredAt: 1000, minutes: 33, routerConnections: 4 }));
+    const query = createNotificationLogQuery({ getDb: () => db });
+    const ids = scope => query(null, null, { sourceScope: scope }).filter(row => row.type === 'agent_silent').map(row => row.detectedAt);
+
+    assert.deepEqual(ids({ sourceKind: 'agent', sourceId: 'mac-a' }), [3000]);
+    assert.deepEqual(ids({ sourceKind: 'agent', sourceId: 'mac-b' }), []);
+  });
+
   it('宛先とポートのある通知は、宛先まで索引で引く', () => {
     const db = fixture();
     let sql;

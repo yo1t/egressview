@@ -45,6 +45,7 @@ function setup() {
     threat: { slack: true, history: true },
     newDevice: { slack: true, history: true },
     lanScan: { slack: true, history: true },
+    agentSilent: { slack: true, history: true },
   });
   return { posts, logged };
 }
@@ -52,12 +53,13 @@ function setup() {
 describe('検出イベント通知の配信スイッチ', () => {
   beforeEach(() => { setup(); });
 
-  it('既定では脅威・新規デバイス・LAN内の探索とも Slack と履歴の両方が有効', () => {
+  it('既定では脅威・新規デバイス・LAN内の探索・Agentから届かないとも Slack と履歴の両方が有効', () => {
     const config = notifier.getDetectionConfig();
     assert.deepEqual(config, {
       threat: { slack: true, history: true },
       newDevice: { slack: true, history: true },
       lanScan: { slack: true, history: true },
+      agentSilent: { slack: true, history: true },
     });
   });
 
@@ -123,6 +125,7 @@ describe('検出イベント通知の配信スイッチ', () => {
       threat: { slack: true, history: true },
       newDevice: { slack: true, history: true },
       lanScan: { slack: true, history: true },
+      agentSilent: { slack: true, history: true },
     });
   });
 
@@ -203,5 +206,61 @@ describe('LAN内からの探索の通知', () => {
     assert.equal(entries[0].entry.src, '192.168.1.77');
     assert.equal(entries[0].entry.dst, '192.168.1.53');
     assert.equal(JSON.parse(entries[0].entry.threat.tag).kind, 'probed');
+  });
+});
+
+// P3-103: an Agent quiet while a router still sees its computer.
+describe('Agentから届かない通知', () => {
+  const finding = {
+    agentId: 'a1', hostName: 'JAMESBOND', address: '192.168.1.50',
+    lastDeliveredAt: 1700000000000, routerConnections: 7,
+  };
+  const now = finding.lastDeliveredAt + 17 * 60 * 1000;
+
+  it('どの機械が何分届いていないか、ルーターが何件見たか、何を確かめればよいかを送り、履歴に詳細を残す', async () => {
+    const { posts } = setup();
+    const entries = [];
+    notifier.setLogCallback((entry, type, slackSent, options) => entries.push({ entry, type, options }));
+    assert.equal(await notifier.notifyAgentSilent(finding, now), true);
+    assert.match(posts[0].text, /Agentから届いていません/);
+    assert.match(posts[0].text, /JAMESBOND のAgentから17分/);
+    assert.match(posts[0].text, /新しい接続を7件/);
+    assert.match(posts[0].text, /メニューバー/);
+    assert.equal(entries[0].type, 'agent_silent');
+    assert.equal(entries[0].options.record, true);
+    assert.equal(entries[0].entry.src, '192.168.1.50');
+    assert.equal(entries[0].entry.srcDnsName, 'JAMESBOND');
+    assert.deepEqual(JSON.parse(entries[0].entry.threat.tag), {
+      kind: 'agent-silent', agentId: 'a1', host: 'JAMESBOND', lastDeliveredAt: 1700000000000,
+      minutes: 17, routerConnections: 7,
+    });
+  });
+
+  it('英語の設定では英語で送る', async () => {
+    const { posts } = setup();
+    notifier.configure({ language: 'en' });
+    try {
+      await notifier.notifyAgentSilent(finding, now);
+      assert.match(posts[0].text, /No reports from an Agent/);
+      assert.match(posts[0].text, /for 17 minutes/);
+    } finally {
+      notifier.configure({ language: 'ja' });
+    }
+  });
+
+  it('agentSilent.slackをfalseにすると送らず、履歴には残す', async () => {
+    const { posts, logged } = setup();
+    notifier.configureDetection({ agentSilent: { slack: false } });
+    assert.equal(await notifier.notifyAgentSilent(finding, now), false);
+    assert.equal(posts.length, 0);
+    assert.equal(logged[0].type, 'agent_silent');
+    assert.equal(logged[0].options.record, true);
+  });
+
+  it('agentSilent.historyをfalseにすると履歴に残さない', async () => {
+    const { logged } = setup();
+    notifier.configureDetection({ agentSilent: { history: false } });
+    await notifier.notifyAgentSilent(finding, now);
+    assert.equal(logged[0].options.record, false);
   });
 });

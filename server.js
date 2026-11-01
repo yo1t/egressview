@@ -35,6 +35,10 @@ const {
   windowsToCheck, createLanScanCooldown, inboundProbeCooldownKey, cooldownSeedsFromLog, LAN_SCAN_COOLDOWN_MS,
 } = require('./src/lan-scan-detector');
 const { PROBE_NOTIFY_MIN_PORTS } = require('./src/agent-inbound-probes');
+const {
+  silenceKey, silenceKeysFromLog, LOOKBACK_MS: AGENT_SILENCE_LOOKBACK_MS,
+  STARTUP_GRACE_MS: AGENT_SILENCE_GRACE_MS, CHECK_INTERVAL_MS: AGENT_SILENCE_CHECK_MS,
+} = require('./src/agent-silence-detector');
 const { aiProvider }  = aiProviderModule;
 const { createAiNotificationService } = require('./src/ai-notification-service');
 const { createAiBudget } = require('./src/ai-budget');
@@ -891,6 +895,39 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
       })
       .finally(() => { lanScanRunning = false; });
   }, 60 * 1000).unref();
+
+  // An Agent quiet while a router still sees its computer (P3-103): checked
+  // every five minutes on the read thread, from twenty minutes after start,
+  // and announced once per silence. The detection log carries what was
+  // announced across a restart.
+  const agentSilenceStartedAt = Date.now();
+  let agentSilenceAnnounced = null;
+  let agentSilenceRunning = false;
+  setInterval(() => {
+    if (agentSilenceRunning || Date.now() - agentSilenceStartedAt < AGENT_SILENCE_GRACE_MS) return;
+    agentSilenceRunning = true;
+    (async () => {
+      if (!agentSilenceAnnounced) {
+        const rows = history.getRecentNotifications('agent_silent', Date.now() - 2 * AGENT_SILENCE_LOOKBACK_MS);
+        if (rows == null) return;
+        agentSilenceAnnounced = new Set(silenceKeysFromLog(rows));
+      }
+      const now = Date.now();
+      const findings = await runtimeProfiler.measureAsync('dbRead.agentSilence', () => dbReadWorker.run('agentSilence.find', { now }));
+      for (const finding of findings || []) {
+        const key = silenceKey(finding);
+        if (agentSilenceAnnounced.has(key)) continue;
+        agentSilenceAnnounced.add(key);
+        logger.warn(`[agent-silence] ${finding.hostName} (${finding.address}): nothing since `
+          + `${new Date(finding.lastDeliveredAt).toISOString()}, ${finding.routerConnections} new router connections`);
+        await notifier.notifyAgentSilent(finding, now);
+      }
+    })()
+      .catch(error => {
+        if (error.code !== 'DB_WORKER_CLOSED') logger.warn('[agent-silence] check failed:', error.message);
+      })
+      .finally(() => { agentSilenceRunning = false; });
+  }, AGENT_SILENCE_CHECK_MS).unref();
 
   // Indexes that only speed up a read (history-indexes.js), built on the
   // database thread once startup is over. A missing one costs only speed.
