@@ -190,7 +190,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
         var line = await reader.ReadLineAsync(cancellationToken);
         if (line is null) return;
-        NoteUiAlive();
+        if (!IpcProtocol.BeginsWindowRun(line)) NoteUiAlive();
         var answering = Task.Run(() => Handle(line), CancellationToken.None);
         if (!await AnswerUnlessCallerLeavesAsync(answering, pipe, cancellationToken))
         {
