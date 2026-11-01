@@ -10,7 +10,8 @@ function fixture() {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE notification_log (
-      id INTEGER PRIMARY KEY, type TEXT, src TEXT, dst TEXT, dport INTEGER, proto TEXT, detectedAt INTEGER
+      id INTEGER PRIMARY KEY, type TEXT, src TEXT, dst TEXT, dport INTEGER, proto TEXT, detectedAt INTEGER,
+      threatTag TEXT
     );
     CREATE INDEX idx_nlog_detectedAt ON notification_log(detectedAt);
     CREATE TABLE connections (src TEXT, dst TEXT, dport INTEGER, proto TEXT, PRIMARY KEY (src, dst, dport, proto));
@@ -116,6 +117,27 @@ describe('notification log query (P3-184)', () => {
       }
     }
     assert.ok(matched > 0, 'the fixture matches something, so the comparison is not of two empty lists');
+  });
+
+  it('LANの探索の通知は、記録に名前のあるAgentに絞っても出る（P3-191）', () => {
+    const db = fixture();
+    const note = db.prepare('INSERT INTO notification_log (type, src, dst, dport, proto, detectedAt, threatTag) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    // A LAN device probed mac-a's computer: the sender is the source, the
+    // computer the destination, and no observation of mac-a starts at the sender.
+    note.run('lan_scan', '192.0.2.200', '192.0.2.10', null, 'tcp', 2000,
+      JSON.stringify({ kind: 'probed', agentId: 'mac-a', protocol: 'tcp', ports: 30 }));
+    // mac-b's own program swept the LAN.
+    note.run('lan_scan', '192.0.2.11', null, null, null, 2001,
+      JSON.stringify({ kind: 'sweep', agentId: 'mac-b', addresses: 40 }));
+    note.run('lan_scan', '192.0.2.201', '192.0.2.10', null, 'tcp', 2002, 'not json');
+    const query = createNotificationLogQuery({ getDb: () => db });
+    const ids = scope => query(null, null, { sourceScope: scope }).filter(row => row.type === 'lan_scan').map(row => row.detectedAt);
+
+    assert.deepEqual(ids({ sourceKind: 'agent', sourceId: 'mac-a' }), [2000]);
+    assert.deepEqual(ids({ sourceKind: 'agent', sourceId: 'mac-b' }), [2001]);
+    assert.deepEqual(ids({ sourceKind: 'agent', sourceId: 'nobody' }), []);
+    assert.deepEqual(ids({ sourceKind: 'router', sourceId: 'cisco1' }), [2001],
+      'a router scope still matches on its own observations only');
   });
 
   it('宛先とポートのある通知は、宛先まで索引で引く', () => {
