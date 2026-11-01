@@ -92,7 +92,7 @@ You may use, modify, and distribute EgressView under the AGPL-3.0. If you includ
 
 ```
 EgressView — Real-time network connection visualizer
-Copyright (C) 2025 Yoichi Takizawa
+Copyright (C) 2024-2026 Yoichi Takizawa
 
 Source code: https://github.com/yo1t/egressview
 ```
