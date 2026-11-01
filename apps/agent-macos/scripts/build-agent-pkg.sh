@@ -126,9 +126,13 @@ PREINSTALL
 # left nothing to check afterwards, so the next occurrence would have produced
 # the same empty hands.
 #
-# Recording only. A failed relaunch must not fail the install: the app is in
-# /Applications and opening it by hand works, and turning a fixable state into
-# an unfixable one helps nobody.
+# A failed relaunch must not fail the install: the app is in /Applications and
+# opening it by hand works, and turning a fixable state into an unfixable one
+# helps nobody. But it must not pass unnoticed either. The extension only
+# buffers observations until the app collects them, so no app means nothing is
+# recorded, and the only other sign is a missing menu bar icon. The installer's
+# closing text is fixed and cannot report what happened here, so a relaunch
+# that still fails after one retry is told to the person directly.
 cat > "$SCRIPTS_DIR/postinstall" <<'POSTINSTALL'
 #!/bin/bash
 # Never fail the install because of what is below.
@@ -148,11 +152,13 @@ note() { printf '%s postinstall %s\n' "$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')" "$
 # outage turned on.
 probe() {
     local when=$1 pid path build found=0
+    RUNNING_EXPECTED=0
     for pid in $(/usr/bin/pgrep -f 'EgressView Agent.app/Contents/MacOS/EgressView Agent' 2>/dev/null); do
         found=1
         path=$(/bin/ps -o comm= -p "$pid" 2>/dev/null)
         if [ "$path" = "$EXECUTABLE" ]; then
             build="$EXPECTED_BUILD"
+            RUNNING_EXPECTED=1
             note "probe=${when}s pid=$pid build=$build path=expected"
         else
             # Its own bundle decides its build, not the one just installed.
@@ -171,7 +177,9 @@ CONSOLE_USER=$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null)
 CONSOLE_UID=$(/usr/bin/id -u "$CONSOLE_USER" 2>/dev/null)
 note "console_user=${CONSOLE_USER:-none} console_uid=${CONSOLE_UID:-none}"
 
+HAS_USER=0
 if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ -n "$CONSOLE_UID" ]; then
+    HAS_USER=1
     /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/open -a "$APP"
     note "open exit=$?"
 else
@@ -183,6 +191,36 @@ fi
 # means it crashed immediately, and the middle case is the easy one to miss.
 sleep 2;  probe 2
 sleep 8;  probe 10
+
+# One more try covers a launch that lost a race with the copy being replaced.
+if [ "$RUNNING_EXPECTED" = 0 ] && [ "$HAS_USER" = 1 ]; then
+    /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/open -a "$APP"
+    note "retry open exit=$?"
+    sleep 10; probe 20
+fi
+
+# Shown in the background with a timeout, so the installer neither waits for
+# the person nor leaves a dialog behind forever. The person's language decides
+# the text, as it does for the installer's own pages.
+if [ "$RUNNING_EXPECTED" = 0 ] && [ "$HAS_USER" = 1 ]; then
+    LANGS=$(/bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -u "$CONSOLE_USER" \
+        /usr/bin/defaults read -g AppleLanguages 2>/dev/null | /usr/bin/tr -d ' \n"(')
+    case "$LANGS" in
+        ja*)
+            TITLE='EgressView Agent'
+            MESSAGE='EgressView Agent を更新しましたが、起動できませんでした。アプリケーションフォルダの EgressView Agent を開いてください。開くまで監視は止まったままで、通信は記録されません。'
+            BUTTON='OK' ;;
+        *)
+            TITLE='EgressView Agent'
+            MESSAGE='EgressView Agent was updated but could not be started. Open EgressView Agent from the Applications folder. Until you do, monitoring stays off and nothing is recorded.'
+            BUTTON='OK' ;;
+    esac
+    /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -u "$CONSOLE_USER" /usr/bin/osascript \
+        -e 'on run {t, m, b}' \
+        -e 'display alert t message m as critical buttons {b} default button b giving up after 600' \
+        -e 'end run' "$TITLE" "$MESSAGE" "$BUTTON" >/dev/null 2>&1 &
+    note "alerted not_running"
+fi
 
 note "end"
 exit 0
@@ -252,14 +290,22 @@ fi
 RESOURCES_DIR="$WORK_DIR/resources"
 mkdir -p "$RESOURCES_DIR/en.lproj" "$RESOURCES_DIR/ja.lproj"
 cat > "$RESOURCES_DIR/en.lproj/conclusion.txt" <<'CONCLUSION_EN'
-EgressView Agent has been installed and started.
+EgressView Agent has been installed.
+
+If the EgressView icon is in the menu bar, monitoring has resumed. If it is
+not, open EgressView Agent from the Applications folder; until you do,
+monitoring stays off and nothing is recorded.
 
 Monitoring stopped while the previous copy was replaced, and nothing was
 recorded during that time. If macOS asks you to approve the network extension
 again, monitoring stays off until you do.
 CONCLUSION_EN
 cat > "$RESOURCES_DIR/ja.lproj/conclusion.txt" <<'CONCLUSION_JA'
-EgressView Agent をインストールし、起動しました。
+EgressView Agent をインストールしました。
+
+メニューバーに EgressView のアイコンが出ていれば、監視は再開しています。
+出ていない場合は、アプリケーションフォルダの EgressView Agent を開いてください。
+開くまで監視は止まったままで、通信は記録されません。
 
 置き換えの間は監視が止まっており、その間の通信は記録されていません。
 macOS がネットワーク機能拡張の承認を求めた場合、承認するまで監視は止まったままです。

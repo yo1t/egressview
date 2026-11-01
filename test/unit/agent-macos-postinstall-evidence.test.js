@@ -36,6 +36,33 @@ describe('macOS Agent postinstall evidence', () => {
     assert.match(postinstall, /probe 10\b/);
   });
 
+  it('起動していなければ1回だけ起動し直し、20秒後にも確認する', () => {
+    assert.match(postinstall, /note "retry open exit=\$\?"/);
+    assert.match(postinstall, /probe 20\b/);
+    assert.equal(postinstall.match(/\/usr\/bin\/open -a "\$APP"/g).length, 2);
+  });
+
+  it('それでも起動していなければ、利用者の言語で知らせる', () => {
+    // The extension only buffers until the app collects, so a missing app
+    // means nothing is recorded; the closing page cannot say so.
+    assert.match(postinstall, /display alert/);
+    assert.match(postinstall, /giving up after \d+/);
+    assert.match(postinstall, /AppleLanguages/);
+    assert.match(postinstall, /起動できませんでした/);
+    assert.match(postinstall, /could not be started/);
+    // In the background, so the installer does not wait for the person.
+    assert.match(postinstall, /"\$BUTTON" >\/dev\/null 2>&1 &/);
+  });
+
+  it('完了画面は起動したと断定しない', () => {
+    const en = script.slice(script.indexOf('CONCLUSION_EN'), script.lastIndexOf('CONCLUSION_EN'));
+    const ja = script.slice(script.indexOf('CONCLUSION_JA'), script.lastIndexOf('CONCLUSION_JA'));
+    assert.doesNotMatch(en, /and started/);
+    assert.doesNotMatch(ja, /起動しました/);
+    assert.match(en, /Applications folder/);
+    assert.match(ja, /アプリケーションフォルダ/);
+  });
+
   it('別パスで動くプロセスを「起動していない」と混同しない', () => {
     // Matching only the expected path would report the wrong-version case as
     // nothing running at all.
