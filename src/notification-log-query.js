@@ -50,8 +50,15 @@ function createNotificationLogQuery({ getDb }) {
       )`);
       params.push(sourceScope.sourceId, sourceScope.sourceId);
     } else if (sourceScope?.sourceKind === 'agent') {
+      // A LAN-scan notification names the Agent it came from in its tag. When
+      // a LAN device probed the Agent's computer, the sender is the source and
+      // the computer the destination, so no observation of the Agent has the
+      // sender as its local address: matched only on observations, the Agent
+      // it was about never listed it (P3-191, 2026-11-01).
       conditions.push(`(
-        (notification_log.dst IS NOT NULL AND notification_log.dport IS NOT NULL AND EXISTS (
+        (notification_log.type = 'lan_scan' AND json_valid(notification_log.threatTag)
+          AND json_extract(notification_log.threatTag, '$.agentId') = ?)
+        OR (notification_log.dst IS NOT NULL AND notification_log.dport IS NOT NULL AND EXISTS (
           SELECT 1 FROM agent_observations o
           WHERE o.agentId = ? AND o.localAddress = notification_log.src
             AND o.remoteAddress = notification_log.dst
@@ -66,7 +73,7 @@ function createNotificationLogQuery({ getDb }) {
             AND (notification_log.proto IS NULL OR LOWER(o.networkProtocol) = LOWER(notification_log.proto))
         ))
       )`);
-      params.push(sourceScope.sourceId, sourceScope.sourceId);
+      params.push(sourceScope.sourceId, sourceScope.sourceId, sourceScope.sourceId);
     } else if (sourceScope) {
       throw new TypeError('Unsupported source scope');
     }
