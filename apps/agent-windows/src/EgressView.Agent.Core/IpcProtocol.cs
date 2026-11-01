@@ -7,6 +7,27 @@ public static class IpcProtocol
 {
     public const int Version = 1;
 
+    /// Whether a request is a window announcing that it has just started.
+    ///
+    /// Any request from the window is taken as a sign that the window the
+    /// service found still open is alive. A window's first request is this
+    /// one, from a new window, so it must not count: taken as a sign of the
+    /// old one, it moved a run that ended at a shutdown on 2026-10-24 to the
+    /// new window's start a week later, and it read as 166.7 hours ending in
+    /// a crash.
+    public static bool BeginsWindowRun(string request)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(request);
+            var root = document.RootElement;
+            return root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("op", out var op) && op.ValueKind == JsonValueKind.String && op.GetString() == "ui-run"
+                && root.TryGetProperty("stage", out var stage) && stage.ValueKind == JsonValueKind.String && stage.GetString() == "begin";
+        }
+        catch (JsonException) { return false; }
+    }
+
     public static string Handle(string request, Func<string> status, Func<int, IReadOnlyList<HourlySummary>> summary,
         Action<AgentCredential>? saveCredential = null, Action<bool>? setDeliveryEnabled = null,
         Func<int, int, IReadOnlyList<RecentFlow>>? recentFlows = null,

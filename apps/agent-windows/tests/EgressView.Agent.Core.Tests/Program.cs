@@ -279,6 +279,47 @@ try
             "the previous exit is settled before the new run opens");
     }
 
+    using (var shutdownWindows = new ObservationStore(Path.Combine(directory, "window-runs-shutdown.db")))
+    {
+        // 2026-10-24: an update signed the user out and shut down. The window
+        // was ended without running its exit; the service recorded the
+        // machine going down. The window's run went down with the machine.
+        var t0 = DateTimeOffset.UtcNow.AddHours(-3);
+        var service = shutdownWindows.BeginRun(RunComponent.Service, "test", t0);
+        var window = t0.AddSeconds(20);
+        var windowRun = shutdownWindows.BeginRun(RunComponent.Ui, "test", window);
+        shutdownWindows.Heartbeat(windowRun);
+        shutdownWindows.EndSystemShutdownRun(service);
+        shutdownWindows.BeginRun(RunComponent.Service, "test");
+        AgentRun Window(DateTimeOffset startedAt) => shutdownWindows.ReadRunHistory().Single(run => run.Component == RunComponent.Ui && run.StartedAt == startedAt);
+        shutdownWindows.SettleWindowRun(shutdownWindows.OpenWindowRun()!.Value);
+        Assert(Window(window).Ending == "system-shutdown",
+            "a silent window whose machine the service saw going down is filed with the shutdown, not as a crash");
+        shutdownWindows.SettleWindowExit(DateTimeOffset.UtcNow.AddSeconds(-1));
+        Assert(Window(window).Ending == "clean", "the window's own note of an orderly exit still wins");
+
+    }
+    using (var earlierShutdown = new ObservationStore(Path.Combine(directory, "window-runs-earlier-shutdown.db")))
+    {
+        // A shutdown from before the window's last sign of life is not how
+        // the window ended.
+        earlierShutdown.EndSystemShutdownRun(earlierShutdown.BeginRun(RunComponent.Service, "test"));
+        Thread.Sleep(20);
+        var started = DateTimeOffset.UtcNow.AddSeconds(-1);
+        earlierShutdown.BeginRun(RunComponent.Ui, "test", started);
+        earlierShutdown.BeginRun(RunComponent.Ui, "test");
+        Assert(earlierShutdown.ReadRunHistory().Single(run => run.Component == RunComponent.Ui && run.StartedAt == started).Ending == "unexpected",
+            "a window that went silent after the last shutdown is still filed as unexpected");
+    }
+
+    // A new window's first request announces it; it is not a sign that the
+    // window the service found still open is alive.
+    Assert(IpcProtocol.BeginsWindowRun("""{"v":1,"op":"ui-run","stage":"begin","previousExit":"2026-10-24T12:06:30Z"}""")
+           && !IpcProtocol.BeginsWindowRun("""{"v":1,"op":"ui-run","stage":"end"}""")
+           && !IpcProtocol.BeginsWindowRun("""{"v":1,"op":"status"}""")
+           && !IpcProtocol.BeginsWindowRun("not json"),
+        "only a window's begin is told apart from its other requests");
+
     {
         // P3-191: LAN senders turned away from this PC's closed ports.
         var probes = new InboundProbeCounter();
