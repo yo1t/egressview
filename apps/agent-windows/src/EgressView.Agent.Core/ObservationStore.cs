@@ -2114,8 +2114,8 @@ public sealed partial class ObservationStore : IDisposable
         var began = (startedAt ?? DateTimeOffset.UtcNow).ToUniversalTime();
         lock (gate)
         {
-            Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
-                $"WHERE component='{name}' AND ending='running'");
+            Execute($"UPDATE run_history SET ending={(component == RunComponent.Ui ? WindowSettledEnding : "'unexpected'")}," +
+                $"ended_at=COALESCE(heartbeat_at,started_at) WHERE component='{name}' AND ending='running'");
             Execute($"INSERT INTO run_history(component,version,started_at,heartbeat_at,ending) " +
                 $"VALUES('{name}','{Sql(Trim(version, 64))}','{began:O}','{DateTimeOffset.UtcNow:O}','running')");
             var id = ScalarInt64("SELECT last_insert_rowid()");
@@ -2201,7 +2201,7 @@ public sealed partial class ObservationStore : IDisposable
         {
             var newest = ScalarInt64("SELECT COALESCE(MAX(id),0) FROM run_history WHERE component='ui' AND ending='running'");
             if (newest == 0) return null;
-            Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
+            Execute($"UPDATE run_history SET ending={WindowSettledEnding},ended_at=COALESCE(heartbeat_at,started_at) " +
                 $"WHERE component='ui' AND ending='running' AND id<{newest}");
             return newest;
         }
@@ -2210,9 +2210,25 @@ public sealed partial class ObservationStore : IDisposable
     /// Settles a window run nobody claimed: ended at its last sign of life.
     public void SettleWindowRun(long runId)
     {
-        lock (gate) Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
+        lock (gate) Execute($"UPDATE run_history SET ending={WindowSettledEnding},ended_at=COALESCE(heartbeat_at,started_at) " +
             $"WHERE id={runId} AND component='ui' AND ending='running'");
     }
+
+    /// How a window run that never wrote its own ending is settled.
+    ///
+    /// The window cannot always say goodbye when the machine goes down: on
+    /// 2026-10-24 an update signed the user out and shut down, the window was
+    /// ended without running its exit, and its run was filed as a crash. The
+    /// service is told when the machine goes down, and records it. A window
+    /// that went silent within five minutes before that went down with the
+    /// machine; the window asks every fifteen seconds and its heartbeat is
+    /// written at most once a minute, so five minutes is slack, not a guess.
+    private const string WindowSettledEnding =
+        "CASE WHEN EXISTS(SELECT 1 FROM run_history shutdown WHERE shutdown.component='service' " +
+        "AND shutdown.ending='system-shutdown' " +
+        "AND julianday(shutdown.ended_at) BETWEEN julianday(COALESCE(run_history.heartbeat_at,run_history.started_at)) " +
+        "AND julianday(COALESCE(run_history.heartbeat_at,run_history.started_at))+5.0/1440) " +
+        "THEN 'system-shutdown' ELSE 'unexpected' END";
 
     /// Settles the window's last run as a clean exit at the time the window
     /// itself recorded, when the service could not take the report.
@@ -2226,7 +2242,7 @@ public sealed partial class ObservationStore : IDisposable
     {
         var at = exitedAt.ToUniversalTime();
         lock (gate) Execute($"UPDATE run_history SET ending='clean',ended_at='{at:O}' " +
-            $"WHERE id=(SELECT MAX(id) FROM run_history WHERE component='ui') AND ending IN ('running','unexpected') " +
+            $"WHERE id=(SELECT MAX(id) FROM run_history WHERE component='ui') AND ending IN ('running','unexpected','system-shutdown') " +
             $"AND fault IS NULL AND started_at<='{at:O}'");
     }
 
