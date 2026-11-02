@@ -344,6 +344,7 @@ function createRegistry() {
       threat: detectionChannels,
       newDevice: detectionChannels,
       lanScan: detectionChannels,
+      agentSilent: detectionChannels,
     }),
   }).loose());
 

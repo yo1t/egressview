@@ -13,6 +13,8 @@ const FIELDS = [
   ['newDevice', 'history', 'detection-new-device-history'],
   ['lanScan', 'slack', 'detection-lan-scan-slack'],
   ['lanScan', 'history', 'detection-lan-scan-history'],
+  ['agentSilent', 'slack', 'detection-agent-silent-slack'],
+  ['agentSilent', 'history', 'detection-agent-silent-history'],
 ];
 
 function applyConfig(config) {
@@ -23,7 +25,7 @@ function applyConfig(config) {
 }
 
 function readConfig() {
-  const config = { threat: {}, newDevice: {}, lanScan: {} };
+  const config = { threat: {}, newDevice: {}, lanScan: {}, agentSilent: {} };
   for (const [kind, channel, id] of FIELDS) {
     config[kind][channel] = !!document.getElementById(id)?.checked;
   }
