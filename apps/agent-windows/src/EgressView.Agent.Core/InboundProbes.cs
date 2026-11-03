@@ -12,9 +12,9 @@ public sealed record InboundProbeSummary(DateTimeOffset WindowStart, int WindowS
 /// it tried and was turned away from (P3-191).
 ///
 /// The Windows counterpart of the Mac's packet-filter counter, fed by a
-/// different source: Microsoft-Windows-TCPIP reports a TCP segment it dropped
-/// because nothing listens on the port (TcpipTransportPacketDrops, reason 4),
-/// with the sender's address. That is what a probe of a closed port looks
+/// different source: Microsoft-Windows-TCPIP reports a TCP segment or UDP
+/// datagram it dropped because nothing listens on the port
+/// (TcpipTransportPacketDrops, reason 4), with the sender's address. That is what a probe of a closed port looks
 /// like from here; a probe of an open port becomes a connection and is seen
 /// with the rest of the traffic. The event carries no TCP flags, so the Mac's
 /// "SYN without ACK" test has no equivalent; a stray late segment to a port a
@@ -22,8 +22,15 @@ public sealed record InboundProbeSummary(DateTimeOffset WindowStart, int WindowS
 /// on the ephemeral range, which is not counted, as on the Mac. Measured on
 /// 2026-10-20: a Mac's `nc -z` to ports 1-30 showed as 30 ports, 60 drops.
 ///
-/// Only addresses and port numbers are kept, never content. TCP only for now:
-/// how Windows reports a UDP datagram to a closed port has not been measured.
+/// UDP is counted the same way, in its own tally. Measured on 2026-11-03: a
+/// Mac's datagrams to ports 1-30 showed as 30 ports, each with a second row
+/// whose ports are both 0 (not counted, as port 0 never is). Over the 2 h 40 min
+/// around it, no other LAN device's drops landed below the ephemeral range:
+/// Windows picks a UDP socket's own port from 49152 up, so a late reply to a
+/// closed socket is not counted -- the Mac had to remember what it sent
+/// (#833) because macOS picks from 1024.
+///
+/// Only addresses and port numbers are kept, never content.
 public sealed class InboundProbeCounter
 {
     public const int WindowSeconds = 120;
@@ -35,13 +42,13 @@ public sealed class InboundProbeCounter
     const int SampleSize = 10;
 
     private readonly object gate = new();
-    private readonly Dictionary<(long Window, string Local, string Source), (HashSet<int> Ports, int Packets)> tallies = [];
+    private readonly Dictionary<(long Window, string Protocol, string Local, string Source), (HashSet<int> Ports, int Packets)> tallies = [];
     private long countedPackets, sendersReported;
 
     public long CountedPackets { get { lock (gate) return countedPackets; } }
     public long SendersReported { get { lock (gate) return sendersReported; } }
 
-    public void Record(string? sourceAddress, string? localAddress, int localPort, DateTimeOffset at)
+    public void Record(string protocol, string? sourceAddress, string? localAddress, int localPort, DateTimeOffset at)
     {
         if (localPort is <= 0 or >= EphemeralFloor) return;
         if (Normal(sourceAddress) is not { } source || Normal(localAddress) is not { } local || source == local) return;
@@ -49,7 +56,7 @@ public sealed class InboundProbeCounter
         var window = at.ToUnixTimeSeconds() / WindowSeconds * WindowSeconds;
         lock (gate)
         {
-            var key = (window, local, source);
+            var key = (window, protocol, local, source);
             if (!tallies.TryGetValue(key, out var tally))
             {
                 if (tallies.Count >= MaxSenders) return;
@@ -72,12 +79,12 @@ public sealed class InboundProbeCounter
             {
                 tallies.Remove(key);
                 if (tally.Ports.Count < ReportMinPorts) continue;
-                summaries.Add(new(DateTimeOffset.FromUnixTimeSeconds(key.Window), WindowSeconds, key.Local, key.Source, "tcp",
+                summaries.Add(new(DateTimeOffset.FromUnixTimeSeconds(key.Window), WindowSeconds, key.Local, key.Source, key.Protocol,
                     tally.Ports.Count, tally.Packets, [.. tally.Ports.Order().Take(SampleSize)]));
             }
             sendersReported += summaries.Count;
         }
-        return [.. summaries.OrderBy(summary => summary.WindowStart).ThenBy(summary => summary.SourceAddress, StringComparer.Ordinal)];
+        return [.. summaries.OrderBy(summary => summary.WindowStart).ThenBy(summary => summary.SourceAddress, StringComparer.Ordinal).ThenBy(summary => summary.NetworkProtocol, StringComparer.Ordinal)];
     }
 
     static string? Normal(string? value)
