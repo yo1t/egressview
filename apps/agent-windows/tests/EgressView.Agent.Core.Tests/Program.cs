@@ -324,12 +324,12 @@ try
         // P3-191: LAN senders turned away from this PC's closed ports.
         var probes = new InboundProbeCounter();
         var w0 = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000 / 120 * 120);
-        for (var port = 1; port <= 30; port++) probes.Record("192.168.20.53", "192.168.20.50", port, w0.AddSeconds(port));
-        for (var port = 1; port <= 3; port++) probes.Record("192.168.20.60", "192.168.20.50", port, w0.AddSeconds(port));
-        probes.Record("192.168.20.53", "192.168.20.50", 50000, w0.AddSeconds(40));
-        probes.Record("203.0.113.9", "192.168.20.50", 22, w0.AddSeconds(40));
-        probes.Record("192.168.20.255", "192.168.20.50", 137, w0.AddSeconds(40));
-        probes.Record("::ffff:192.168.20.70", "192.168.20.50", 22, w0.AddSeconds(41));
+        for (var port = 1; port <= 30; port++) probes.Record("tcp", "192.168.20.53", "192.168.20.50", port, w0.AddSeconds(port));
+        for (var port = 1; port <= 3; port++) probes.Record("tcp", "192.168.20.60", "192.168.20.50", port, w0.AddSeconds(port));
+        probes.Record("tcp", "192.168.20.53", "192.168.20.50", 50000, w0.AddSeconds(40));
+        probes.Record("tcp", "203.0.113.9", "192.168.20.50", 22, w0.AddSeconds(40));
+        probes.Record("tcp", "192.168.20.255", "192.168.20.50", 137, w0.AddSeconds(40));
+        probes.Record("tcp", "::ffff:192.168.20.70", "192.168.20.50", 22, w0.AddSeconds(41));
         Assert(probes.TakeCompleted(w0.AddSeconds(100)).Count == 0, "a window is reported only once it has ended");
         var summaries = probes.TakeCompleted(w0.AddSeconds(130));
         Assert(summaries.Count == 1 && summaries[0].SourceAddress == "192.168.20.53" && summaries[0].DistinctPorts == 30
@@ -338,6 +338,23 @@ try
             "a LAN sender reaching 30 closed ports is reported once, with ten sample ports; the ephemeral range is not counted");
         Assert(probes.TakeCompleted(w0.AddSeconds(400)).Count == 0,
             "fewer than five ports, a sender outside the LAN, a broadcast address and reported windows are not reported");
+
+        // UDP in its own tally: the same sender's TCP and UDP are two reports,
+        // and neither tops up the other to five ports. The second row Windows
+        // writes for each datagram has port 0 and is not a port.
+        for (var port = 1; port <= 30; port++)
+        {
+            probes.Record("udp", "192.168.20.45", "192.168.20.50", port, w0.AddSeconds(500 + port));
+            probes.Record("udp", "192.168.20.45", "192.168.20.50", 0, w0.AddSeconds(500 + port));
+        }
+        for (var port = 1; port <= 3; port++) probes.Record("tcp", "192.168.20.60", "192.168.20.50", port, w0.AddSeconds(501));
+        for (var port = 4; port <= 5; port++) probes.Record("udp", "192.168.20.60", "192.168.20.50", port, w0.AddSeconds(501));
+        for (var port = 1; port <= 6; port++) probes.Record("tcp", "192.168.20.45", "192.168.20.50", port, w0.AddSeconds(502));
+        var mixed = probes.TakeCompleted(w0.AddSeconds(800));
+        Assert(mixed.Count == 2
+               && mixed.Single(s => s.NetworkProtocol == "udp") is { SourceAddress: "192.168.20.45", DistinctPorts: 30, Packets: 30 }
+               && mixed.Single(s => s.NetworkProtocol == "tcp") is { SourceAddress: "192.168.20.45", DistinctPorts: 6 },
+            "UDP is counted apart from TCP, its port-0 rows are not ports, and three TCP and two UDP ports are not five");
 
         var (v4, v4Port) = EtwNetworkCollector.SockAddr(new byte[] { 2, 0, 0, 80, 192, 168, 20, 105, 0, 0, 0, 0, 0, 0, 0, 0 });
         var mapped = new byte[28];

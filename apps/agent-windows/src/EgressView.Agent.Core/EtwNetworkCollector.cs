@@ -29,8 +29,8 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private static readonly Guid KernelProcess = new("22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716");
     private static readonly Guid DnsClient = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
     /// Microsoft-Windows-TCPIP, for the two things Kernel-Network never says
-    /// (P3-191): a connection attempt that failed, and a segment dropped
-    /// because nothing listens on its port. Kernel-Network reports connections
+    /// (P3-191): a connection attempt that failed, and a segment or datagram
+    /// dropped because nothing listens on its port. Kernel-Network reports connections
     /// that were made and data that moved; a sweep of the LAN in which nothing
     /// answers left no trace at all -- 0 of 40 on 2026-10-20, against 40 of 40
     /// on the Mac. This provider is very busy (several hundred thousand events
@@ -40,7 +40,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private const ulong TcpipKeywords = 0x400000000 | 0x10000000000;   // ConnectPath | Dropped
     private const int TcpConnectTcbFailure = 1034;
     private const int TcpipTransportPacketDrops = 1214;
-    /// TcpipTransportPacketDrops: no endpoint for the segment's port.
+    /// TcpipTransportPacketDrops: no endpoint for the segment's or datagram's port.
     private const int DropReasonNoListener = 4;
 
     /// The two keywords this Agent reads: IPv4 and IPv6 traffic.
@@ -546,10 +546,11 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
 
     private void RecordDroppedSegment(TraceEvent e)
     {
-        if (IntValue(Raw(e, "IPTransportProtocol"), 0) != 6 || IntValue(Raw(e, "Reason"), 0) != DropReasonNoListener) return;
+        var protocol = IntValue(Raw(e, "IPTransportProtocol"), 0) switch { 6 => "tcp", 17 => "udp", _ => null };
+        if (protocol is null || IntValue(Raw(e, "Reason"), 0) != DropReasonNoListener) return;
         var (local, localPort) = SockAddr(Raw(e, "LocalSockAddr"));
         var (remote, _) = SockAddr(Raw(e, "RemoteSockAddr"));
-        InboundProbes.Record(remote, local, localPort, At(e));
+        InboundProbes.Record(protocol, remote, local, localPort, At(e));
     }
 
     /// A SOCKADDR as Microsoft-Windows-TCPIP writes it: family, port in network
