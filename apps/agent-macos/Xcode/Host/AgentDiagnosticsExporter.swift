@@ -155,6 +155,7 @@ final class AgentDiagnosticsExporter {
             migrationBackups: databaseURL.map { MigrationInventory.backups(forDatabaseAt: $0) } ?? [],
             interruptedMigration: databaseURL.flatMap { MigrationInventory.interrupted(forDatabaseAt: $0) },
             outboundBaseline: try? store?.outboundBaselineSummary(),
+            outboundCandidates: try? store?.outboundCandidates(),
             // Read fresh rather than held: the export exists to describe a
             // fault, and a copy taken at launch would predate it.
             runHistory: AgentRunRecorder.inAppGroup()?.snapshot() ?? AgentRunHistory(),

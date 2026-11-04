@@ -128,6 +128,28 @@ enum RenderCheck {
                      to: "\(output)/worldmap-glow-\(language)-\(Int(seconds))s.png")
             }
 
+            // The longest names and the three states that say something
+            // other than the list itself.
+            let day = Date(timeIntervalSince1970: 1_793_491_200)
+            let candidates = [
+                OutboundCandidate(kind: .machine, at: day, bytesOut: 9_513_000_000, usualBytesOut: 777_000_000),
+                OutboundCandidate(kind: .newPair, at: day, application: "curl", destination: "one.example",
+                                  bytesOut: 9_022_000_000),
+                OutboundCandidate(kind: .aboveUsual, at: day, application: "com.apple.Safari.SafeBrowsing.S",
+                                  destination: "cdn-windows-client-a.example.com",
+                                  bytesOut: 35_000_000, usualBytesOut: 6_400_000),
+            ]
+            for (name, report) in [
+                ("ready", OutboundCandidateReport(state: .ready, candidates: candidates, total: 9)),
+                ("empty", OutboundCandidateReport(state: .ready)),
+                ("learning", OutboundCandidateReport(state: .learning(monitoredHours: 41.5))),
+                ("coverage", OutboundCandidateReport(state: .lowByteCoverage(share: 0.19))),
+            ] {
+                save(AgentOutboundCandidatesView(report: report).padding(16),
+                     width: 420, height: 300,
+                     to: "\(output)/outbound-candidates-\(name)-\(language).png")
+            }
+
             for (width, height) in [(1440.0, 900.0), (1100.0, 700.0), (820.0, 560.0)] {
                 save(AgentWorldMapChart(atlas: atlas, visitedCountryCodes: visited),
                      width: width, height: height,

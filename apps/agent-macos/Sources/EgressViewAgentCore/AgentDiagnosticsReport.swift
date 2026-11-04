@@ -111,6 +111,7 @@ public struct AgentDiagnosticsReport: Sendable {
         /// What this Mac usually sends, as numbers only: no application, no
         /// destination (P3-192 phase 1). Nil when it could not be read.
         public var outboundBaseline: OutboundBaselineSummary?
+        public var outboundCandidates: OutboundCandidateReport?
         /// What happened to the runs before this one. Empty on a Mac where the
         /// App Group container could not be opened, which the report says
         /// elsewhere.
@@ -137,6 +138,7 @@ public struct AgentDiagnosticsReport: Sendable {
             migrationBackups: [MigrationBackup] = [],
             interruptedMigration: MigrationProgress? = nil,
             outboundBaseline: OutboundBaselineSummary? = nil,
+            outboundCandidates: OutboundCandidateReport? = nil,
             runHistory: AgentRunHistory = AgentRunHistory(),
             installLog: InstallLog
         ) {
@@ -169,6 +171,7 @@ public struct AgentDiagnosticsReport: Sendable {
             self.migrationBackups = migrationBackups
             self.interruptedMigration = interruptedMigration
             self.outboundBaseline = outboundBaseline
+            self.outboundCandidates = outboundCandidates
             self.runHistory = runHistory
             self.installLog = installLog
         }
@@ -368,6 +371,20 @@ public struct AgentDiagnosticsReport: Sendable {
             lines.append(row("with a name", share(usual.namedShare)))
             lines.append(row("with bytes", share(usual.bytesShare)))
             lines.append(row("pairs known", "\(usual.pairsKnown)"))
+            // Counts only: which apps and destinations stay on the screen.
+            if let report = inputs.outboundCandidates {
+                let state: String
+                switch report.state {
+                case .learning: state = "learning"
+                case .lowByteCoverage: state = "low byte coverage"
+                case .ready: state = "ready"
+                }
+                lines.append(row("candidates state", state))
+                for kind in [OutboundCandidate.Kind.newPair, .aboveUsual, .machine] {
+                    let count = report.candidates.filter { $0.kind == kind }.count
+                    lines.append(row("candidates \(kind.rawValue)", "\(count)"))
+                }
+            }
         } else {
             lines.append(row("baseline", "unreadable"))
         }

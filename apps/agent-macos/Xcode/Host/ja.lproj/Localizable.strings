@@ -902,4 +902,14 @@
 "median %1$@, 99th percentile %2$@ (over %3$lld fully monitored hours)" = "中央値 %1$@・上位1%% %2$@（全体を監視できた %3$lld 時間）";
 "Destinations with a name" = "宛先名が取れた割合";
 "App and destination pairs seen" = "見たことのあるアプリと宛先の組";
-"Measured only. Nothing is judged against this yet." = "測っているだけで、まだこれと比べた判定はしていません。";
+
+/* Traffic worth a look (P3-192, P3-193 phase 2) */
+"Worth a look (last 14 days)" = "調べる候補（直近14日）";
+"Still learning this Mac: %1$@ of %2$lld monitored hours. Until then nothing can be judged, which is not the same as nothing unusual." = "このMacの普段を学習中です（監視した %2$lld 時間のうち %1$@ 時間）。それまでは判定できません。普段と違う通信が無いという意味ではありません。";
+"Only %lld%% of recent connections have a byte count, so unusual amounts can be missed here. Counting from packet headers in Settings raises it." = "最近の接続のうち通信量が分かるのは %lld%% だけなので、普段と違う量を見逃すことがあります。設定の「パケットのヘッダーから数える」をオンにすると増えます。";
+"Nothing stood out against this Mac's usual traffic." = "このMacの普段と比べて、目立つ送信はありませんでした。";
+"A place to start looking, not a verdict: your own uploads and updates appear here too. Small amounts, browsers, virtual machines and transfers within your network are not judged." = "調べ始める手がかりで、判定ではありません。ご自身のアップロードや更新もここに出ます。少ない量、ブラウザ、仮想マシン、ネットワーク内の転送は判定の対象外です。";
+"This Mac as a whole" = "このMac全体";
+"%1$@: first time together, %2$@ sent within a week" = "%1$@: 初めての組み合わせで、1週間以内に %2$@ 送信";
+"%1$@: %2$@ sent in a day, usually up to %3$@" = "%1$@: 1日に %2$@ 送信（普段は多くて %3$@）";
+"%1$@: %2$@ sent in 24 hours, usually up to %3$@" = "%1$@: 24時間に %2$@ 送信（普段は多くて %3$@）";

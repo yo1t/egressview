@@ -996,7 +996,7 @@ struct AgentOverviewPanel: View {
                 .agentHoverPopover {
                     AgentOutboundAnomalyList(
                         records: summary.outboundAnomalies, total: summary.outboundAnomalyCount,
-                        usual: summary.outboundBaseline
+                        usual: summary.outboundBaseline, candidates: summary.outboundCandidates
                     )
                 }
                 tile(L("Monitored"), "\(Int((coverage.share * 100).rounded()))%", "clock.badge.checkmark")
