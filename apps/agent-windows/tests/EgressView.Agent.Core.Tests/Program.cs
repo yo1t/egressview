@@ -356,6 +356,15 @@ try
                && mixed.Single(s => s.NetworkProtocol == "tcp") is { SourceAddress: "192.168.20.45", DistinctPorts: 6 },
             "UDP is counted apart from TCP, its port-0 rows are not ports, and three TCP and two UDP ports are not five");
 
+        // Sent to everyone, not to this PC: one device's discovery on twelve
+        // ports is neither counted nor reported, wherever it was addressed.
+        var countedBefore = probes.CountedPackets;
+        foreach (var everyone in new[] { "255.255.255.255", "192.168.20.255", "239.255.255.250", "224.0.0.251", "ff02::1" })
+            for (var port = 1; port <= 12; port++)
+                probes.Record("udp", "192.168.20.35", everyone, port, w0.AddSeconds(900 + port));
+        Assert(probes.CountedPackets == countedBefore && probes.TakeCompleted(w0.AddSeconds(1200)).Count == 0,
+            "datagrams to a broadcast or multicast address are not probes of this PC");
+
         var (v4, v4Port) = EtwNetworkCollector.SockAddr(new byte[] { 2, 0, 0, 80, 192, 168, 20, 105, 0, 0, 0, 0, 0, 0, 0, 0 });
         var mapped = new byte[28];
         mapped[0] = 23; mapped[2] = 0xF7; mapped[3] = 0xFA;
