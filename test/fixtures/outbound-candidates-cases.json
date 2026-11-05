@@ -1,0 +1,595 @@
+{
+ "description": "Shared cases for the outbound candidate rules (P3-192, P3-193 phase 2). Each Agent feeds the same input to its own rules and must reach the same result. Days and hours count from a day-aligned UTC start. Application names here are neutral: which browsers and virtual machines are left out is per platform and is not covered.",
+ "cases": [
+  {
+   "name": "learning is counted in monitored hours",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 40,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1,
+     "observations": 0,
+     "observationsWithBytes": 0
+    }
+   ],
+   "pairDays": [],
+   "firstSeen": [],
+   "nowDay": 40,
+   "expected": {
+    "state": "learning",
+    "monitoredHours": 40,
+    "total": 0,
+    "candidates": []
+   }
+  },
+  {
+   "name": "a new pair adds up over a week",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 288,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    }
+   ],
+   "pairDays": [
+    {
+     "day": 8,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 307200
+    },
+    {
+     "day": 9,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 307200
+    },
+    {
+     "day": 10,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 307200
+    },
+    {
+     "day": 11,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 307200
+    }
+   ],
+   "firstSeen": [
+    {
+     "day": 8,
+     "application": "curl",
+     "destination": "one.example"
+    }
+   ],
+   "nowDay": 12,
+   "expected": {
+    "state": "ready",
+    "total": 1,
+    "candidates": [
+     {
+      "kind": "newPair",
+      "day": 11,
+      "bytesOut": 1228800,
+      "application": "curl",
+      "destination": "one.example"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a new pair under the floor in a week is not listed",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 360,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    }
+   ],
+   "pairDays": [
+    {
+     "day": 8,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 102400
+    },
+    {
+     "day": 9,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 102400
+    },
+    {
+     "day": 10,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 102400
+    },
+    {
+     "day": 11,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 102400
+    },
+    {
+     "day": 12,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 102400
+    },
+    {
+     "day": 13,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 102400
+    },
+    {
+     "day": 14,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 102400
+    }
+   ],
+   "firstSeen": [
+    {
+     "day": 8,
+     "application": "curl",
+     "destination": "one.example"
+    }
+   ],
+   "nowDay": 15,
+   "expected": {
+    "state": "ready",
+    "total": 0,
+    "candidates": []
+   }
+  },
+  {
+   "name": "a pair first seen while learning is not new",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 240,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    }
+   ],
+   "pairDays": [
+    {
+     "day": 9,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 5242880
+    }
+   ],
+   "firstSeen": [
+    {
+     "day": 2,
+     "application": "curl",
+     "destination": "one.example"
+    }
+   ],
+   "nowDay": 10,
+   "expected": {
+    "state": "ready",
+    "total": 0,
+    "candidates": []
+   }
+  },
+  {
+   "name": "a pair first seen as learning ends is new",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 240,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    }
+   ],
+   "pairDays": [
+    {
+     "day": 7,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 5242880
+    }
+   ],
+   "firstSeen": [
+    {
+     "day": 7,
+     "application": "curl",
+     "destination": "one.example"
+    }
+   ],
+   "nowDay": 10,
+   "expected": {
+    "state": "ready",
+    "total": 1,
+    "candidates": [
+     {
+      "kind": "newPair",
+      "day": 7,
+      "bytesOut": 5242880,
+      "application": "curl",
+      "destination": "one.example"
+     }
+    ]
+   }
+  },
+  {
+   "name": "flagged days stay out of the yardstick",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 480,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    }
+   ],
+   "pairDays": [
+    {
+     "day": 3,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 1048576
+    },
+    {
+     "day": 4,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 1048576
+    },
+    {
+     "day": 5,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 1048576
+    },
+    {
+     "day": 6,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 1048576
+    },
+    {
+     "day": 7,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 1048576
+    },
+    {
+     "day": 8,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 1048576
+    },
+    {
+     "day": 9,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 1048576
+    },
+    {
+     "day": 12,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 20971520
+    },
+    {
+     "day": 13,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 31457280
+    }
+   ],
+   "firstSeen": [
+    {
+     "day": 3,
+     "application": "curl",
+     "destination": "one.example"
+    }
+   ],
+   "nowDay": 20,
+   "expected": {
+    "state": "ready",
+    "total": 2,
+    "candidates": [
+     {
+      "kind": "aboveUsual",
+      "day": 13,
+      "bytesOut": 31457280,
+      "application": "curl",
+      "destination": "one.example",
+      "usualBytesOut": 1048576
+     },
+     {
+      "kind": "aboveUsual",
+      "day": 12,
+      "bytesOut": 20971520,
+      "application": "curl",
+      "destination": "one.example",
+      "usualBytesOut": 1048576
+     }
+    ]
+   }
+  },
+  {
+   "name": "over the floor but under five times usual is not listed",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 480,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    }
+   ],
+   "pairDays": [
+    {
+     "day": 3,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 3145728
+    },
+    {
+     "day": 4,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 3145728
+    },
+    {
+     "day": 5,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 3145728
+    },
+    {
+     "day": 6,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 3145728
+    },
+    {
+     "day": 7,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 3145728
+    },
+    {
+     "day": 8,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 3145728
+    },
+    {
+     "day": 9,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 3145728
+    },
+    {
+     "day": 12,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 12582912
+    }
+   ],
+   "firstSeen": [
+    {
+     "day": 3,
+     "application": "curl",
+     "destination": "one.example"
+    }
+   ],
+   "nowDay": 20,
+   "expected": {
+    "state": "ready",
+    "total": 0,
+    "candidates": []
+   }
+  },
+  {
+   "name": "the machine gets one entry a day",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 300,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    },
+    {
+     "startHour": 300,
+     "count": 1,
+     "monitoredSeconds": 3600,
+     "bytesOut": 104857600,
+     "observations": 100,
+     "observationsWithBytes": 99
+    },
+    {
+     "startHour": 301,
+     "count": 179,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    }
+   ],
+   "pairDays": [],
+   "firstSeen": [],
+   "nowDay": 20,
+   "expected": {
+    "state": "ready",
+    "total": 2,
+    "candidates": [
+     {
+      "kind": "machine",
+      "day": 13,
+      "bytesOut": 128974848,
+      "usualBytesOut": 25165824
+     },
+     {
+      "kind": "machine",
+      "day": 12,
+      "bytesOut": 128974848,
+      "usualBytesOut": 25165824
+     }
+    ]
+   }
+  },
+  {
+   "name": "low byte coverage is said and the list stays",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 240,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 19
+    }
+   ],
+   "pairDays": [
+    {
+     "day": 8,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 5242880
+    }
+   ],
+   "firstSeen": [
+    {
+     "day": 8,
+     "application": "curl",
+     "destination": "one.example"
+    }
+   ],
+   "nowDay": 10,
+   "expected": {
+    "state": "lowByteCoverage",
+    "byteCoverageShare": 0.19,
+    "total": 1,
+    "candidates": [
+     {
+      "kind": "newPair",
+      "day": 8,
+      "bytesOut": 5242880,
+      "application": "curl",
+      "destination": "one.example"
+     }
+    ]
+   }
+  },
+  {
+   "name": "only the last fourteen days are listed",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 240,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    }
+   ],
+   "pairDays": [
+    {
+     "day": 9,
+     "application": "curl",
+     "destination": "one.example",
+     "bytesOut": 5242880
+    }
+   ],
+   "firstSeen": [
+    {
+     "day": 9,
+     "application": "curl",
+     "destination": "one.example"
+    }
+   ],
+   "nowDay": 24,
+   "expected": {
+    "state": "ready",
+    "total": 0,
+    "candidates": []
+   }
+  },
+  {
+   "name": "one day orders by application then destination, descending",
+   "hours": [
+    {
+     "startHour": 0,
+     "count": 240,
+     "monitoredSeconds": 3600,
+     "bytesOut": 1048576,
+     "observations": 100,
+     "observationsWithBytes": 99
+    }
+   ],
+   "pairDays": [
+    {
+     "day": 8,
+     "application": "alpha",
+     "destination": "one.example",
+     "bytesOut": 2097152
+    },
+    {
+     "day": 8,
+     "application": "beta",
+     "destination": "one.example",
+     "bytesOut": 3145728
+    }
+   ],
+   "firstSeen": [
+    {
+     "day": 8,
+     "application": "alpha",
+     "destination": "one.example"
+    },
+    {
+     "day": 8,
+     "application": "beta",
+     "destination": "one.example"
+    }
+   ],
+   "nowDay": 10,
+   "expected": {
+    "state": "ready",
+    "total": 2,
+    "candidates": [
+     {
+      "kind": "newPair",
+      "day": 8,
+      "bytesOut": 3145728,
+      "application": "beta",
+      "destination": "one.example"
+     },
+     {
+      "kind": "newPair",
+      "day": 8,
+      "bytesOut": 2097152,
+      "application": "alpha",
+      "destination": "one.example"
+     }
+    ]
+   }
+  }
+ ]
+}
