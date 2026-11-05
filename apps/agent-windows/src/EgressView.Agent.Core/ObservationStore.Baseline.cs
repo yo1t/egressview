@@ -41,6 +41,38 @@ public static class OutboundBaselineKeys
         var take = labels[^1].Length == 2 && labels[^2].Length <= 3 ? 3 : 2;
         return string.Join('.', labels[^take..]);
     }
+
+    /// What an hour's rows add up to, by application and destination.
+    ///
+    /// A row with a name counts under that name: one CDN address serves many
+    /// sites, and taking one name per address put 106 MiB of 4,108 under the
+    /// wrong domain on one PC in 14 days (2026-11-05). A row without one
+    /// takes the name only when that application reached a single domain at
+    /// that address in the hour. Left on the bare address instead, as on the
+    /// Mac, 824 MiB moved and the pairs doubled from 1,008 to 1,969, because
+    /// ETW names a connection only after its first rows. With several domains
+    /// there is nothing to choose between, so the address is what is known.
+    public static Dictionary<(string Application, string Destination), ulong> Pairs(
+        IReadOnlyCollection<(string Address, string? Hostname, string Application, ulong Sent)> rows)
+    {
+        var domains = new Dictionary<(string Address, string Application), string?>();
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Hostname)) continue;
+            var domain = Destination(row.Hostname, row.Address);
+            var key = (row.Address, row.Application);
+            domains[key] = !domains.TryGetValue(key, out var held) || held == domain ? domain : null;
+        }
+        var pairs = new Dictionary<(string Application, string Destination), ulong>();
+        foreach (var row in rows)
+        {
+            var hostname = string.IsNullOrWhiteSpace(row.Hostname)
+                ? domains.GetValueOrDefault((row.Address, row.Application)) : row.Hostname;
+            var key = (row.Application, Destination(hostname, row.Address));
+            pairs[key] = pairs.GetValueOrDefault(key) + row.Sent;
+        }
+        return pairs;
+    }
 }
 
 public sealed partial class ObservationStore
@@ -101,6 +133,40 @@ public sealed partial class ObservationStore
         catch { TryRollback(); throw; }
     }
 
+    /// Reads the days the raw history still covers again, now that a name no
+    /// longer stands for its whole address (see
+    /// <see cref="OutboundBaselineKeys.Pairs"/>).
+    ///
+    /// Whole days from the first the raw history fully holds, because the
+    /// pair-days add up and a part-day would lose the hours before the cut.
+    /// baseline_pairs stays: wiping it would forget what was first seen
+    /// before the raw history begins, and those pairs would come back as new.
+    /// Older days keep their merged sums and age out within 35 days. The
+    /// reading itself is the usual catch-up, so this transaction stays short.
+    private void MigrateVersion32To33()
+    {
+        try
+        {
+            Execute("BEGIN IMMEDIATE");
+            var through = NullableScalarText("SELECT captured_through FROM baseline_state WHERE id=1");
+            var oldest = ScalarInt64("SELECT COALESCE(MIN(observed_at),0) FROM observations");
+            if (through is not null && oldest > 0)
+            {
+                var raw = new DateTimeOffset(oldest, TimeSpan.Zero);
+                var earliest = DateTimeOffset.UtcNow.AddDays(-DefaultRawRetentionDays);
+                var held = raw > earliest ? raw : earliest;
+                var from = new DateTimeOffset(held.Year, held.Month, held.Day, 0, 0, 0, TimeSpan.Zero).AddDays(1);
+                if (DateTimeOffset.Parse(through) > from)
+                {
+                    Execute($"DELETE FROM baseline_pair_days WHERE day>='{from:O}'");
+                    Execute($"UPDATE baseline_state SET captured_through='{from:O}' WHERE id=1");
+                }
+            }
+            Execute("UPDATE schema_version SET version=33 WHERE version=32; COMMIT;");
+        }
+        catch { TryRollback(); throw; }
+    }
+
     private void ValidateBaselineSchema()
     {
         if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('baseline_hours','baseline_pair_days','baseline_pairs','baseline_state')") != 4
@@ -152,10 +218,10 @@ public sealed partial class ObservationStore
         // 39.1% of what went outside this network, rows with their connection
         // 62.6%. Most of the rest has no name to find -- DNS servers
         // themselves (port 53) and peer-to-peer STUN (3478).
-        CheckOperation(WinSqlite.Prepare(db, "SELECT o.remote_address,MAX(COALESCE(o.remote_hostname,f.remote_hostname)),COALESCE(o.process_name,''),COUNT(*),COUNT(o.bytes_sent)," +
+        CheckOperation(WinSqlite.Prepare(db, "SELECT o.remote_address,COALESCE(o.remote_hostname,f.remote_hostname),COALESCE(o.process_name,''),COUNT(*),COUNT(o.bytes_sent)," +
             "COUNT(COALESCE(o.remote_hostname,f.remote_hostname)),COALESCE(SUM(o.bytes_sent),0) FROM observations o LEFT JOIN flows f ON f.rowid=o.flow_id " +
-            $"WHERE o.observed_at >= {hour.UtcTicks} AND o.observed_at < {end.UtcTicks} GROUP BY 1,3", -1, out var statement, 0));
-        var pairs = new Dictionary<(string Application, string Destination), ulong>();
+            $"WHERE o.observed_at >= {hour.UtcTicks} AND o.observed_at < {end.UtcTicks} GROUP BY 1,2,3", -1, out var statement, 0));
+        var rows = new List<(string Address, string? Hostname, string Application, ulong Sent)>();
         long observations = 0, withBytes = 0, named = 0;
         ulong bytesOut = 0;
         try
@@ -166,10 +232,8 @@ public sealed partial class ObservationStore
                 // The same "outside this network" as the fifteen-minute
                 // windows, so the two never disagree about what left.
                 if (PrivateAddress.StaysOnNetwork(address)) continue;
-                var key = (OutboundBaselineKeys.Application(Text(statement, 2)),
-                    OutboundBaselineKeys.Destination(NullableTextValue(statement, 1), address));
                 var sent = (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 6));
-                pairs[key] = pairs.GetValueOrDefault(key) + sent;
+                rows.Add((address, NullableTextValue(statement, 1), OutboundBaselineKeys.Application(Text(statement, 2)), sent));
                 observations += WinSqlite.ColumnInt64(statement, 3);
                 withBytes += WinSqlite.ColumnInt64(statement, 4);
                 named += WinSqlite.ColumnInt64(statement, 5);
@@ -177,6 +241,7 @@ public sealed partial class ObservationStore
             }
         }
         finally { WinSqlite.Finalize(statement); }
+        var pairs = OutboundBaselineKeys.Pairs(rows);
 
         Execute("BEGIN IMMEDIATE");
         try
@@ -311,6 +376,46 @@ public sealed partial class ObservationStore
             observations == 0 ? null : (double)named / observations,
             observations == 0 ? null : (double)withBytes / observations,
             ScalarInt64("SELECT COUNT(*) FROM baseline_pairs"));
+    }
+
+    public OutboundCandidateReport ReadOutboundCandidates(DateTimeOffset now)
+    {
+        lock (gate) return ReadOutboundCandidatesLocked(now);
+    }
+
+    private OutboundCandidateReport ReadOutboundCandidatesLocked(DateTimeOffset now)
+    {
+        static double Seconds(string text) => DateTimeOffset.Parse(text, System.Globalization.CultureInfo.InvariantCulture).ToUnixTimeSeconds();
+        static ulong Bytes(IntPtr statement, int column) => (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, column));
+
+        var hours = new List<OutboundCandidateRules.Hour>();
+        CheckOperation(WinSqlite.Prepare(db, "SELECT hour_start,monitored_seconds,bytes_out,observations,observations_with_bytes FROM baseline_hours", -1, out var statement, 0));
+        try
+        {
+            while (WinSqlite.Step(statement) == WinSqlite.Row)
+                hours.Add(new(Seconds(Text(statement, 0)), WinSqlite.ColumnInt64(statement, 1), Bytes(statement, 2),
+                    WinSqlite.ColumnInt64(statement, 3), WinSqlite.ColumnInt64(statement, 4)));
+        }
+        finally { WinSqlite.Finalize(statement); }
+
+        var days = new List<OutboundCandidateRules.PairDay>();
+        CheckOperation(WinSqlite.Prepare(db, "SELECT day,application,destination,bytes_out FROM baseline_pair_days", -1, out statement, 0));
+        try
+        {
+            while (WinSqlite.Step(statement) == WinSqlite.Row)
+                days.Add(new(Seconds(Text(statement, 0)), new(Text(statement, 1), Text(statement, 2)), Bytes(statement, 3)));
+        }
+        finally { WinSqlite.Finalize(statement); }
+
+        var firstSeen = new Dictionary<OutboundCandidateRules.PairKey, double>();
+        CheckOperation(WinSqlite.Prepare(db, "SELECT application,destination,first_seen FROM baseline_pairs", -1, out statement, 0));
+        try
+        {
+            while (WinSqlite.Step(statement) == WinSqlite.Row)
+                firstSeen[new(Text(statement, 0), Text(statement, 1))] = Seconds(Text(statement, 2));
+        }
+        finally { WinSqlite.Finalize(statement); }
+        return OutboundCandidateRules.Evaluate(hours, days, firstSeen, now);
     }
 
     private static DateTimeOffset FloorHour(DateTimeOffset value)

@@ -103,5 +103,19 @@
   <system:String x:Key="UsualNoFullHourYet">全体を監視できた1時間はまだありません</system:String>
   <system:String x:Key="UsualNamed">宛先名が取れた割合</system:String>
   <system:String x:Key="UsualPairs">見たことのあるアプリと宛先の組</system:String>
-  <system:String x:Key="UsualNotJudgedYet">測っているだけで、まだこれと比べた判定はしていません。</system:String>
+  <system:String x:Key="WorthALook">調べる候補（直近14日）</system:String>
+  <system:String x:Key="WorthALookLearningSummary">調べる候補: このPCを学習中のため、まだ判定できません。</system:String>
+  <system:String x:Key="WorthALookNothingSummary">調べる候補: 直近14日に目立つ送信はありませんでした。</system:String>
+  <system:String x:Key="WorthALookCountSummaryFormat">調べる候補: 直近14日に{0:N0}件あります。カードをクリックすると「インサイト」タブで一覧を開きます。</system:String>
+  <system:String x:Key="WorthALookLowCoverageSummaryFormat">調べる候補: 直近14日に{0:N0}件です。ここでは多すぎる送信を見逃すことがあります。カードをクリックすると「インサイト」タブを開きます。</system:String>
+  <system:String x:Key="WorthALookShowAllFormat">すべて表示（{0:N0}件）</system:String>
+  <system:String x:Key="OpenInsightsTab">「インサイト」タブを開く</system:String>
+  <system:String x:Key="WorthALookLearningFormat">このPCの普段を学習中です（監視した {1:N0} 時間のうち {0:N1} 時間）。それまでは判定できません。普段と違う通信が無いという意味ではありません。数えるのはPCが動いている時間だけなので、電源を切っていることが多いPCでは時間がかかります。</system:String>
+  <system:String x:Key="WorthALookLowCoverageFormat">最近の接続のうち通信量が分かるのは {0:P0} だけなので、普段と違う量を見逃すことがあります。</system:String>
+  <system:String x:Key="WorthALookNothing">このPCの普段と比べて、目立つ送信はありませんでした。</system:String>
+  <system:String x:Key="WorthALookCaveat">調べ始める手がかりで、判定ではありません。ご自身のアップロードや更新もここに出ます。少ない量、ブラウザ、仮想マシン、ネットワーク内の転送は判定の対象外です。</system:String>
+  <system:String x:Key="WorthALookThisPc">このPC全体</system:String>
+  <system:String x:Key="WorthALookNewPairFormat">{0}: 初めての組み合わせで、1週間以内に {1} 送信</system:String>
+  <system:String x:Key="WorthALookAboveUsualFormat">{0}: 1日に {1} 送信（普段は多くて {2}）</system:String>
+  <system:String x:Key="WorthALookMachineFormat">{0}: 24時間に {1} 送信（普段は多くて {2}）</system:String>
 </ResourceDictionary>

@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 32;
+    private const int CurrentSchemaVersion = 33;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -608,7 +608,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 28) { MigrateVersion28To29(); version = 29; }
         if (version == 29) { MigrateVersion29To30(); version = 30; }
         if (version == 30) { MigrateVersion30To31(); version = 31; }
-        if (version == 31) MigrateVersion31To32();
+        if (version == 31) { MigrateVersion31To32(); version = 32; }
+        if (version == 32) MigrateVersion32To33();
         ValidateSchema();
         }
         catch { ReportMigrationFailed(startedAt); throw; }
@@ -3580,6 +3581,7 @@ public sealed partial class ObservationStore : IDisposable
                 OutboundAnomalyDetails = ReadOutboundAnomaliesLocked(from, to, 5),
                 OutboundBaselineReady = ReadUsableBaselineWindowsLocked() >= 96,
                 OutboundBaseline = ReadOutboundBaselineSummaryLocked(),
+                OutboundCandidates = ReadOutboundCandidatesLocked(DateTimeOffset.UtcNow),
                 SleepPeriods = ReadSleepPeriodsLocked(from, to),
                 MonitoringGaps = ReadMonitoringGaps(from, to),
             };
@@ -3934,6 +3936,11 @@ public sealed partial class ObservationStore : IDisposable
             if (db != 0) WinSqlite.Close(db);
             db = 0;
         }
+    }
+
+    internal void ExecuteForTesting(string sql)
+    {
+        lock (gate) Execute(sql);
     }
 
     internal void LimitGrowthForTesting(int additionalPages)
