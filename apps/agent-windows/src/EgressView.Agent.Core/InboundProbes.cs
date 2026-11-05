@@ -14,9 +14,9 @@ public sealed record InboundProbeSummary(DateTimeOffset WindowStart, int WindowS
 /// The Windows counterpart of the Mac's packet-filter counter, fed by a
 /// different source: Microsoft-Windows-TCPIP reports a TCP segment or UDP
 /// datagram it dropped because nothing listens on the port
-/// (TcpipTransportPacketDrops, reason 4), with the sender's address. That is what a probe of a closed port looks
-/// like from here; a probe of an open port becomes a connection and is seen
-/// with the rest of the traffic. The event carries no TCP flags, so the Mac's
+/// (TcpipTransportPacketDrops, reason 4), with the sender's address. That is
+/// what a probe of a closed port looks like from here; a probe of an open port
+/// becomes a connection and is seen with the rest of the traffic. The event carries no TCP flags, so the Mac's
 /// "SYN without ACK" test has no equivalent; a stray late segment to a port a
 /// connection has just left is told apart by the port instead -- those land
 /// on the ephemeral range, which is not counted, as on the Mac. Measured on
@@ -24,11 +24,14 @@ public sealed record InboundProbeSummary(DateTimeOffset WindowStart, int WindowS
 ///
 /// UDP is counted the same way, in its own tally. Measured on 2026-11-03: a
 /// Mac's datagrams to ports 1-30 showed as 30 ports, each with a second row
-/// whose ports are both 0 (not counted, as port 0 never is). Over the 2 h 40 min
-/// around it, no other LAN device's drops landed below the ephemeral range:
+/// whose ports are both 0 (not counted, as port 0 never is). A datagram sent
+/// to everyone is dropped the same way wherever nothing listens for it, and is
+/// discovery rather than a probe of this PC, so only drops addressed to this
+/// PC count, as on the Mac: of 4,160 drops below the ephemeral range in the
+/// 2 h 40 min around that measurement, all but 39 were sent to everyone.
 /// Windows picks a UDP socket's own port from 49152 up, so a late reply to a
-/// closed socket is not counted -- the Mac had to remember what it sent
-/// (#833) because macOS picks from 1024.
+/// closed socket is not counted -- the Mac had to remember what it sent (#833)
+/// because macOS picks from 1024.
 ///
 /// Only addresses and port numbers are kept, never content.
 public sealed class InboundProbeCounter
@@ -52,7 +55,7 @@ public sealed class InboundProbeCounter
     {
         if (localPort is <= 0 or >= EphemeralFloor) return;
         if (Normal(sourceAddress) is not { } source || Normal(localAddress) is not { } local || source == local) return;
-        if (!IsLanUnicast(source)) return;
+        if (!IsLanUnicast(source) || IsBroadcastOrMulticast(local)) return;
         var window = at.ToUnixTimeSeconds() / WindowSeconds * WindowSeconds;
         lock (gate)
         {
@@ -96,13 +99,19 @@ public sealed class InboundProbeCounter
         return address.ToString();
     }
 
-    /// A LAN address that is one device: not this network's broadcast or a
-    /// multicast group, which are discovery rather than probing.
+    /// A LAN address that is one device.
     static bool IsLanUnicast(string address) =>
-        PrivateAddress.NetworkName(address) == PrivateAddress.Lan
-        && IPAddress.TryParse(address, out var parsed)
-        && !(parsed.AddressFamily == AddressFamily.InterNetwork && parsed.GetAddressBytes()[3] == 255)
-        && !parsed.IsIPv6Multicast;
+        PrivateAddress.NetworkName(address) == PrivateAddress.Lan && !IsBroadcastOrMulticast(address);
+
+    /// This network's broadcast, the limited broadcast or a multicast group,
+    /// which are discovery rather than probing. The same ranges as the Mac.
+    static bool IsBroadcastOrMulticast(string address)
+    {
+        if (!IPAddress.TryParse(address, out var parsed)) return false;
+        if (parsed.AddressFamily != AddressFamily.InterNetwork) return parsed.IsIPv6Multicast;
+        var bytes = parsed.GetAddressBytes();
+        return bytes[3] == 255 || bytes[0] >= 224;
+    }
 }
 
 /// Inbound probe summaries waiting to go to the Hub with the next batch.
