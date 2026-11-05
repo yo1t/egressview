@@ -905,6 +905,12 @@
 
 /* Traffic worth a look (P3-192, P3-193 phase 2) */
 "Worth a look (last 14 days)" = "調べる候補（直近14日）";
+"Worth a look: still learning this Mac, so nothing can be judged yet." = "調べる候補: このMacを学習中のため、まだ判定できません。";
+"Worth a look: nothing stood out in the last 14 days." = "調べる候補: 直近14日に目立つ送信はありませんでした。";
+"Worth a look: %lld in the last 14 days. Click this card to open the list in Insights." = "調べる候補: 直近14日に%lld件あります。カードをクリックすると「インサイト」タブで一覧を開きます。";
+"Worth a look: %lld in the last 14 days, and unusual amounts can be missed here. Click this card to open Insights." = "調べる候補: 直近14日に%lld件です。ここでは多すぎる送信を見逃すことがあります。カードをクリックすると「インサイト」タブを開きます。";
+"Show all %lld" = "すべて表示（%lld件）";
+"Open the Insights tab" = "「インサイト」タブを開く";
 "Still learning this Mac: %1$@ of %2$lld monitored hours. Until then nothing can be judged, which is not the same as nothing unusual." = "このMacの普段を学習中です（監視した %2$lld 時間のうち %1$@ 時間）。それまでは判定できません。普段と違う通信が無いという意味ではありません。";
 "Only %lld%% of recent connections have a byte count, so unusual amounts can be missed here. Counting from packet headers in Settings raises it." = "最近の接続のうち通信量が分かるのは %lld%% だけなので、普段と違う量を見逃すことがあります。設定の「パケットのヘッダーから数える」をオンにすると増えます。";
 "Nothing stood out against this Mac's usual traffic." = "このMacの普段と比べて、目立つ送信はありませんでした。";

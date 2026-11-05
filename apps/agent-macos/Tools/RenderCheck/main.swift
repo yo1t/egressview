@@ -148,7 +148,22 @@ enum RenderCheck {
                 save(AgentOutboundCandidatesView(report: report).padding(16),
                      width: 420, height: 300,
                      to: "\(output)/outbound-candidates-\(name)-\(language).png")
+                save(AgentOutboundAnomalyList(records: [], total: 0, candidates: report).padding(16),
+                     width: 432, height: 200,
+                     to: "\(output)/outbound-tile-\(name)-\(language).png")
             }
+            let many = (0..<12).map { index in
+                OutboundCandidate(kind: .aboveUsual, at: day.addingTimeInterval(Double(-index) * 86_400),
+                                  application: "app\(index)", destination: "one.example",
+                                  bytesOut: 35_000_000, usualBytesOut: 6_400_000)
+            }
+            let long = OutboundCandidateReport(state: .ready, candidates: many, total: 60)
+            save(AgentOutboundCandidatesView(report: long).padding(16),
+                 width: 760, height: 520,
+                 to: "\(output)/outbound-candidates-collapsed-\(language).png")
+            save(AgentOutboundCandidatesView(report: long, showsAll: true).padding(16),
+                 width: 760, height: 600,
+                 to: "\(output)/outbound-candidates-expanded-\(language).png")
 
             for (width, height) in [(1440.0, 900.0), (1100.0, 700.0), (820.0, 560.0)] {
                 save(AgentWorldMapChart(atlas: atlas, visitedCountryCodes: visited),

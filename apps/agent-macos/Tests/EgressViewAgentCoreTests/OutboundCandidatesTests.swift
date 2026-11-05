@@ -1,5 +1,6 @@
 import XCTest
 @testable import EgressViewAgentCore
+import EgressViewAgentUI
 
 /// The list asks "does this differ from this Mac's own usual level", and says
 /// when it cannot tell (P3-192, P3-193 phase 2).
@@ -117,5 +118,36 @@ final class OutboundCandidatesTests: XCTestCase {
         let days = [Rules.PairDay(day: day(9), pair: pair, bytesOut: 5 * mib)]
         let report = evaluate(hours: hours(days: 10), days: days, firstSeen: [pair: day(9)], now: now(24))
         XCTAssertTrue(report.candidates.isEmpty)
+    }
+
+    func testAListOverTheLimitKeepsTheNewestAndCountsThemAll() {
+        let pairs = (0..<(Rules.listLimit + 5)).map {
+            Rules.PairKey(application: "tool\($0)", destination: "one.example")
+        }
+        let days = pairs.map { Rules.PairDay(day: day(9), pair: $0, bytesOut: 5 * mib) }
+        let firstSeen = Dictionary(uniqueKeysWithValues: pairs.map { ($0, day(9)) })
+        let report = evaluate(hours: hours(days: 10), days: days, firstSeen: firstSeen, now: now(10))
+        XCTAssertEqual(report.candidates.count, Rules.listLimit)
+        XCTAssertEqual(report.total, Rules.listLimit + 5)
+    }
+
+    func testTheTileSummaryNeverReadsAsAllClearWhenItCannotTell() {
+        // Compared with each other, because the words follow the app's language.
+        let summary = AgentOutboundCandidatesView.summary
+        let allClear = summary(OutboundCandidateReport(state: .ready))
+        XCTAssertNotEqual(summary(OutboundCandidateReport(state: .learning(monitoredHours: 41.5))), allClear,
+                          "判定できないのに異常なしと読めてはいけない")
+        XCTAssertNotEqual(summary(OutboundCandidateReport(state: .lowByteCoverage(share: 0.19))), allClear,
+                          "判定できないのに異常なしと読めてはいけない")
+        XCTAssertNotEqual(
+            summary(OutboundCandidateReport(state: .lowByteCoverage(share: 0.19), total: 3)),
+            summary(OutboundCandidateReport(state: .ready, total: 3)),
+            "取得率が低いときは件数だけで終わらない"
+        )
+    }
+
+    func testTheTileSummaryGivesTheWholeCountNotTheListedOne() {
+        let report = OutboundCandidateReport(state: .ready, candidates: [], total: 60)
+        XCTAssertTrue(AgentOutboundCandidatesView.summary(report).contains("60"))
     }
 }

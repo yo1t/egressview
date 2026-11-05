@@ -177,7 +177,9 @@ public struct AgentOutboundAnomalyList: View {
                 .fixedSize(horizontal: false, vertical: true)
             if let candidates {
                 Divider()
-                AgentOutboundCandidatesView(report: candidates)
+                Text(AgentOutboundCandidatesView.summary(candidates))
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let usual {
                 Divider()
@@ -190,14 +192,44 @@ public struct AgentOutboundAnomalyList: View {
 /// Traffic worth a look against this Mac's usual level (P3-192, P3-193 phase
 /// 2). Says what stayed out of view beside what it found, because an empty
 /// list here must not read as "nothing left this Mac".
+///
+/// Lives in Insights, not in the overview tile's popover: fourteen days do not
+/// belong beside a period picker, and a list the pointer has to rest on to see
+/// is a list nobody finds. The popover keeps `summary(_:)`.
 public struct AgentOutboundCandidatesView: View {
-    let report: OutboundCandidateReport
+    /// Opens short because the AI conversation sits below it on the same screen.
+    public static let collapsedCount = 10
 
-    public init(report: OutboundCandidateReport) { self.report = report }
+    let report: OutboundCandidateReport
+    @State private var showsAll: Bool
+
+    public init(report: OutboundCandidateReport, showsAll: Bool = false) {
+        self.report = report
+        _showsAll = State(initialValue: showsAll)
+    }
+
+    /// One line for the overview tile. A low share keeps its warning here,
+    /// because a count alone would read as all there is.
+    public static func summary(_ report: OutboundCandidateReport) -> String {
+        switch report.state {
+        case .learning:
+            return L("Worth a look: still learning this Mac, so nothing can be judged yet.")
+        case .lowByteCoverage:
+            return L("Worth a look: %lld in the last 14 days, and unusual amounts can be missed here. Click this card to open Insights.", report.total)
+        case .ready:
+            return report.total == 0
+                ? L("Worth a look: nothing stood out in the last 14 days.")
+                : L("Worth a look: %lld in the last 14 days. Click this card to open the list in Insights.", report.total)
+        }
+    }
+
+    private var visible: [OutboundCandidate] {
+        showsAll ? report.candidates : Array(report.candidates.prefix(Self.collapsedCount))
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(L("Worth a look (last 14 days)")).font(.headline)
+            Label(L("Worth a look (last 14 days)"), systemImage: "magnifyingglass").font(.headline)
             switch report.state {
             case .learning(let hours):
                 note(L(
@@ -217,13 +249,18 @@ public struct AgentOutboundCandidatesView: View {
                 if report.candidates.isEmpty {
                     note(L("Nothing stood out against this Mac's usual traffic."))
                 }
-                ForEach(report.candidates) { candidate in
+                ForEach(visible) { candidate in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title(candidate)).font(.callout)
                         Text(detail(candidate)).font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                if report.total > report.candidates.count {
+                if visible.count < report.candidates.count {
+                    Button(L("Show all %lld", report.candidates.count)) { showsAll = true }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
+                        .font(.caption)
+                } else if report.total > report.candidates.count {
                     Text(L("Showing the newest %1$lld of %2$lld.", report.candidates.count, report.total))
                         .font(.caption).foregroundStyle(.secondary)
                 }

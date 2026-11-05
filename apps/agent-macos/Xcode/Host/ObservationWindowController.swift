@@ -213,8 +213,10 @@ struct AgentMainView: View {
                             monitoringStatus: model.monitoringStatus,
                             storage: model.storage,
                             threats: model.threats,
+                            outboundCandidates: model.outboundCandidates,
                             usesRolledUpHistory: model.usesRolledUpHistory,
-                            openThreats: { selection.tab = .threats }
+                            openThreats: { selection.tab = .threats },
+                            openInsights: { selection.tab = .insights }
                         )
                         .frame(maxWidth: .infinity)
                         .frame(height: metrics.topHeight)
@@ -259,6 +261,7 @@ struct AgentMainView: View {
                 snapshot: model.localInsights,
                 monitoringStatus: model.monitoringStatus,
                 isRefreshing: model.isRefreshing,
+                outboundCandidates: model.outboundCandidates,
                 ollama: model.ollama
             )
             .padding(.horizontal, 20)
@@ -928,6 +931,7 @@ struct AgentOverviewPanel: View {
     let monitoringStatus: String
     let storage: ObservationStoreStatistics?
     let threats: ThreatReport
+    let outboundCandidates: OutboundCandidateReport?
     /// Whether this period leans on hours whose individual records have aged
     /// out. The store answered this and the view model published it; nothing
     /// displayed it, so the connection log for an old period looked empty for
@@ -936,6 +940,8 @@ struct AgentOverviewPanel: View {
     /// The threat tile is where the eye lands on a match; the list is a tab
     /// away, so the tile takes the reader there.
     let openThreats: () -> Void
+    /// The candidates are listed in Insights, so the anomaly tile goes there.
+    let openInsights: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -988,17 +994,25 @@ struct AgentOverviewPanel: View {
                     L("Sent"), trafficValue(summary.bytesOut),
                     "arrow.up.circle"
                 )
-                tile(
-                    L("Outbound anomalies"), summary.outboundAnomalyCount.formatted(),
-                    summary.outboundAnomalyCount > 0
-                        ? "exclamationmark.arrow.triangle.2.circlepath" : "checkmark.shield"
-                )
-                .agentHoverPopover {
-                    AgentOutboundAnomalyList(
-                        records: summary.outboundAnomalies, total: summary.outboundAnomalyCount,
-                        usual: summary.outboundBaseline, candidates: summary.outboundCandidates
+                Button(action: openInsights) {
+                    tile(
+                        L("Outbound anomalies"), summary.outboundAnomalyCount.formatted(),
+                        summary.outboundAnomalyCount > 0
+                            ? "exclamationmark.arrow.triangle.2.circlepath" : "checkmark.shield"
                     )
+                    .contentShape(Rectangle())
+                    .agentHoverPopover {
+                        AgentOutboundAnomalyList(
+                            records: summary.outboundAnomalies, total: summary.outboundAnomalyCount,
+                            usual: summary.outboundBaseline, candidates: outboundCandidates
+                        )
+                    }
                 }
+                .buttonStyle(.plain)
+                .onHover { inside in
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+                .accessibilityHint(L("Open the Insights tab"))
                 tile(L("Monitored"), "\(Int((coverage.share * 100).rounded()))%", "clock.badge.checkmark")
                 // In the ordinary style whatever the value. A low share is a
                 // fact about the traffic -- browsers resolving over DoH,

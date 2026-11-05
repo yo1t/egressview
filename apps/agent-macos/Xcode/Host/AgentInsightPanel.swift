@@ -7,6 +7,9 @@ struct AgentInsightPanel: View {
     let snapshot: AgentLocalInsightSnapshot?
     let monitoringStatus: String
     let isRefreshing: Bool
+    /// Not part of `snapshot`: that is the bounded context an AI request may
+    /// send, and these stay on this Mac.
+    let outboundCandidates: OutboundCandidateReport?
     @ObservedObject var ollama: AgentOllamaController
 
     @State private var question = ""
@@ -23,6 +26,7 @@ struct AgentInsightPanel: View {
                 if let snapshot {
                     metrics(snapshot.context)
                     changes(snapshot.context)
+                    candidates
                     preview(snapshot)
                     conversation(snapshot)
                 } else {
@@ -39,6 +43,9 @@ struct AgentInsightPanel: View {
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity, minHeight: 280)
+                    // Fourteen days, so an empty selected period says nothing
+                    // about them.
+                    candidates
                 }
             }
             .padding(18)
@@ -429,6 +436,16 @@ struct AgentInsightPanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(cardBackground)
+    }
+
+    @ViewBuilder
+    private var candidates: some View {
+        if let outboundCandidates {
+            AgentOutboundCandidatesView(report: outboundCandidates)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(cardBackground)
+        }
     }
 
     private func preview(_ snapshot: AgentLocalInsightSnapshot) -> some View {
