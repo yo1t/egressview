@@ -267,6 +267,8 @@ public struct AgentOutboundCandidatesView: View {
                 note(L("A place to start looking, not a verdict: your own uploads and updates appear here too. Small amounts, browsers, virtual machines and transfers within your network are not judged."))
             }
         }
+        // A name here is what gets searched for or passed on next.
+        .textSelection(.enabled)
     }
 
     private func note(_ text: String) -> some View {
