@@ -1,3 +1,4 @@
+import AppKit
 import EgressViewAgentCore
 import SwiftUI
 
@@ -7,11 +8,17 @@ import SwiftUI
 /// a popover rather than a tooltip because what it holds is a small table: a
 /// tooltip is one run of text, appears after about a second, and cannot be
 /// laid out.
+///
+/// Opened and closed by the pointer alone, through an `NSPopover` rather than
+/// SwiftUI's `.popover`. That one is transient: the first click anywhere only
+/// closes it, so a tile that can be clicked took two clicks once its popover
+/// was open. Seen on 0.5.139 build 220.
 public struct AgentHoverPopover<Detail: View>: ViewModifier {
     let isEnabled: Bool
     let detail: () -> Detail
     @State private var isShown = false
     @State private var pending: Task<Void, Never>?
+    @Environment(\.locale) private var locale
 
     public init(isEnabled: Bool = true, @ViewBuilder detail: @escaping () -> Detail) {
         self.isEnabled = isEnabled
@@ -31,12 +38,63 @@ public struct AgentHoverPopover<Detail: View>: ViewModifier {
                     if !Task.isCancelled { isShown = true }
                 }
             }
-            .onDisappear { pending?.cancel() }
-            .popover(isPresented: $isShown, arrowEdge: .bottom) {
+            .onDisappear { dismiss() }
+            // Nothing else closes it now, and the pointer sends no exit when
+            // the app goes to the back or the window closes under it.
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                dismiss()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+                dismiss()
+            }
+            .background(AgentPopoverAnchor(isShown: isShown) {
                 detail()
                     .padding(14)
                     .frame(width: 400, alignment: .leading)
-            }
+                    // A hosting controller starts a new environment.
+                    .environment(\.locale, locale)
+            })
+    }
+
+    private func dismiss() {
+        pending?.cancel()
+        isShown = false
+    }
+}
+
+/// The view an `NSPopover` hangs from, and the popover's lifetime.
+private struct AgentPopoverAnchor<Detail: View>: NSViewRepresentable {
+    let isShown: Bool
+    let detail: () -> Detail
+
+    final class Coordinator {
+        var popover: NSPopover?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard isShown else {
+            context.coordinator.popover?.close()
+            context.coordinator.popover = nil
+            return
+        }
+        guard context.coordinator.popover == nil, view.window != nil else { return }
+        let controller = NSHostingController(rootView: detail())
+        controller.sizingOptions = [.preferredContentSize]
+        let popover = NSPopover()
+        popover.behavior = .applicationDefined
+        popover.animates = false
+        popover.contentViewController = controller
+        context.coordinator.popover = popover
+        popover.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        coordinator.popover?.close()
+        coordinator.popover = nil
     }
 }
 
