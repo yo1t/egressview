@@ -905,6 +905,12 @@
 
 /* Traffic worth a look (P3-192, P3-193 phase 2) */
 "Worth a look (last 14 days)" = "Worth a look (last 14 days)";
+"Worth a look: still learning this Mac, so nothing can be judged yet." = "Worth a look: still learning this Mac, so nothing can be judged yet.";
+"Worth a look: nothing stood out in the last 14 days." = "Worth a look: nothing stood out in the last 14 days.";
+"Worth a look: %lld in the last 14 days. Click this card to open the list in Insights." = "Worth a look: %lld in the last 14 days. Click this card to open the list in Insights.";
+"Worth a look: %lld in the last 14 days, and unusual amounts can be missed here. Click this card to open Insights." = "Worth a look: %lld in the last 14 days, and unusual amounts can be missed here. Click this card to open Insights.";
+"Show all %lld" = "Show all %lld";
+"Open the Insights tab" = "Open the Insights tab";
 "Still learning this Mac: %1$@ of %2$lld monitored hours. Until then nothing can be judged, which is not the same as nothing unusual." = "Still learning this Mac: %1$@ of %2$lld monitored hours. Until then nothing can be judged, which is not the same as nothing unusual.";
 "Only %lld%% of recent connections have a byte count, so unusual amounts can be missed here. Counting from packet headers in Settings raises it." = "Only %lld%% of recent connections have a byte count, so unusual amounts can be missed here. Counting from packet headers in Settings raises it.";
 "Nothing stood out against this Mac's usual traffic." = "Nothing stood out against this Mac's usual traffic.";

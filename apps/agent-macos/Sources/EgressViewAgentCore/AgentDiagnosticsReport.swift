@@ -380,6 +380,9 @@ public struct AgentDiagnosticsReport: Sendable {
                 case .ready: state = "ready"
                 }
                 lines.append(row("candidates state", state))
+                // The rows below count the listed candidates, which stop at the
+                // list limit; this is how many there were.
+                lines.append(row("candidates total", "\(report.total)"))
                 for kind in [OutboundCandidate.Kind.newPair, .aboveUsual, .machine] {
                     let count = report.candidates.filter { $0.kind == kind }.count
                     lines.append(row("candidates \(kind.rawValue)", "\(count)"))
