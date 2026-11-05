@@ -393,7 +393,7 @@ public partial class MainWindow : Window
         // Which windows, how much against the usual, and who sent it -- where
         // the pointer rests on the card, not only how many (P3-180).
         AnomalyDetailView.Attach(OutboundAnomalyCard,
-            AnomalyDetailView.List(data.OutboundAnomalyDetails, data.OutboundAnomalies, data.OutboundBaselineReady, data.OutboundBaseline));
+            AnomalyDetailView.List(data.OutboundAnomalyDetails, data.OutboundAnomalies, data.OutboundBaselineReady, data.OutboundBaseline, data.OutboundCandidates));
         SetCoverage(data.CoverageRatio);
         StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.StorageBytes));
         MonitoringSince.Text = data.MonitoringStartedAt is { } started ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MonitoringSince"), started.LocalDateTime.ToString("g")) : string.Empty;
@@ -564,6 +564,9 @@ public partial class MainWindow : Window
             : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DurationMinutes"), minutes);
     }
 
+    private bool showAllCandidates;
+    private string? shownCandidates;
+
     private async Task RefreshInsightsAsync()
     {
         try
@@ -596,9 +599,47 @@ public partial class MainWindow : Window
                 ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("InsightTopAppFormat"), topApp.Name, topApp.RawValue) : string.Empty;
             InsightTopDestination.Text = destinations.FirstOrDefault() is { } topDestination
                 ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("InsightTopDestinationFormat"), topDestination.Name, topDestination.RawValue) : string.Empty;
+            ShowOutboundCandidates(current.OutboundCandidates);
             RefreshAiSurface();
         }
         catch (Exception exception) { InsightChangeSummary.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+    }
+
+    /// Drawn again only when something in it changed: this tab refreshes every
+    /// few seconds, and redrawing would drop a selection in the middle of
+    /// copying a name.
+    private void ShowOutboundCandidates(OutboundCandidateReport? report)
+    {
+        if (report is null)
+        {
+            OutboundCandidatesCard.Visibility = Visibility.Collapsed;
+            shownCandidates = null;
+            return;
+        }
+        var shown = $"{LocalizationManager.Text("WorthALook")}|{showAllCandidates}|{JsonSerializer.Serialize(report)}";
+        if (shown == shownCandidates) return;
+        shownCandidates = shown;
+        OutboundCandidatesCard.Child = OutboundCandidatesView.Build(report, showAllCandidates, () =>
+        {
+            showAllCandidates = true;
+            ShowOutboundCandidates(report);
+        });
+        OutboundCandidatesCard.Visibility = Visibility.Visible;
+    }
+
+    private void OutboundAnomalyCard_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e) => OpenCandidates();
+
+    private void OutboundAnomalyCard_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key is not (System.Windows.Input.Key.Enter or System.Windows.Input.Key.Space)) return;
+        e.Handled = true;
+        OpenCandidates();
+    }
+
+    private void OpenCandidates()
+    {
+        MainTabs.SelectedIndex = 1;
+        Dispatcher.BeginInvoke(() => OutboundCandidatesCard.BringIntoView(), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     internal static string InsightDelta(long current, long previous)

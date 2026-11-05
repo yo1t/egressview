@@ -39,7 +39,7 @@ internal static class AnomalyDetailView
 
     /// The period's anomalies for the overview card, newest first.
     internal static FrameworkElement List(IReadOnlyList<OutboundAnomalyRecord> records, int total, bool baselineReady,
-        OutboundBaselineSummary? usual = null)
+        OutboundBaselineSummary? usual = null, OutboundCandidateReport? candidates = null)
     {
         var panel = new StackPanel { Width = 420 };
         panel.Children.Add(Heading(LocalizationManager.Text("AnomaliesInPeriod"), 15));
@@ -48,7 +48,7 @@ internal static class AnomalyDetailView
             // "None found" and "cannot judge yet" are different answers, as
             // the dash on the card already says.
             panel.Children.Add(Secondary(LocalizationManager.Text(total == 0 && !baselineReady ? "AnomalyBaselineNotReady" : "NoAnomaliesInPeriod"), 6));
-            AddUsual(panel, usual);
+            AddUsual(panel, usual, candidates);
             return panel;
         }
         for (var index = 0; index < records.Count; index++)
@@ -59,7 +59,7 @@ internal static class AnomalyDetailView
         if (total > records.Count)
             panel.Children.Add(Secondary(string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ShowingNewestFormat"), records.Count, total), 10));
         panel.Children.Add(Secondary(LocalizationManager.Text("AnomalyNotMalware"), 10));
-        AddUsual(panel, usual);
+        AddUsual(panel, usual, candidates);
         return panel;
     }
 
@@ -72,16 +72,19 @@ internal static class AnomalyDetailView
     /// destinations with a name is shown beside it because it differs by
     /// machine -- 44.6% on one Windows PC, 82.5% on a Mac -- and it decides
     /// how well "a destination this app has not used before" can be told.
-    private static void AddUsual(StackPanel panel, OutboundBaselineSummary? usual)
+    private static void AddUsual(StackPanel panel, OutboundBaselineSummary? usual, OutboundCandidateReport? candidates)
     {
         if (usual is null) return;
         panel.Children.Add(Rule());
         panel.Children.Add(Heading(LocalizationManager.Text("UsualOnThisPc"), 13));
         if (usual.HoursRecorded == 0)
-        {
             panel.Children.Add(Secondary(LocalizationManager.Text("UsualNotLearnedYet"), 6));
-            return;
-        }
+        else AddUsualFacts(panel, usual);
+        if (candidates is not null) panel.Children.Add(Secondary(OutboundCandidatesView.Summary(candidates), 8));
+    }
+
+    private static void AddUsualFacts(StackPanel panel, OutboundBaselineSummary usual)
+    {
         var facts = new Grid { Margin = new Thickness(0, 6, 0, 0) };
         facts.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         facts.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -96,7 +99,6 @@ internal static class AnomalyDetailView
             AddFact(facts, LocalizationManager.Text("UsualNamed"), named.ToString("P0", culture));
         AddFact(facts, LocalizationManager.Text("UsualPairs"), usual.PairsKnown.ToString("N0", culture));
         panel.Children.Add(facts);
-        panel.Children.Add(Secondary(LocalizationManager.Text("UsualNotJudgedYet"), 8));
     }
 
     /// One flagged fifteen minutes, explained as far as what was kept allows.
@@ -211,7 +213,7 @@ internal static class AnomalyDetailView
     private static string Window(OutboundAnomalyRecord record) =>
         $"{record.WindowStart.LocalDateTime.ToString("g", CultureInfo.CurrentCulture)}–{record.WindowEnd.LocalDateTime.ToString("t", CultureInfo.CurrentCulture)}";
 
-    private static string Bytes(ulong value) => FlowRow.FormatBytes((long)Math.Min(value, long.MaxValue));
+    internal static string Bytes(ulong value) => FlowRow.FormatBytes((long)Math.Min(value, long.MaxValue));
 
     private static FrameworkElement Contributors(string title, IReadOnlyList<OutboundContributor> rows)
     {
