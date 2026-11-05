@@ -902,4 +902,14 @@
 "median %1$@, 99th percentile %2$@ (over %3$lld fully monitored hours)" = "median %1$@, 99th percentile %2$@ (over %3$lld fully monitored hours)";
 "Destinations with a name" = "Destinations with a name";
 "App and destination pairs seen" = "App and destination pairs seen";
-"Measured only. Nothing is judged against this yet." = "Measured only. Nothing is judged against this yet.";
+
+/* Traffic worth a look (P3-192, P3-193 phase 2) */
+"Worth a look (last 14 days)" = "Worth a look (last 14 days)";
+"Still learning this Mac: %1$@ of %2$lld monitored hours. Until then nothing can be judged, which is not the same as nothing unusual." = "Still learning this Mac: %1$@ of %2$lld monitored hours. Until then nothing can be judged, which is not the same as nothing unusual.";
+"Only %lld%% of recent connections have a byte count, so unusual amounts can be missed here. Counting from packet headers in Settings raises it." = "Only %lld%% of recent connections have a byte count, so unusual amounts can be missed here. Counting from packet headers in Settings raises it.";
+"Nothing stood out against this Mac's usual traffic." = "Nothing stood out against this Mac's usual traffic.";
+"A place to start looking, not a verdict: your own uploads and updates appear here too. Small amounts, browsers, virtual machines and transfers within your network are not judged." = "A place to start looking, not a verdict: your own uploads and updates appear here too. Small amounts, browsers, virtual machines and transfers within your network are not judged.";
+"This Mac as a whole" = "This Mac as a whole";
+"%1$@: first time together, %2$@ sent within a week" = "%1$@: first time together, %2$@ sent within a week";
+"%1$@: %2$@ sent in a day, usually up to %3$@" = "%1$@: %2$@ sent in a day, usually up to %3$@";
+"%1$@: %2$@ sent in 24 hours, usually up to %3$@" = "%1$@: %2$@ sent in 24 hours, usually up to %3$@";

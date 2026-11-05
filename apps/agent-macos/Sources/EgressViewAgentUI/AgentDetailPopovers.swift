@@ -143,11 +143,16 @@ public struct AgentOutboundAnomalyList: View {
     let records: [OutboundAnomalyRecord]
     let total: Int
     let usual: OutboundBaselineSummary?
+    let candidates: OutboundCandidateReport?
 
-    public init(records: [OutboundAnomalyRecord], total: Int, usual: OutboundBaselineSummary? = nil) {
+    public init(
+        records: [OutboundAnomalyRecord], total: Int, usual: OutboundBaselineSummary? = nil,
+        candidates: OutboundCandidateReport? = nil
+    ) {
         self.records = records
         self.total = total
         self.usual = usual
+        self.candidates = candidates
     }
 
     public var body: some View {
@@ -170,10 +175,83 @@ public struct AgentOutboundAnomalyList: View {
             Text(L("This is a behavioural anomaly, not a malware verdict."))
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let candidates {
+                Divider()
+                AgentOutboundCandidatesView(report: candidates)
+            }
             if let usual {
                 Divider()
                 AgentOutboundBaselineView(usual: usual)
             }
+        }
+    }
+}
+
+/// Traffic worth a look against this Mac's usual level (P3-192, P3-193 phase
+/// 2). Says what stayed out of view beside what it found, because an empty
+/// list here must not read as "nothing left this Mac".
+public struct AgentOutboundCandidatesView: View {
+    let report: OutboundCandidateReport
+
+    public init(report: OutboundCandidateReport) { self.report = report }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L("Worth a look (last 14 days)")).font(.headline)
+            switch report.state {
+            case .learning(let hours):
+                note(L(
+                    "Still learning this Mac: %1$@ of %2$lld monitored hours. Until then nothing can be judged, which is not the same as nothing unusual.",
+                    hours.formatted(.number.precision(.fractionLength(1))),
+                    OutboundCandidateRules.learningSeconds / 3600
+                ))
+            case .lowByteCoverage(let share):
+                note(L(
+                    "Only %lld%% of recent connections have a byte count, so unusual amounts can be missed here. Counting from packet headers in Settings raises it.",
+                    Int((share * 100).rounded())
+                ))
+            case .ready:
+                EmptyView()
+            }
+            if case .learning = report.state {} else {
+                if report.candidates.isEmpty {
+                    note(L("Nothing stood out against this Mac's usual traffic."))
+                }
+                ForEach(report.candidates) { candidate in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title(candidate)).font(.callout)
+                        Text(detail(candidate)).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if report.total > report.candidates.count {
+                    Text(L("Showing the newest %1$lld of %2$lld.", report.candidates.count, report.total))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                note(L("A place to start looking, not a verdict: your own uploads and updates appear here too. Small amounts, browsers, virtual machines and transfers within your network are not judged."))
+            }
+        }
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func title(_ candidate: OutboundCandidate) -> String {
+        guard let application = candidate.application, let destination = candidate.destination else {
+            return L("This Mac as a whole")
+        }
+        return "\(application) → \(destination)"
+    }
+
+    private func detail(_ candidate: OutboundCandidate) -> String {
+        let day = candidate.at.formatted(date: .abbreviated, time: .omitted)
+        let sent = AgentOutboundBaselineView.bytes(candidate.bytesOut)
+        let usual = AgentOutboundBaselineView.bytes(candidate.usualBytesOut ?? 0)
+        switch candidate.kind {
+        case .newPair: return L("%1$@: first time together, %2$@ sent within a week", day, sent)
+        case .aboveUsual: return L("%1$@: %2$@ sent in a day, usually up to %3$@", day, sent, usual)
+        case .machine: return L("%1$@: %2$@ sent in 24 hours, usually up to %3$@", day, sent, usual)
         }
     }
 }
@@ -216,9 +294,6 @@ public struct AgentOutboundBaselineView: View {
                     usual.namedShare.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
                 row(L("App and destination pairs seen"), usual.pairsKnown.formatted())
             }
-            Text(L("Measured only. Nothing is judged against this yet."))
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

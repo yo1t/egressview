@@ -21,6 +21,9 @@ struct AgentPeriodSummary: Equatable {
     /// What this Mac usually sends, over all it has learned rather than this
     /// period (P3-192 phase 1). Nil when it could not be read.
     var outboundBaseline: OutboundBaselineSummary?
+    /// Worth a look against that usual level (P3-192 phase 2). Nil when it
+    /// could not be read.
+    var outboundCandidates: OutboundCandidateReport?
 }
 
 /// What one line of the connection log stands for (P3-107 stage 3).
@@ -724,7 +727,8 @@ final class AgentMainViewModel: ObservableObject {
                         outboundAnomalyCount: try store.outboundAnomalyCount(from: from, to: to),
                         outboundAnomalies: try store.outboundAnomalies(from: from, to: to),
                         destinationNames: try store.destinationNameCoverage(from: from, to: to),
-                        outboundBaseline: try? store.outboundBaselineSummary()
+                        outboundBaseline: try? store.outboundBaselineSummary(),
+                        outboundCandidates: try? store.outboundCandidates()
                     )
                     let buckets = try store.appTimeline(
                         from: from, to: to, buckets: VisualizationSelection.bucketCount

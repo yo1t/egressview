@@ -2686,6 +2686,51 @@ public final class ObservationStore: @unchecked Sendable {
         }
     }
 
+    /// What is worth a look against this Mac's usual level (P3-192, P3-193
+    /// phase 2). Read from the bounded baseline tables, never the raw history.
+    public func outboundCandidates(now: Date = Date()) throws -> OutboundCandidateReport {
+        try lock.withLock {
+            var hours: [OutboundCandidateRules.Hour] = []
+            let hourRows = try prepare("""
+            SELECT hour_start, monitored_seconds, bytes_out, observations, observations_with_bytes
+            FROM baseline_hours ORDER BY hour_start
+            """)
+            defer { sqlite3_finalize(hourRows) }
+            while sqlite3_step(hourRows) == SQLITE_ROW {
+                hours.append(OutboundCandidateRules.Hour(
+                    start: sqlite3_column_double(hourRows, 0),
+                    monitoredSeconds: Int(sqlite3_column_int64(hourRows, 1)),
+                    bytesOut: UInt64(max(0, sqlite3_column_int64(hourRows, 2))),
+                    observations: Int(sqlite3_column_int64(hourRows, 3)),
+                    observationsWithBytes: Int(sqlite3_column_int64(hourRows, 4))
+                ))
+            }
+            var days: [OutboundCandidateRules.PairDay] = []
+            let dayRows = try prepare("SELECT day, application, destination, bytes_out FROM baseline_pair_days")
+            defer { sqlite3_finalize(dayRows) }
+            while sqlite3_step(dayRows) == SQLITE_ROW {
+                days.append(OutboundCandidateRules.PairDay(
+                    day: sqlite3_column_double(dayRows, 0),
+                    pair: .init(
+                        application: String(cString: sqlite3_column_text(dayRows, 1)),
+                        destination: String(cString: sqlite3_column_text(dayRows, 2))
+                    ),
+                    bytesOut: UInt64(max(0, sqlite3_column_int64(dayRows, 3)))
+                ))
+            }
+            var firstSeen: [OutboundCandidateRules.PairKey: Double] = [:]
+            let pairRows = try prepare("SELECT application, destination, first_seen FROM baseline_pairs")
+            defer { sqlite3_finalize(pairRows) }
+            while sqlite3_step(pairRows) == SQLITE_ROW {
+                firstSeen[.init(
+                    application: String(cString: sqlite3_column_text(pairRows, 0)),
+                    destination: String(cString: sqlite3_column_text(pairRows, 1))
+                )] = sqlite3_column_double(pairRows, 2)
+            }
+            return OutboundCandidateRules.evaluate(hours: hours, pairDays: days, firstSeen: firstSeen, now: now)
+        }
+    }
+
     private static func floorHour(_ seconds: Double) -> Double {
         (seconds / 3600).rounded(.down) * 3600
     }
