@@ -605,6 +605,28 @@ internal static class Entry
                     Path.Combine(output, $"anomaly-card-usual-{suffix}.png"));
                 SaveDetail(AnomalyDetailView.List([], 0, false, new OutboundBaselineSummary(0, 0, 0, null, 0, 0, 0, null, null, 0)),
                     Path.Combine(output, $"anomaly-card-usual-empty-{suffix}.png"));
+
+                // The list, opening short, then in the states that say why it is empty.
+                var day = new DateTimeOffset(at.Year, at.Month, at.Day, 0, 0, 0, TimeSpan.Zero);
+                OutboundCandidate[] found =
+                [
+                    new(OutboundCandidateKind.Machine, day, null, null, 9_200_000_000, 2_100_000_000),
+                    new(OutboundCandidateKind.AboveUsual, day.AddDays(-1), "OneDrive.Sync.Service", "sharepoint.com", 734_003_200, 41_943_040),
+                    .. Enumerable.Range(2, 10).Select(index => new OutboundCandidate(OutboundCandidateKind.NewPair, day.AddDays(-index),
+                        "Creative Cloud UI Helper", $"a-rather-long-destination-name-{index}.example.com", 1_572_864, null)),
+                ];
+                var listed = new OutboundCandidateReport(OutboundCandidateState.Ready, 412.5, 1, found, found.Length);
+                SaveDetail(Width(OutboundCandidatesView.Build(listed, false, () => { })), Path.Combine(output, $"candidates-collapsed-{suffix}.png"));
+                SaveDetail(Width(OutboundCandidatesView.Build(listed with { Total = 63 }, true, () => { })), Path.Combine(output, $"candidates-all-{suffix}.png"));
+                SaveDetail(Width(OutboundCandidatesView.Build(new(OutboundCandidateState.Learning, 128.4, 0, [], 0), false, () => { })),
+                    Path.Combine(output, $"candidates-learning-{suffix}.png"));
+                SaveDetail(Width(OutboundCandidatesView.Build(new(OutboundCandidateState.Ready, 412.5, 1, [], 0), false, () => { })),
+                    Path.Combine(output, $"candidates-nothing-{suffix}.png"));
+                SaveDetail(Width(OutboundCandidatesView.Build(new(OutboundCandidateState.LowByteCoverage, 412.5, 0.42, [found[0]], 1), false, () => { })),
+                    Path.Combine(output, $"candidates-low-coverage-{suffix}.png"));
+                SaveDetail(AnomalyDetailView.List([], 0, true, new OutboundBaselineSummary(412.5, 430, 320, at.AddDays(-20),
+                    13UL * 1024 * 1024, 57UL * 1024 * 1024, 317UL * 1024 * 1024, 0.626, 1.0, 1_594), listed),
+                    Path.Combine(output, $"anomaly-card-candidates-{suffix}.png"));
                 SaveDetail(AnomalyDetailView.Notice(new NotificationHistoryEntry(at.AddMinutes(20), "OutboundAnomaly", "EgressView Agent",
                     "17:00 に通常と異なる外向き通信がありました。送信 396.7 MiB。このPCの通常より大幅に多い量です。Agentを開いて確認してください。",
                     true, Anomaly: explained)), Path.Combine(output, $"notice-anomaly-{suffix}.png"));
@@ -632,6 +654,12 @@ internal static class Entry
 
     /// A detail panel as its tooltip draws it: the card's ground and edge,
     /// as tall as its content.
+    private static FrameworkElement Width(FrameworkElement content)
+    {
+        content.Width = 640;
+        return content;
+    }
+
     private static void SaveDetail(FrameworkElement content, string path)
     {
         var tip = new Border { Child = content, Padding = new Thickness(14), BorderThickness = new Thickness(1) };

@@ -103,5 +103,19 @@
   <system:String x:Key="UsualNoFullHourYet">No fully monitored hour yet</system:String>
   <system:String x:Key="UsualNamed">Destinations with a name</system:String>
   <system:String x:Key="UsualPairs">App and destination pairs seen</system:String>
-  <system:String x:Key="UsualNotJudgedYet">Measured only. Nothing is judged against this yet.</system:String>
+  <system:String x:Key="WorthALook">Worth a look (last 14 days)</system:String>
+  <system:String x:Key="WorthALookLearningSummary">Worth a look: still learning this PC, so nothing can be judged yet.</system:String>
+  <system:String x:Key="WorthALookNothingSummary">Worth a look: nothing stood out in the last 14 days.</system:String>
+  <system:String x:Key="WorthALookCountSummaryFormat">Worth a look: {0:N0} in the last 14 days. Click this card to open the list in Insights.</system:String>
+  <system:String x:Key="WorthALookLowCoverageSummaryFormat">Worth a look: {0:N0} in the last 14 days, and unusual amounts can be missed here. Click this card to open Insights.</system:String>
+  <system:String x:Key="WorthALookShowAllFormat">Show all {0:N0}</system:String>
+  <system:String x:Key="OpenInsightsTab">Open the Insights tab</system:String>
+  <system:String x:Key="WorthALookLearningFormat">Still learning this PC: {0:N1} of {1:N0} monitored hours. Until then nothing can be judged, which is not the same as nothing unusual. Only the hours this PC is on count, so one that is often off takes longer.</system:String>
+  <system:String x:Key="WorthALookLowCoverageFormat">Only {0:P0} of recent connections have a byte count, so unusual amounts can be missed here.</system:String>
+  <system:String x:Key="WorthALookNothing">Nothing stood out against this PC's usual traffic.</system:String>
+  <system:String x:Key="WorthALookCaveat">A place to start looking, not a verdict: your own uploads and updates appear here too. Small amounts, browsers, virtual machines and transfers within your network are not judged.</system:String>
+  <system:String x:Key="WorthALookThisPc">This PC as a whole</system:String>
+  <system:String x:Key="WorthALookNewPairFormat">{0}: first time together, {1} sent within a week</system:String>
+  <system:String x:Key="WorthALookAboveUsualFormat">{0}: {1} sent in a day, usually up to {2}</system:String>
+  <system:String x:Key="WorthALookMachineFormat">{0}: {1} sent in 24 hours, usually up to {2}</system:String>
 </ResourceDictionary>

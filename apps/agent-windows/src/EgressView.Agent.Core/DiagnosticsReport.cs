@@ -155,6 +155,7 @@ public static class DiagnosticsReport
         try
         {
             var baseline = store.ReadOutboundBaselineSummary();
+            var candidates = store.ReadOutboundCandidates(DateTimeOffset.UtcNow);
             return new
             {
                 monitoredHours = Math.Round(baseline.MonitoredHours, 1),
@@ -167,6 +168,14 @@ public static class DiagnosticsReport
                 namedShare = baseline.NamedShare is { } named ? Math.Round(named, 3) : (double?)null,
                 bytesShare = baseline.BytesShare is { } bytes ? Math.Round(bytes, 3) : (double?)null,
                 pairsKnown = baseline.PairsKnown,
+                // Counts only: the report never carries a name.
+                candidates = new
+                {
+                    state = candidates.State.ToString(),
+                    byteCoverageShare = Math.Round(candidates.ByteCoverageShare, 3),
+                    total = candidates.Total,
+                    listed = candidates.Candidates.Count,
+                },
             };
         }
         catch (Exception) { return null; }
