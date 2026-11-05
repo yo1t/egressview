@@ -121,7 +121,9 @@ public enum OutboundCandidateRules {
     public static let lowByteCoverageShare = 0.8
     public static let coverageHours = 168
     public static let listWindow: Double = 14 * 86_400
-    public static let listLimit = 10
+    /// Enough that fourteen days on a busy Mac are not cut short. The view
+    /// opens with `AgentOutboundCandidatesView.collapsedCount` of these.
+    public static let listLimit = 50
 
     /// Browsers go to new places for a living and a virtual machine hides what
     /// runs inside it: 220 of 415 new pairs in the replay. Neither can be told

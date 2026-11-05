@@ -21,9 +21,6 @@ struct AgentPeriodSummary: Equatable {
     /// What this Mac usually sends, over all it has learned rather than this
     /// period (P3-192 phase 1). Nil when it could not be read.
     var outboundBaseline: OutboundBaselineSummary?
-    /// Worth a look against that usual level (P3-192 phase 2). Nil when it
-    /// could not be read.
-    var outboundCandidates: OutboundCandidateReport?
 }
 
 /// What one line of the connection log stands for (P3-107 stage 3).
@@ -292,6 +289,10 @@ final class AgentMainViewModel: ObservableObject {
     }
     @Published private(set) var summary = AgentPeriodSummary()
     @Published private(set) var localInsights: AgentLocalInsightSnapshot?
+    /// Worth a look against this Mac's usual level, over the last 14 days
+    /// rather than the selected period (P3-192 phase 2). Nil when it could not
+    /// be read.
+    @Published private(set) var outboundCandidates: OutboundCandidateReport?
     let ollama: AgentOllamaController
     @Published private(set) var coverage = CoverageSummary(
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
@@ -727,8 +728,7 @@ final class AgentMainViewModel: ObservableObject {
                         outboundAnomalyCount: try store.outboundAnomalyCount(from: from, to: to),
                         outboundAnomalies: try store.outboundAnomalies(from: from, to: to),
                         destinationNames: try store.destinationNameCoverage(from: from, to: to),
-                        outboundBaseline: try? store.outboundBaselineSummary(),
-                        outboundCandidates: try? store.outboundCandidates()
+                        outboundBaseline: try? store.outboundBaselineSummary()
                     )
                     let buckets = try store.appTimeline(
                         from: from, to: to, buckets: VisualizationSelection.bucketCount
@@ -755,6 +755,11 @@ final class AgentMainViewModel: ObservableObject {
                         sleepPeriods: sleeps,
                         from: from, to: to
                     )
+                }
+
+                // The overview tile counts them and Insights lists them.
+                if tab == .network || tab == .insights {
+                    data.outboundCandidates = .some(try? store.outboundCandidates())
                 }
 
                 if tab == .insights {
@@ -854,6 +859,9 @@ final class AgentMainViewModel: ObservableObject {
     private struct LoadedData {
         var summary: AgentPeriodSummary?
         var localInsights: AgentLocalInsightSnapshot?
+        /// Outer nil: this tab did not read them. Inner nil: the read failed,
+        /// which must clear the list rather than leave an old one standing.
+        var outboundCandidates: OutboundCandidateReport??
         var sankey: SankeyModel?
         var timeline: TimelineModel?
         var globe: GlobeModel?
@@ -870,6 +878,7 @@ final class AgentMainViewModel: ObservableObject {
     private func apply(_ data: LoadedData, tab: AgentMainTab) {
         if let value = data.summary { summary = value }
         if let value = data.localInsights { localInsights = value }
+        if let value = data.outboundCandidates { outboundCandidates = value }
         if let value = data.sankey { sankey = value }
         if let value = data.timeline { timeline = value }
         if let value = data.globe { globe = value }

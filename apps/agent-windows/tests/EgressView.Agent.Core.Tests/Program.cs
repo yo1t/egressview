@@ -1488,7 +1488,7 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 32, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 33, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
@@ -1914,7 +1914,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 32, "v1 database migrates through v2-v32");
+        Assert(migrated.SchemaVersion == 33, "v1 database migrates through v2-v33");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -1966,7 +1966,7 @@ try
     Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v29.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 32, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 33, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -3491,7 +3491,7 @@ try
             var baselineDatabase = Path.Combine(directory, "baseline.db");
             using (var store = new ObservationStore(baselineDatabase))
             {
-                Assert(store.SchemaVersion == 32 && store.ReadOutboundBaselineSummary().HoursRecorded == 0,
+                Assert(store.SchemaVersion == 33 && store.ReadOutboundBaselineSummary().HoursRecorded == 0,
                     "a new database starts with an empty baseline");
                 var now = DateTimeOffset.UtcNow;
                 var start = Hour(now).AddHours(-5);
@@ -3529,6 +3529,136 @@ try
                 Assert(store.ReadOutboundBaselineSummary() is { HoursRecorded: 0, PairsKnown: 0 },
                     "the baseline keeps to the retention the person chose, like the rest of the history");
             }
+
+            // One CDN address, several sites: each name keeps its own bytes.
+            var shared = OutboundBaselineKeys.Pairs([
+                ("203.0.113.9", "a.one.example", "app", 100UL),
+                ("203.0.113.9", "b.two.example", "app", 10UL),
+                ("203.0.113.9", null, "app", 1UL),
+                ("203.0.113.8", "c.one.example", "app", 1000UL),
+                ("203.0.113.8", null, "app", 2000UL),
+                ("203.0.113.8", null, "other", 5UL),
+                ("203.0.113.7", null, "app", 7UL),
+            ]);
+            Assert(shared.Count == 5 && shared[("app", "two.example")] == 10 && shared[("app", "203.0.113.9")] == 1
+                   && shared[("app", "203.0.113.7")] == 7,
+                "a name counts under itself, and a nameless row at an address with two names is left on the address");
+            Assert(shared[("app", "one.example")] == 3100 && shared[("other", "203.0.113.8")] == 5,
+                "a nameless row takes the only name its own application reached at that address, and no other application's");
+
+            // The stored rows from before that: the days the raw history still
+            // holds are read again, once, and what was known stays known.
+            var rebuildDatabase = Path.Combine(directory, "baseline-rebuild.db");
+            long PairDayBytes(string destination)
+            {
+                WinSqlite.Open(rebuildDatabase, out var raw, WinSqlite.OpenReadOnly, 0);
+                try
+                {
+                    WinSqlite.Prepare(raw, $"SELECT COALESCE(SUM(bytes_out),0) FROM baseline_pair_days WHERE destination='{destination}'", -1, out var statement, 0);
+                    try { WinSqlite.Step(statement); return WinSqlite.ColumnInt64(statement, 0); }
+                    finally { WinSqlite.Finalize(statement); }
+                }
+                finally { WinSqlite.Close(raw); }
+            }
+            var rebuildNow = DateTimeOffset.UtcNow;
+            var midnight = new DateTimeOffset(rebuildNow.Year, rebuildNow.Month, rebuildNow.Day, 0, 0, 0, TimeSpan.Zero);
+            var firstRaw = midnight.AddDays(-3).AddHours(12);
+            using (var store = new ObservationStore(rebuildDatabase))
+            {
+                var coverage = store.BeginCoverage([], firstRaw);
+                store.EndCoverage(coverage, rebuildNow);
+                store.WriteBatch([
+                    Sent(firstRaw.AddMinutes(1), "203.0.113.5", 1_000, "app", "kept.example"),
+                    Sent(midnight.AddDays(-1).AddHours(1), "203.0.113.9", 2_000, "app", "a.one.example"),
+                    Sent(midnight.AddDays(-1).AddHours(1).AddMinutes(1), "203.0.113.9", 300, "app", "b.two.example"),
+                ]);
+                store.CaptureBaselineHours(rebuildNow, maxHours: 1000);
+                var day = midnight.AddDays(-1);
+                store.ExecuteForTesting($"DELETE FROM baseline_pair_days WHERE day='{day:O}';" +
+                    $"INSERT INTO baseline_pair_days(day,application,destination,bytes_out) VALUES('{day:O}','app','two.example',2300);" +
+                    "UPDATE schema_version SET version=32;");
+            }
+            Assert(PairDayBytes("two.example") == 2300, "the fixture holds the merged sum");
+            using (var store = new ObservationStore(rebuildDatabase))
+            {
+                Assert(store.SchemaVersion == 33, "the baseline moves to v33");
+                var known = store.ReadOutboundBaselineSummary();
+                store.CaptureBaselineHours(rebuildNow, maxHours: 1000);
+                Assert(store.ReadOutboundBaselineSummary() is { } after && after.PairsKnown == known.PairsKnown
+                       && after.HoursRecorded == known.HoursRecorded && after.MonitoredHours == known.MonitoredHours,
+                    "reading the days again adds no pair and no hour, and the hours keep what they measured");
+            }
+            Assert(PairDayBytes("one.example") == 2_000 && PairDayBytes("two.example") == 300,
+                "a day the raw history holds is split by name");
+            Assert(PairDayBytes("kept.example") == 1_000, "the part-day the raw history begins on is left alone, not lost or doubled");
+        }
+
+        // The shared cases: the same input must give the same list on the Mac.
+        {
+            const double origin = 1_699_920_000;
+            var fixture = Path.GetFullPath(Path.Combine(windowsRoot, "..", "..", "test", "fixtures", "outbound-candidates-cases.json"));
+            using var document = JsonDocument.Parse(File.ReadAllText(fixture));
+            var cases = document.RootElement.GetProperty("cases").EnumerateArray().ToArray();
+            Assert(cases.Length >= 11, "the shared cases are there");
+            foreach (var item in cases)
+            {
+                var name = item.GetProperty("name").GetString()!;
+                static double Day(JsonElement value) => origin + value.GetProperty("day").GetInt32() * 86_400.0;
+                static OutboundCandidateRules.PairKey Key(JsonElement value) =>
+                    new(value.GetProperty("application").GetString()!, value.GetProperty("destination").GetString()!);
+                var hours = item.GetProperty("hours").EnumerateArray().SelectMany(run => Enumerable.Range(0, run.GetProperty("count").GetInt32()).Select(offset =>
+                    new OutboundCandidateRules.Hour(origin + (run.GetProperty("startHour").GetInt32() + offset) * 3600.0,
+                        run.GetProperty("monitoredSeconds").GetInt64(), run.GetProperty("bytesOut").GetUInt64(),
+                        run.GetProperty("observations").GetInt64(), run.GetProperty("observationsWithBytes").GetInt64()))).ToList();
+                var days = item.GetProperty("pairDays").EnumerateArray().Select(day =>
+                    new OutboundCandidateRules.PairDay(Day(day), Key(day), day.GetProperty("bytesOut").GetUInt64())).ToList();
+                var firstSeen = item.GetProperty("firstSeen").EnumerateArray().ToDictionary(Key, Day);
+                var now = DateTimeOffset.FromUnixTimeSeconds((long)(origin + item.GetProperty("nowDay").GetInt32() * 86_400.0));
+                var report = OutboundCandidateRules.Evaluate(hours, days, firstSeen, now);
+
+                var expected = item.GetProperty("expected");
+                var state = expected.GetProperty("state").GetString();
+                Assert(state == report.State switch
+                {
+                    OutboundCandidateState.Learning => "learning",
+                    OutboundCandidateState.LowByteCoverage => "lowByteCoverage",
+                    _ => "ready",
+                }, $"{name}: state {report.State}");
+                if (expected.TryGetProperty("monitoredHours", out var learned))
+                    Assert(Math.Abs(learned.GetDouble() - report.MonitoredHours) < 0.0001, $"{name}: monitored hours {report.MonitoredHours}");
+                if (expected.TryGetProperty("byteCoverageShare", out var coverage))
+                    Assert(Math.Abs(coverage.GetDouble() - report.ByteCoverageShare) < 0.0001, $"{name}: share {report.ByteCoverageShare}");
+                Assert(report.Total == expected.GetProperty("total").GetInt32(), $"{name}: total {report.Total}");
+                var wanted = expected.GetProperty("candidates").EnumerateArray().Select(candidate => string.Join('|',
+                    candidate.GetProperty("kind").GetString(), candidate.GetProperty("day").GetInt32(),
+                    candidate.TryGetProperty("application", out var application) ? application.GetString() : "",
+                    candidate.TryGetProperty("destination", out var destination) ? destination.GetString() : "",
+                    candidate.GetProperty("bytesOut").GetUInt64(),
+                    candidate.TryGetProperty("usualBytesOut", out var usual) ? usual.GetUInt64().ToString() : "")).ToArray();
+                var got = report.Candidates.Select(candidate => string.Join('|',
+                    JsonNamingPolicy.CamelCase.ConvertName(candidate.Kind.ToString()),
+                    (int)((candidate.At.ToUnixTimeSeconds() - origin) / 86_400),
+                    candidate.Application ?? "", candidate.Destination ?? "", candidate.BytesOut,
+                    candidate.UsualBytesOut?.ToString() ?? "")).ToArray();
+                Assert(wanted.SequenceEqual(got), $"{name}: wanted [{string.Join("; ", wanted)}], got [{string.Join("; ", got)}]");
+            }
+
+            Assert(OutboundCandidateRules.IsUnattributable("msedge") && OutboundCandidateRules.IsUnattributable("Chrome.exe")
+                   && OutboundCandidateRules.IsUnattributable("msedgewebview2") && OutboundCandidateRules.IsUnattributable("vmmemWSL")
+                   && OutboundCandidateRules.IsUnattributable("qemu-system-x86_64") && OutboundCandidateRules.IsUnattributable("com.docker.backend"),
+                "browsers and virtual machines are left out of the new pairs, by process name");
+            Assert(!OutboundCandidateRules.IsUnattributable("curl") && !OutboundCandidateRules.IsUnattributable("OneDrive")
+                   && !OutboundCandidateRules.IsUnattributable("chromedriver"),
+                "an application that only starts like a browser is judged");
+
+            // The list stays on this PC.
+            var kept = new PeriodAnalysis(DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddHours(1), 0, 0, 0, 0, 0, 1, null, 0, [], [])
+            {
+                OutboundCandidates = new(OutboundCandidateState.Ready, 200, 1,
+                    [new(OutboundCandidateKind.NewPair, DateTimeOffset.UnixEpoch, "private-app", "private.example", 1, null)], 1),
+            };
+            var context = AiInsightContextBuilder.Preview(AiInsightContextBuilder.Build(kept, kept));
+            Assert(!context.Contains("private", StringComparison.OrdinalIgnoreCase), "the candidates are not given to the AI");
         }
 
         // The fifteen-minute windows are kept and compared by monitored time
@@ -4941,7 +5071,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 32 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 33 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
