@@ -135,7 +135,9 @@
   "overrides": {
     "@hono/node-server": "2.1.5",
     "socket.io-parser": ">=4.2.7",
-    "hono": ">=4.13.5"
+    "hono": ">=4.13.5",
+    "minimatch": "11.0.3",
+    "@isaacs/nonrecursive-glob-match": "1.0.3"
   },
   "allowScripts": {
     "better-sqlite3": true,
