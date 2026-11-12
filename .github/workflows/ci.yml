@@ -202,7 +202,21 @@ jobs:
           password="$(openssl rand -hex 16)"
           echo "::add-mask::$password"
           echo "password=$password" >> "$GITHUB_OUTPUT"
-          docker build -t egressview-conntrack-router test/fixtures/conntrack-router
+          # The build installs packages from the Ubuntu mirrors. On 2026-11-11
+          # the runner briefly could not resolve archive.ubuntu.com and the
+          # job failed with nothing wrong in the code, so retry the build a
+          # few times before giving up.
+          for attempt in 1 2 3; do
+            if docker build -t egressview-conntrack-router test/fixtures/conntrack-router; then
+              break
+            fi
+            if [[ "$attempt" == 3 ]]; then
+              echo "::error::conntrack router image failed to build after 3 attempts"
+              exit 1
+            fi
+            echo "::warning::conntrack router image build failed (attempt ${attempt}), retrying in 20s"
+            sleep 20
+          done
           docker run -d --name conntrack-router --privileged \
             -e "ROUTER_PASSWORD=$password" -p 2222:22 egressview-conntrack-router
 
