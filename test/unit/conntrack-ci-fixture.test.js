@@ -71,4 +71,11 @@ describe('conntrack CI fixture (P2-91)', () => {
     // whole difficulty is that it talks to something else.
     assert.match(ci, /if: failure\(\)\s*\n\s*run: docker logs conntrack-router/);
   });
+
+  it('ミラーが一時的に引けなくてもイメージの作成をやり直す', () => {
+    // On 2026-11-11 the runner could not resolve archive.ubuntu.com for a few
+    // seconds and the job failed with nothing wrong in the code.
+    assert.match(ci, /for attempt in 1 2 3; do\s*\n\s*if docker build -t egressview-conntrack-router/);
+    assert.match(ci, /failed to build after 3 attempts"\s*\n\s*exit 1/);
+  });
 });
