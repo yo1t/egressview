@@ -194,6 +194,7 @@ All 101 implemented HTTP endpoints are listed below. **Public** means no browser
 | Agent | `POST /api/agents/enrollment-requests/:requestId/reject` | `auth.admin`; rejects the request |
 | Agent | `GET /api/agents` | Protected; `auth.admin`, never returns credential hashes |
 | Agent | `GET /api/agents/ingest-metrics` | Protected; `auth.admin`, aggregate counters and limits only |
+| Agent | `GET /api/agents/outbound-candidates` | Protected; `auth.admin`. What each enrolled Agent chose to share of its outbound candidates and answers |
 | Agent | `POST /api/agents/:agentId/revoke` | Protected; `auth.admin` |
 | Agent | `POST /api/agent/token/rotate` | Agent bearer; `agent.ingest` only |
 | Agent | `POST /api/agent/registration/revoke` | Agent bearer; revokes only the authenticated Agent |
@@ -201,6 +202,7 @@ All 101 implemented HTTP endpoints are listed below. **Public** means no browser
 | Agent | `GET /api/agent/capabilities` | Agent bearer; accepted schema versions and batch limits, so an agent can pick a version both sides speak |
 | Agent | `GET /api/agent/geo-cache` | Agent bearer; the whole location cache, so an agent can place its own destinations on a map without telling the Hub which ones it cares about. `ETag`/`304` supported |
 | Agent | `GET /api/agent/threat-intel` | Agent bearer; every threat indicator, so an agent can match its own destinations locally without telling anyone which ones it is asking about. `available: false` when the Hub runs without feeds, which an agent must not read as "no threats found". `ETag`/`304` supported |
+| Agent | `PUT /api/agent/outbound-candidates` | Agent bearer; what the Agent found worth a look against its own usual traffic and the person's answers, sent only when the person turned sharing on in the Agent's settings. Notes come only with a second, separate switch. Each send replaces that Agent's list; `sharing: false` deletes it |
 | Router setup | `POST /api/nonce` | Protected |
 | Router setup | `POST /api/yamaha/detect` | Protected |
 | Router setup | `POST /api/cisco/detect` | Protected |

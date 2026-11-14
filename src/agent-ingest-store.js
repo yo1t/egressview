@@ -1,6 +1,7 @@
 'use strict';
 const { readGeoLocations } = require('./agent-geo-cache');
 const { ensureInboundProbesTable, storeInboundProbes, pruneInboundProbes } = require('./agent-inbound-probes');
+const outboundCandidates = require('./agent-outbound-candidates');
 
 const runtimeProfiler = require('./runtime-profiler');
 
@@ -38,6 +39,7 @@ function initDb(dbPath) {
   applyWalPragmas(db);
   db.pragma('busy_timeout = 5000');
   ensureInboundProbesTable(db);
+  outboundCandidates.ensureOutboundCandidatesTables(db);
 }
 
 function closeDb() {
@@ -609,6 +611,9 @@ function pruneObservations({
   // Inbound-probe summaries (P3-191): a few rows a day, kept as long as the
   // observations they sit beside.
   result.inboundProbes = timed('receiptsMs', () => pruneInboundProbes(database, before));
+  // Candidates an Agent shared (P3-194): replaced whole on every send, so
+  // only an Agent that stopped sending leaves rows to age out.
+  result.outboundCandidates = timed('receiptsMs', () => outboundCandidates.pruneOutboundCandidates(database));
   return result;
 }
 
@@ -731,11 +736,21 @@ function _initForTest(dbPath = ':memory:') {
       ON connection_agent_observations(src, dst, dport, proto);
   `);
   ensureInboundProbesTable(db);
+  outboundCandidates.ensureOutboundCandidatesTables(db);
 }
 
 /// Locations for destinations, as stored by enrichment (agent-geo-cache.js).
 function listGeoLocations() {
   return readGeoLocations(requireDb());
+}
+
+/// Replaces what this Agent shared of its outbound candidates (P3-194).
+function storeOutboundCandidates(agentId, payload, options) {
+  return outboundCandidates.replaceOutboundCandidates(requireDb(), agentId, payload, options);
+}
+
+function listOutboundCandidates() {
+  return outboundCandidates.listOutboundCandidates(requireDb());
 }
 
 function _dbForTest() {
@@ -761,6 +776,8 @@ module.exports = {
   reconcileCorrelations,
   reopen,
   storeBatch,
+  storeOutboundCandidates,
+  listOutboundCandidates,
   _dbForTest,
   _initForTest,
 };

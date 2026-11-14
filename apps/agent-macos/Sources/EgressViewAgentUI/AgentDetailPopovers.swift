@@ -476,6 +476,10 @@ struct AgentOutboundCandidateDetail: View {
     private enum Loaded { case loading, failed, done(OutboundCandidateEvidence) }
     @State private var loaded: Loaded
     @State private var noteText: String
+    /// The person's choice in Settings > Hub (P3-194), read here so this
+    /// screen says where an answer goes whenever it is typed.
+    @AppStorage(OutboundCandidateSharingPreferences.enabledKey) private var sharesWithHub = false
+    @AppStorage(OutboundCandidateSharingPreferences.includesNotesKey) private var sharesNotesWithHub = false
 
     init(
         candidate: OutboundCandidate, judgment: OutboundCandidateJudgment?,
@@ -575,7 +579,12 @@ struct AgentOutboundCandidateDetail: View {
                         .font(.caption)
                 }
             }
-            caption(L("Your answer and note stay on this Mac. They are not sent to the Hub or an AI provider."))
+            caption(L("Your answer and note are kept on this Mac. They go to an AI provider only with a question you send, and the AI context preview shows them first."))
+            if sharesWithHub {
+                caption(sharesNotesWithHub
+                    ? L("Sending to the Hub is on: this list, your answers and your notes also go to the Hub. Change it in Settings > Hub.")
+                    : L("Sending to the Hub is on: this list and your answers also go to the Hub, without your notes. Change it in Settings > Hub."))
+            }
         }
     }
 

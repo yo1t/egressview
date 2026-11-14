@@ -936,7 +936,6 @@
 "Does this matter to you?" = "Does this matter to you?";
 "Note (optional)" = "Note (optional)";
 "Take back" = "Take back";
-"Your answer and note stay on this Mac. They are not sent to the Hub or an AI provider." = "Your answer and note stay on this Mac. They are not sent to the Hub or an AI provider.";
 "%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed." = "%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed.";
 "On %1$@, %2$@ sent %3$@ to %4$@. On most days it sends up to %5$@; a day is listed at 10 MB and five times that." = "On %1$@, %2$@ sent %3$@ to %4$@. On most days it sends up to %5$@; a day is listed at 10 MB and five times that.";
 "In 24 hours on %1$@ this Mac sent %2$@. Its usual 24 hours reach up to %3$@; it is listed above one and a half times that." = "In 24 hours on %1$@ this Mac sent %2$@. Its usual 24 hours reach up to %3$@; it is listed above one and a half times that.";
@@ -944,3 +943,27 @@
 "Forget all answers?" = "Forget all answers?";
 "Forget all answers" = "Forget all answers";
 "Every candidate goes back to the list, and the notes are deleted. The candidates themselves are not changed." = "Every candidate goes back to the list, and the notes are deleted. The candidates themselves are not changed.";
+"Worth a look, with your answers" = "Worth a look, with your answers";
+"Not answered" = "Not answered";
+"Note: %@" = "Note: %@";
+"Most of it was %1$@ → %2$@, which you marked Expected on %3$@. Check that this is the same thing." = "Most of it was %1$@ → %2$@, which you marked Expected on %3$@. Check that this is the same thing.";
+"Most of it was %1$@ → %2$@, which you marked Look into it on %3$@." = "Most of it was %1$@ → %2$@, which you marked Look into it on %3$@.";
+"Your answer and note are kept on this Mac. They go to an AI provider only with a question you send, and the AI context preview shows them first." = "Your answer and note are kept on this Mac. They go to an AI provider only with a question you send, and the AI context preview shows them first.";
+
+/* P3-194: sending the list to the Hub */
+"Worth a look" = "Worth a look";
+"Send the \"worth a look\" list and your answers to the Hub" = "Send the \"worth a look\" list and your answers to the Hub";
+"Include your notes" = "Include your notes";
+"Sent: each app and destination on the list for the last 14 days, the day, how much was sent and how much is usual, and your answer. Not sent: connections, addresses, or your notes unless you include them. Turning this off removes the list from the Hub." = "Sent: each app and destination on the list for the last 14 days, the day, how much was sent and how much is usual, and your answer. Not sent: connections, addresses, or your notes unless you include them. Turning this off removes the list from the Hub.";
+"Not sent." = "Not sent.";
+"Not sent: this Mac is not enrolled with a Hub." = "Not sent: this Mac is not enrolled with a Hub.";
+"Waiting to send." = "Waiting to send.";
+"Last sent %@." = "Last sent %@.";
+"Removed from the Hub." = "Removed from the Hub.";
+"Not sent: the Hub is too old to receive this. Update the Hub." = "Not sent: the Hub is too old to receive this. Update the Hub.";
+"Not sent: the Hub address is not HTTPS." = "Not sent: the Hub address is not HTTPS.";
+"Not sent: the Hub answered %lld." = "Not sent: the Hub answered %lld.";
+"Not sent: the Hub could not be reached. It is tried again within an hour." = "Not sent: the Hub could not be reached. It is tried again within an hour.";
+"The list could not be read." = "The list could not be read.";
+"Sending to the Hub is on: this list, your answers and your notes also go to the Hub. Change it in Settings > Hub." = "Sending to the Hub is on: this list, your answers and your notes also go to the Hub. Change it in Settings > Hub.";
+"Sending to the Hub is on: this list and your answers also go to the Hub, without your notes. Change it in Settings > Hub." = "Sending to the Hub is on: this list and your answers also go to the Hub, without your notes. Change it in Settings > Hub.";

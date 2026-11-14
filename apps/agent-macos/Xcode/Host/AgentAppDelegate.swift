@@ -293,6 +293,13 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // install wait a day for its first map would be a strange welcome.
         geoCacheController.start()
         threatIntelController.start()
+        // Off unless the person turned it on in Settings; then it sends the
+        // "worth a look" list to the Hub (P3-194).
+        OutboundCandidateSharingController.shared.start(
+            store: store,
+            credentialStore: KeychainAgentCredentialStore(),
+            agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        )
         notificationCoordinator.start()
         // The window needs to know whether anyone was in a position to look, so
         // that "found nothing" is never shown for "never checked".

@@ -855,3 +855,176 @@ describe('inbound probe summaries', () => {
     assert.equal(response.status, 400);
   });
 });
+
+// P3-194: what an Agent found worth a look and the person's answers, sent only
+// when the person turned sharing on. Each send replaces that Agent's list.
+describe('outbound candidates shared by an Agent', () => {
+  const outboundCandidates = require('../../src/agent-outbound-candidates');
+
+  function report(overrides = {}) {
+    return {
+      schemaVersion: 1,
+      sharing: true,
+      generatedAt: new Date().toISOString(),
+      state: 'ready',
+      total: 2,
+      entries: [
+        {
+          candidateId: 'aboveUsual|2026-11-13|com.example.backup|example.net',
+          kind: 'aboveUsual', day: '2026-11-13T00:00:00Z',
+          application: 'com.example.backup', destination: 'example.net',
+          bytesOut: 9_500_000_000, usualBytesOut: 400_000_000,
+          answer: 'expected', answeredAt: '2026-11-14T01:00:00Z', note: '  自分のバックアップ  ',
+        },
+        {
+          candidateId: 'newPair|2026-11-12|curl|example.org',
+          kind: 'newPair', day: '2026-11-12T00:00:00Z',
+          application: 'curl', destination: 'example.org', bytesOut: 120_000_000,
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  async function sharingAgent() {
+    const made = makeApp();
+    const { enrolled } = await enrolledAgent(made.app);
+    return { ...made, enrolled, authorization: { Authorization: `Bearer ${enrolled.body.token}` } };
+  }
+
+  it('Hubは受け取れることを伝える', async () => {
+    const { app, authorization } = await sharingAgent();
+    const response = await request(app, 'GET', '/api/agent/capabilities', { headers: authorization });
+    assert.equal(response.body.outboundCandidates, true);
+  });
+
+  it('届いた一覧を登録名と一緒に管理者へ見せる。メモは前後の空白を落とす', async () => {
+    const { app, authorization, enrolled } = await sharingAgent();
+    const stored = await request(app, 'PUT', '/api/agent/outbound-candidates', { body: report(), headers: authorization });
+    assert.equal(stored.status, 200);
+    assert.deepEqual(stored.body, { stored: 2, sharing: true });
+
+    const listed = await request(app, 'GET', '/api/agents/outbound-candidates');
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.agents.length, 1);
+    const [agent] = listed.body.agents;
+    assert.equal(agent.agentId, enrolled.body.agentId);
+    assert.equal(agent.hostName, metadata.hostName);
+    assert.equal(agent.total, 2);
+    assert.deepEqual(agent.entries.map(entry => entry.kind), ['aboveUsual', 'newPair']);
+    assert.equal(agent.entries[0].answer, 'expected');
+    assert.equal(agent.entries[0].note, '自分のバックアップ');
+    assert.equal(agent.entries[1].answer, null);
+    assert.equal(agent.entries[1].note, null);
+  });
+
+  it('送るたびに置き換える。消えた候補、取り消した答え、送らなくなったメモは残らない', async () => {
+    const { app, authorization } = await sharingAgent();
+    await request(app, 'PUT', '/api/agent/outbound-candidates', { body: report(), headers: authorization });
+    const next = report({ total: 1 });
+    next.entries = [{ ...next.entries[0], note: null }];
+    await request(app, 'PUT', '/api/agent/outbound-candidates', { body: next, headers: authorization });
+    const [agent] = (await request(app, 'GET', '/api/agents/outbound-candidates')).body.agents;
+    assert.equal(agent.entries.length, 1);
+    assert.equal(agent.entries[0].note, null);
+  });
+
+  it('答えの無い候補にメモは付けない', async () => {
+    const { app, authorization } = await sharingAgent();
+    const body = report();
+    body.entries[1].note = '答えずに書いたメモ';
+    await request(app, 'PUT', '/api/agent/outbound-candidates', { body, headers: authorization });
+    const [agent] = (await request(app, 'GET', '/api/agents/outbound-candidates')).body.agents;
+    assert.equal(agent.entries[1].note, null);
+  });
+
+  it('送るのをやめると、そのAgentの分を消す', async () => {
+    const { app, authorization } = await sharingAgent();
+    await request(app, 'PUT', '/api/agent/outbound-candidates', { body: report(), headers: authorization });
+    const off = await request(app, 'PUT', '/api/agent/outbound-candidates', {
+      body: report({ sharing: false, total: 0, entries: [], state: null }), headers: authorization,
+    });
+    assert.deepEqual(off.body, { stored: 0, sharing: false });
+    assert.deepEqual((await request(app, 'GET', '/api/agents/outbound-candidates')).body.agents, []);
+  });
+
+  it('送るのをやめたのに中身があれば受け取らない', async () => {
+    const { app, authorization } = await sharingAgent();
+    const response = await request(app, 'PUT', '/api/agent/outbound-candidates', {
+      body: report({ sharing: false }), headers: authorization,
+    });
+    assert.equal(response.status, 400);
+  });
+
+  it('知らない項目、長すぎるメモ、多すぎる候補は受け取らない', async () => {
+    const { app, authorization } = await sharingAgent();
+    const unknown = report();
+    unknown.entries[0].processPath = '/Users/someone/bin/tool';
+    const longNote = report();
+    longNote.entries[0].note = 'あ'.repeat(outboundCandidates.NOTE_LIMIT + 1);
+    const many = report();
+    many.entries = Array.from({ length: outboundCandidates.MAX_ENTRIES + 1 }, (_, index) => ({
+      ...many.entries[1], candidateId: `newPair|2026-11-12|curl|host${index}.example`,
+    }));
+    for (const body of [unknown, longNote, many]) {
+      const response = await request(app, 'PUT', '/api/agent/outbound-candidates', { body, headers: authorization });
+      assert.equal(response.status, 400);
+    }
+    assert.deepEqual((await request(app, 'GET', '/api/agents/outbound-candidates')).body.agents, []);
+  });
+
+  it('上限いっぱいの一覧も、Hubが受け取るJSONの大きさに収まる', () => {
+    const body = report();
+    body.entries = Array.from({ length: outboundCandidates.MAX_ENTRIES }, (_, index) => ({
+      candidateId: `${index}`.padEnd(600, 'x'), kind: 'aboveUsual', day: '2026-11-13T00:00:00Z',
+      application: 'a'.repeat(255), destination: 'd'.repeat(255),
+      bytesOut: Number.MAX_SAFE_INTEGER, usualBytesOut: Number.MAX_SAFE_INTEGER,
+      answer: 'investigate', answeredAt: '2026-11-14T01:00:00.000Z', note: 'あ'.repeat(outboundCandidates.NOTE_LIMIT),
+    }));
+    assert.equal(outboundCandidates.outboundCandidatesSchema.safeParse(body).success, true);
+    assert.ok(Buffer.byteLength(JSON.stringify(body)) < 64 * 1024);
+  });
+
+  it('Mac Agentが作る見本をそのまま受け取る', async () => {
+    const golden = JSON.parse(fs.readFileSync(
+      path.join(__dirname, '../../protocol/agent-outbound-candidates/v1/golden.json'), 'utf8'
+    ));
+    const { app, authorization } = await sharingAgent();
+    const response = await request(app, 'PUT', '/api/agent/outbound-candidates', { body: golden, headers: authorization });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { stored: 3, sharing: true });
+  });
+
+  it('Agentのトークンが無ければ受け取らない', async () => {
+    const { app } = makeApp();
+    const response = await request(app, 'PUT', '/api/agent/outbound-candidates', { body: report() });
+    assert.equal(response.status, 401);
+  });
+
+  it('登録を取り消したAgentの分は見せない', async () => {
+    const { app, authorization, enrolled } = await sharingAgent();
+    await request(app, 'PUT', '/api/agent/outbound-candidates', { body: report(), headers: authorization });
+    await request(app, 'POST', `/api/agents/${enrolled.body.agentId}/revoke`, { body: {} });
+    assert.deepEqual((await request(app, 'GET', '/api/agents/outbound-candidates')).body.agents, []);
+  });
+
+  it('送られなくなった古い分は、期限を過ぎると片づく', async () => {
+    const { app, authorization } = await sharingAgent();
+    await request(app, 'PUT', '/api/agent/outbound-candidates', { body: report(), headers: authorization });
+    const db = agentIngestStore._dbForTest();
+    const later = Date.parse('2026-11-12T00:00:00Z') + outboundCandidates.RETENTION_MS + 1;
+    const removed = outboundCandidates.pruneOutboundCandidates(db, { now: later });
+    assert.equal(removed, 1);
+    const [agent] = (await request(app, 'GET', '/api/agents/outbound-candidates')).body.agents;
+    assert.deepEqual(agent.entries.map(entry => entry.kind), ['aboveUsual']);
+  });
+
+  it('監査には件数だけを書き、アプリ名・宛先・メモは書かない', async () => {
+    const { app, authorization, audits } = await sharingAgent();
+    await request(app, 'PUT', '/api/agent/outbound-candidates', { body: report(), headers: authorization });
+    const text = JSON.stringify(audits);
+    for (const value of ['com.example.backup', 'example.net', 'バックアップ']) {
+      assert.equal(text.includes(value), false, value);
+    }
+  });
+});

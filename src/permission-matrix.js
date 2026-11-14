@@ -60,6 +60,7 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('GET', '/api/agent/capabilities', ACCESS.AGENT, [A.INGEST]),
   httpRoute('GET', '/api/agent/geo-cache', ACCESS.AGENT, [A.INGEST]),
   httpRoute('GET', '/api/agent/threat-intel', ACCESS.AGENT, [A.INGEST]),
+  httpRoute('PUT', '/api/agent/outbound-candidates', ACCESS.AGENT, [A.INGEST]),
 
   httpRoute('GET', '/api/status', ACCESS.PERMISSION, [R.NETWORK_READ]),
   httpRoute('GET', '/api/connections', ACCESS.PERMISSION, [R.NETWORK_READ]),
@@ -140,6 +141,9 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('GET', '/api/auth/api-identities', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('GET', '/api/agents', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('GET', '/api/agents/ingest-metrics', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  // A note can name people and places at the Agent's end, so it is read at
+  // the same level as the Agent list itself.
+  httpRoute('GET', '/api/agents/outbound-candidates', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/agents/enrollment-tokens', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   // Approving a request mints a long-lived credential, so it sits at the same
   // level as the other authentication administration routes.

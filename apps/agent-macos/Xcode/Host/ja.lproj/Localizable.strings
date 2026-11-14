@@ -936,7 +936,6 @@
 "Does this matter to you?" = "あなたにとって問題ですか？";
 "Note (optional)" = "メモ（任意）";
 "Take back" = "取り消す";
-"Your answer and note stay on this Mac. They are not sent to the Hub or an AI provider." = "答えとメモはこのMacにだけ残ります。HubやAIのサービスへは送りません。";
 "%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed." = "%1$@ は、このMacの普段を学習し終えるまで %2$@ へ送ったことがありませんでした。%3$@ までの1週間に %4$@ 送り、新しい組み合わせを載せる 1 MB を超えました。";
 "On %1$@, %2$@ sent %3$@ to %4$@. On most days it sends up to %5$@; a day is listed at 10 MB and five times that." = "%1$@ に、%2$@ が %4$@ へ %3$@ 送りました。普段の日は多くて %5$@ で、10 MB 以上かつその5倍以上の日を載せています。";
 "In 24 hours on %1$@ this Mac sent %2$@. Its usual 24 hours reach up to %3$@; it is listed above one and a half times that." = "%1$@ の24時間に、このMacは %2$@ 送りました。普段の24時間は多くて %3$@ で、その1.5倍を超えると載せています。";
@@ -944,3 +943,27 @@
 "Forget all answers?" = "答えをすべて消しますか？";
 "Forget all answers" = "すべて消す";
 "Every candidate goes back to the list, and the notes are deleted. The candidates themselves are not changed." = "候補はすべて一覧に戻り、メモは消えます。候補そのものは変わりません。";
+"Worth a look, with your answers" = "調べる候補とあなたの答え";
+"Not answered" = "未回答";
+"Note: %@" = "メモ: %@";
+"Most of it was %1$@ → %2$@, which you marked Expected on %3$@. Check that this is the same thing." = "大半は %1$@ → %2$@ で、%3$@ に「想定内」と答えた組です。同じものか確かめてください。";
+"Most of it was %1$@ → %2$@, which you marked Look into it on %3$@." = "大半は %1$@ → %2$@ で、%3$@ に「要調査」と答えた組です。";
+"Your answer and note are kept on this Mac. They go to an AI provider only with a question you send, and the AI context preview shows them first." = "答えとメモはこのMacに残ります。AIへは、あなたが質問を送ったときだけ渡り、渡す前に「AIに渡す内容のプレビュー」で見られます。";
+
+/* P3-194: sending the list to the Hub */
+"Worth a look" = "調べる候補";
+"Send the \"worth a look\" list and your answers to the Hub" = "「調べる候補」の一覧と答えをHubへ送る";
+"Include your notes" = "メモも送る";
+"Sent: each app and destination on the list for the last 14 days, the day, how much was sent and how much is usual, and your answer. Not sent: connections, addresses, or your notes unless you include them. Turning this off removes the list from the Hub." = "送るもの: 直近14日の一覧にあるアプリと宛先、日付、送信量と普段の量、あなたの答え。送らないもの: 個々の通信、アドレス、メモ（「メモも送る」をオンにしたときだけ送ります）。オフにすると、Hubから一覧を消します。";
+"Not sent." = "送っていません。";
+"Not sent: this Mac is not enrolled with a Hub." = "送っていません: このMacはHubに登録されていません。";
+"Waiting to send." = "送信を待っています。";
+"Last sent %@." = "最後に送った日時: %@";
+"Removed from the Hub." = "Hubから消しました。";
+"Not sent: the Hub is too old to receive this. Update the Hub." = "送れません: Hubが古く、受け取れません。Hubを更新してください。";
+"Not sent: the Hub address is not HTTPS." = "送っていません: HubのアドレスがHTTPSではありません。";
+"Not sent: the Hub answered %lld." = "送れませんでした: Hubの応答は%lldでした。";
+"Not sent: the Hub could not be reached. It is tried again within an hour." = "送れませんでした: Hubにつながりません。1時間以内にもう一度試します。";
+"The list could not be read." = "一覧を読み込めませんでした。";
+"Sending to the Hub is on: this list, your answers and your notes also go to the Hub. Change it in Settings > Hub." = "Hubへの送信がオンです: この一覧、答え、メモもHubへ送ります。設定の「Hub」で変えられます。";
+"Sending to the Hub is on: this list and your answers also go to the Hub, without your notes. Change it in Settings > Hub." = "Hubへの送信がオンです: この一覧と答えもHubへ送ります。メモは送りません。設定の「Hub」で変えられます。";

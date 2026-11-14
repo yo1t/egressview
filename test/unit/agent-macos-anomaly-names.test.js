@@ -24,6 +24,9 @@ describe('送信異常の通知は、何がどこへ出たかを言う', () => {
   it('通知の本文に名前を入れる', () => {
     assert.match(notifier, /let culprits = OutboundAnomalyWording\.contributorLine\(report\)/);
     assert.match(notifier, /reason: culprits\.isEmpty \? reason : reason \+ "\\n" \+ culprits/);
+    // An earlier answer about the pair that sent most of it follows the
+    // names; the answer only, never its note (P3-194).
+    assert.match(notifier, /\.joinedLine\(OutboundAnomalyWording\.previousAnswerLine\(report\)\)/);
   });
 
   it('名前が取れないときは、数字だけの通知に戻る', () => {
