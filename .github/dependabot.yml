@@ -7,10 +7,13 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
-    # Wait 7 days before proposing updates to newly published versions so that
-    # a compromised/unstable release has time to be caught and yanked.
+    # Wait 2 days before proposing updates to newly published versions so that
+    # a compromised/unstable release has time to be caught and yanked. It was
+    # 7 days until 2026-11-14: hijacked npm releases have been found and
+    # pulled within hours to about a day, while a week kept advisory fixes
+    # out of the Hub and forced exact pins to older versions.
     cooldown:
-      default-days: 7
+      default-days: 2
     # better-sqlite3 majors were ignored here between 2026-08-03 and
     # 2026-08-06. 13.0.2 shipped a prebuilds/linux-arm64.node linked against
     # GLIBC_2.38 while the EC2 host (aarch64 Amazon Linux 2023, glibc 2.34)
@@ -43,7 +46,7 @@ updates:
       interval: "weekly"
       day: "monday"
     cooldown:
-      default-days: 7
+      default-days: 2
     groups:
       actions:
         patterns:
