@@ -561,11 +561,26 @@ final class AgentNotificationCoordinator {
                 let contributors = try? store.outboundWindowContributors(
                     windowStart: finding.window.startedAt, limit: 5
                 )
+                // What the person said before about the pair that sent most
+                // of it (P3-194). Only said, never used to hold the notice.
+                let previousAnswer: OutboundAnomalyReport.PreviousAnswer? = {
+                    guard let pair = try? store.outboundWindowTopPair(windowStart: finding.window.startedAt),
+                          pair.bytesOut * 2 >= pair.windowBytesOut,
+                          let answer = try? store.latestOutboundCandidateAnswer(
+                            application: pair.application, destination: pair.destination
+                          )
+                    else { return nil }
+                    return .init(
+                        application: pair.application, destination: pair.destination,
+                        verdict: answer.verdict, judgedAt: answer.judgedAt
+                    )
+                }()
                 let report = OutboundAnomalyReport(
                     finding: finding,
                     applications: contributors?.applications ?? [],
                     destinations: contributors?.destinations ?? [],
-                    destinationCount: contributors?.destinationCount ?? 0
+                    destinationCount: contributors?.destinationCount ?? 0,
+                    previousAnswer: previousAnswer
                 )
                 // Kept with the window whether or not the notice is sent, so
                 // the overview can explain the anomaly later (0.5.97).
@@ -605,6 +620,7 @@ final class AgentNotificationCoordinator {
             )
         }
         let culprits = OutboundAnomalyWording.contributorLine(report)
+            .joinedLine(OutboundAnomalyWording.previousAnswerLine(report))
         _ = notifier.notify(
             kind: .outboundAnomaly,
             key: "outbound-anomaly-\(finding.kind.rawValue)",
@@ -690,10 +706,20 @@ private extension ThreatIntelController.Status {
 
 /// The window's findings, with the names that make it judgeable.
 struct OutboundAnomalyReport {
+    /// An answer the person gave earlier about the app and destination that
+    /// sent at least half of this window.
+    struct PreviousAnswer {
+        let application: String
+        let destination: String
+        let verdict: OutboundCandidateVerdict
+        let judgedAt: Date
+    }
+
     let finding: OutboundAnomalyFinding
     let applications: [(name: String, bytesOut: UInt64)]
     let destinations: [(name: String, bytesOut: UInt64)]
     let destinationCount: Int
+    var previousAnswer: PreviousAnswer? = nil
 
     /// The same, in the form kept with the window and the notice.
     var record: OutboundAnomalyRecord {
@@ -714,6 +740,22 @@ struct OutboundAnomalyReport {
 }
 
 enum OutboundAnomalyWording {
+    /// "Most of it was curl → example.com, which you marked Expected on
+    /// 10 Nov." The answer only, never the note: a notification can show on
+    /// a locked screen.
+    static func previousAnswerLine(_ report: OutboundAnomalyReport) -> String {
+        guard let answer = report.previousAnswer else { return "" }
+        let day = answer.judgedAt.formatted(date: .abbreviated, time: .omitted)
+        switch answer.verdict {
+        case .expected:
+            return L("Most of it was %1$@ → %2$@, which you marked Expected on %3$@. Check that this is the same thing.",
+                     answer.application, answer.destination, day)
+        case .investigate:
+            return L("Most of it was %1$@ → %2$@, which you marked Look into it on %3$@.",
+                     answer.application, answer.destination, day)
+        }
+    }
+
     /// "Mostly Google Chrome Helper (804.9 MB), to speedtest.example.net and
     /// 194 other destinations."
     ///
@@ -737,5 +779,13 @@ enum OutboundAnomalyWording {
             "Mostly %@ (%@), to %@ and %lld other destinations.",
             application.name, sent, destination.name, others
         )
+    }
+}
+
+private extension String {
+    /// Another line under this one, leaving out whichever is empty.
+    func joinedLine(_ next: String) -> String {
+        if next.isEmpty { return self }
+        return isEmpty ? next : self + "\n" + next
     }
 }

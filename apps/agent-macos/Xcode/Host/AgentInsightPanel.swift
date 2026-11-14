@@ -483,6 +483,10 @@ struct AgentInsightPanel: View {
                     previewList(L("Top destinations"), items: snapshot.context.topDestinations)
                 }
 
+                if let list = snapshot.context.outboundCandidates {
+                    previewCandidates(list)
+                }
+
                 HStack {
                     Label(
                         L("%lld bytes · up to %lld applications and %lld destinations",
@@ -562,6 +566,44 @@ struct AgentInsightPanel: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The candidates and answers as they would be sent, notes included, so
+    /// a note is seen here before it goes anywhere (P3-194).
+    private func previewCandidates(_ list: AgentLocalInsightCandidateList) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L("Worth a look, with your answers")).font(.callout.bold())
+            if list.entries.isEmpty {
+                Text(L("None recorded")).foregroundStyle(.secondary)
+            }
+            ForEach(Array(list.entries.enumerated()), id: \.offset) { _, entry in
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack {
+                        Text(entry.application.map { "\($0) → \(entry.destination ?? "")" } ?? L("This Mac as a whole"))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Text(entry.answer.flatMap(OutboundCandidateVerdict.init(rawValue:))
+                                .map(Self.answerLabel) ?? L("Not answered"))
+                            .foregroundStyle(.secondary)
+                    }
+                    if let note = entry.note {
+                        Text(L("Note: %@", note))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static func answerLabel(_ verdict: OutboundCandidateVerdict) -> String {
+        switch verdict {
+        case .expected: return L("Expected")
+        case .investigate: return L("Look into it")
+        }
     }
 
     private var cardBackground: some View {

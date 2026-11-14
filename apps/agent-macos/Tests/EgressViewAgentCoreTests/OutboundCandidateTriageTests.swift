@@ -171,4 +171,89 @@ final class OutboundCandidateTriageTests: XCTestCase {
         XCTAssertTrue(try store.outboundCandidateJudgments().isEmpty)
         XCTAssertEqual(try store.statistics().rawCount, 1)
     }
+
+    func testAIに渡す一覧は答えとメモを候補に添える() throws {
+        let answered = candidate()
+        let open = candidate(.newPair, application: "zoom", destination: "zoom.us")
+        let machine = candidate(.machine, application: nil, destination: nil)
+        let report = OutboundCandidateReport(state: .ready, candidates: [answered, open, machine], total: 3)
+        let judgments = [
+            answered.id: OutboundCandidateJudgment(
+                candidateID: answered.id, candidateAt: day, verdict: .expected, note: "  夜のバックアップ \n", judgedAt: day
+            ),
+            machine.id: OutboundCandidateJudgment(
+                candidateID: machine.id, candidateAt: day, verdict: .investigate, note: "   ", judgedAt: day
+            ),
+        ]
+        let list = AgentLocalInsightCandidateList(report: report, judgments: judgments)
+        XCTAssertEqual(list.state, "ready")
+        XCTAssertEqual(list.total, 3)
+        XCTAssertEqual(list.entries.map(\.answer), ["expected", nil, "investigate"])
+        XCTAssertEqual(list.entries.map(\.note), ["夜のバックアップ", nil, nil])
+        XCTAssertEqual(list.entries.map(\.kind), ["aboveUsual", "newPair", "machine"])
+        XCTAssertNil(list.entries[2].application)
+
+        let learning = AgentLocalInsightCandidateList(
+            report: OutboundCandidateReport(state: .learning(monitoredHours: 3)), judgments: [:]
+        )
+        XCTAssertEqual(learning.state, "learning")
+        XCTAssertTrue(learning.entries.isEmpty)
+    }
+
+    func testAIに渡す一覧は件数の上限で切る() {
+        let many = (0..<30).map { candidate(application: "app\($0)") }
+        let list = AgentLocalInsightCandidateList(
+            report: OutboundCandidateReport(state: .ready, candidates: many, total: 30), judgments: [:]
+        )
+        XCTAssertEqual(list.entries.count, AgentLocalInsightCandidateList.entryLimit)
+        XCTAssertEqual(list.total, 30)
+    }
+
+    func test答えが変わるとAIに渡す内容もすぐ変わる() throws {
+        let snapshot = try AgentLocalInsightBuilder.build(
+            current: [], previous: [], periodStart: day, periodEnd: day.addingTimeInterval(3600)
+        )
+        XCTAssertNil(snapshot.context.outboundCandidates)
+        let item = candidate()
+        let list = AgentLocalInsightCandidateList(
+            report: OutboundCandidateReport(state: .ready, candidates: [item], total: 1),
+            judgments: [item.id: .init(candidateID: item.id, candidateAt: day, verdict: .expected, note: "メモ", judgedAt: day)]
+        )
+        let updated = try snapshot.replacingCandidates(list)
+        XCTAssertEqual(updated.context.outboundCandidates, list)
+        XCTAssertGreaterThan(updated.previewSizeBytes, snapshot.previewSizeBytes)
+        let json = String(decoding: try updated.context.encodedPreview(), as: UTF8.self)
+        XCTAssertTrue(json.contains("\"outboundCandidates\""))
+        XCTAssertTrue(json.contains("メモ"))
+        XCTAssertEqual(updated.context.schemaVersion, 2)
+    }
+
+    func test通知に添える答えは同じ組の一番新しいものでメモを含まない() throws {
+        let earlier = candidate(at: day)
+        let later = candidate(.newPair, at: day.addingTimeInterval(86_400))
+        try store.setOutboundCandidateJudgment(earlier, verdict: .investigate, note: "a", now: day)
+        try store.setOutboundCandidateJudgment(later, verdict: .expected, note: "秘密", now: day.addingTimeInterval(90_000))
+        try store.setOutboundCandidateJudgment(
+            candidate(application: "zoom", destination: "zoom.us"), verdict: .investigate, now: day.addingTimeInterval(99_000)
+        )
+        let answer = try XCTUnwrap(store.latestOutboundCandidateAnswer(application: "curl", destination: "one.example"))
+        XCTAssertEqual(answer.verdict, .expected)
+        XCTAssertEqual(answer.candidateID, later.id)
+        XCTAssertEqual(answer.note, "")
+        XCTAssertNil(try store.latestOutboundCandidateAnswer(application: "curl", destination: "two.example"))
+    }
+
+    func test窓で一番送った組を基準と同じ鍵で返す() throws {
+        let window = day.addingTimeInterval(900)
+        try observe(at: window.addingTimeInterval(10), hostname: "a.one.example", bytesOut: 4_000)
+        try observe(at: window.addingTimeInterval(20), address: "203.0.113.9", hostname: "b.one.example", bytesOut: 3_000)
+        try observe(at: window.addingTimeInterval(30), hostname: "zoom.us", process: "zoom", bytesOut: 5_000)
+        try observe(at: window.addingTimeInterval(40), address: "192.168.1.20", hostname: "nas.local", bytesOut: 90_000)
+        try observe(at: window.addingTimeInterval(1_000), bytesOut: 90_000)
+        let top = try XCTUnwrap(store.outboundWindowTopPair(windowStart: window))
+        XCTAssertEqual(top.application, "curl")
+        XCTAssertEqual(top.destination, "one.example")
+        XCTAssertEqual(top.bytesOut, 7_000)
+        XCTAssertEqual(top.windowBytesOut, 12_000)
+    }
 }

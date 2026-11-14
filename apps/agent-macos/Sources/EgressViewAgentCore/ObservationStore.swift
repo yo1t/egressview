@@ -839,6 +839,8 @@ public final class ObservationStore: @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS outbound_candidate_judgments (
                 candidate_id TEXT PRIMARY KEY,
                 candidate_at REAL NOT NULL,
+                application TEXT,
+                destination TEXT,
                 verdict TEXT NOT NULL CHECK (verdict IN ('expected', 'investigate')),
                 note TEXT NOT NULL DEFAULT '',
                 judged_at REAL NOT NULL
@@ -847,6 +849,10 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("""
             CREATE INDEX IF NOT EXISTS outbound_candidate_judgments_at
             ON outbound_candidate_judgments(candidate_at)
+            """)
+            try execute("""
+            CREATE INDEX IF NOT EXISTS outbound_candidate_judgments_pair
+            ON outbound_candidate_judgments(application, destination, judged_at)
             """)
             try execute("PRAGMA user_version=20")
             reportMigrationStep(20)
@@ -2802,18 +2808,87 @@ public final class ObservationStore: @unchecked Sendable {
             }
             let statement = try prepare("""
             INSERT OR REPLACE INTO outbound_candidate_judgments
-                (candidate_id, candidate_at, verdict, note, judged_at)
-            VALUES (?, ?, ?, ?, ?)
+                (candidate_id, candidate_at, application, destination, verdict, note, judged_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """)
             defer { sqlite3_finalize(statement) }
             bindText(statement, 1, candidate.id)
             sqlite3_bind_double(statement, 2, candidate.at.timeIntervalSince1970)
-            bindText(statement, 3, verdict.rawValue)
-            bindText(statement, 4, String(note.prefix(Self.judgmentNoteLimit)))
-            sqlite3_bind_double(statement, 5, now.timeIntervalSince1970)
+            if let application = candidate.application { bindText(statement, 3, application) } else { sqlite3_bind_null(statement, 3) }
+            if let destination = candidate.destination { bindText(statement, 4, destination) } else { sqlite3_bind_null(statement, 4) }
+            bindText(statement, 5, verdict.rawValue)
+            bindText(statement, 6, String(note.prefix(Self.judgmentNoteLimit)))
+            sqlite3_bind_double(statement, 7, now.timeIntervalSince1970)
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw ObservationStoreError.statement(lastMessage)
             }
+        }
+    }
+
+    /// The newest answer given to any candidate of this app and destination,
+    /// for a notice to mention. Never used to hold a notice back: an app the
+    /// person trusts is exactly what a careful sender would use (P3-193).
+    public func latestOutboundCandidateAnswer(
+        application: String, destination: String
+    ) throws -> OutboundCandidateJudgment? {
+        try lock.withLock {
+            let statement = try prepare("""
+            SELECT candidate_id, candidate_at, verdict, judged_at FROM outbound_candidate_judgments
+            WHERE application = ? AND destination = ?
+            ORDER BY judged_at DESC LIMIT 1
+            """)
+            defer { sqlite3_finalize(statement) }
+            bindText(statement, 1, application)
+            bindText(statement, 2, destination)
+            guard sqlite3_step(statement) == SQLITE_ROW, let id = text(statement, 0),
+                  let verdict = text(statement, 2).flatMap(OutboundCandidateVerdict.init(rawValue:))
+            else { return nil }
+            // The note stays behind: this is read for a notification, which
+            // can show on a locked screen.
+            return OutboundCandidateJudgment(
+                candidateID: id,
+                candidateAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
+                verdict: verdict,
+                judgedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
+            )
+        }
+    }
+
+    /// The app and destination that sent the most in a window, keyed as the
+    /// baseline keys them, with that window's whole total beside it.
+    public func outboundWindowTopPair(
+        windowStart: Date, windowLength: TimeInterval = 900
+    ) throws -> (application: String, destination: String, bytesOut: UInt64, windowBytesOut: UInt64)? {
+        try lock.withLock {
+            let statement = try prepare("""
+            SELECT remote_address, NULLIF(remote_hostname, ''), bundle_id, process_name,
+                   COALESCE(SUM(bytes_out), 0)
+            FROM observations
+            WHERE last_observed_at >= ? AND last_observed_at < ?
+            GROUP BY remote_address, NULLIF(remote_hostname, ''), bundle_id, process_name
+            """)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, windowStart.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 2, windowStart.timeIntervalSince1970 + windowLength)
+            struct Key: Hashable { let application: String; let destination: String }
+            var sums: [Key: UInt64] = [:]
+            var total: UInt64 = 0
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let address = text(statement, 0) ?? ""
+                guard !NonPublicAddress.isExcludedFromOutboundAnomaly(address) else { continue }
+                let sent = UInt64(max(0, sqlite3_column_int64(statement, 4)))
+                let key = Key(
+                    application: OutboundBaselineKeys.application(
+                        bundleID: text(statement, 2), processName: text(statement, 3)
+                    ),
+                    destination: OutboundBaselineKeys.destination(hostname: text(statement, 1), address: address)
+                )
+                sums[key, default: 0] &+= sent
+                total &+= sent
+            }
+            guard let top = sums.max(by: { ($0.value, $1.key.application) < ($1.value, $0.key.application) }),
+                  top.value > 0 else { return nil }
+            return (top.key.application, top.key.destination, top.value, total)
         }
     }
 

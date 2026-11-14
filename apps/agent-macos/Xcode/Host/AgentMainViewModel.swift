@@ -545,8 +545,18 @@ final class AgentMainViewModel: ObservableObject {
                 guard let self, let store = self.store else { return }
                 try? store.removeAllOutboundCandidateJudgments()
                 self.outboundCandidateJudgments = (try? store.outboundCandidateJudgments()) ?? [:]
+                self.refreshInsightCandidates()
             }
         )
+    }
+
+    /// What the AI would be given follows the answers at once.
+    private func refreshInsightCandidates() {
+        guard let snapshot = localInsights else { return }
+        let list = outboundCandidates.map {
+            AgentLocalInsightCandidateList(report: $0, judgments: outboundCandidateJudgments)
+        }
+        if let updated = try? snapshot.replacingCandidates(list) { localInsights = updated }
     }
 
     private func judge(_ candidate: OutboundCandidate, verdict: OutboundCandidateVerdict?, note: String) {
@@ -554,6 +564,7 @@ final class AgentMainViewModel: ObservableObject {
         do {
             try store.setOutboundCandidateJudgment(candidate, verdict: verdict, note: note)
             outboundCandidateJudgments = try store.outboundCandidateJudgments()
+            refreshInsightCandidates()
         } catch {
             // Left as it was: the row stays where it is, which is what the
             // person sees, rather than moving to "Checked" without being kept.
@@ -812,7 +823,12 @@ final class AgentMainViewModel: ObservableObject {
                         previous: previous,
                         periodStart: from,
                         periodEnd: to,
-                        generatedAt: to
+                        generatedAt: to,
+                        candidates: (data.outboundCandidates ?? nil).map {
+                            AgentLocalInsightCandidateList(
+                                report: $0, judgments: data.outboundCandidateJudgments ?? [:]
+                            )
+                        }
                     )
                 }
 

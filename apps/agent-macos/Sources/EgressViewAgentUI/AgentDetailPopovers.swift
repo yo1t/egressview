@@ -575,7 +575,7 @@ struct AgentOutboundCandidateDetail: View {
                         .font(.caption)
                 }
             }
-            caption(L("Your answer and note stay on this Mac. They are not sent to the Hub or an AI provider."))
+            caption(L("Your answer and note are kept on this Mac. They go to an AI provider only with a question you send, and the AI context preview shows them first."))
         }
     }
 

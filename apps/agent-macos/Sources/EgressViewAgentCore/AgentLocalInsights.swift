@@ -21,7 +21,7 @@ public struct AgentLocalInsightItem: Codable, Equatable, Sendable, Identifiable 
 /// impossible to accidentally serialize raw flows, credentials or device
 /// notes through the Phase 1 path.
 public struct AgentLocalInsightContext: Codable, Equatable, Sendable {
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
 
     public let schemaVersion: Int
     public let generatedAt: Date
@@ -31,6 +31,9 @@ public struct AgentLocalInsightContext: Codable, Equatable, Sendable {
     public let previous: AgentLocalInsightCounts
     public let topApplications: [AgentLocalInsightItem]
     public let topDestinations: [AgentLocalInsightItem]
+    /// Traffic worth a look over the last 14 days, with the person's answers
+    /// (P3-194). Absent when it could not be read.
+    public var outboundCandidates: AgentLocalInsightCandidateList? = nil
 
     public func encodedPreview() throws -> Data {
         let encoder = JSONEncoder()
@@ -40,9 +43,63 @@ public struct AgentLocalInsightContext: Codable, Equatable, Sendable {
     }
 }
 
+/// The candidate list as an AI provider sees it: what stood out, against
+/// what, and what the person said about it. A note is the person's own words
+/// and goes as data, shown in the preview first.
+public struct AgentLocalInsightCandidateList: Codable, Equatable, Sendable {
+    public struct Entry: Codable, Equatable, Sendable {
+        /// `newPair`, `aboveUsual` or `machine`.
+        public let kind: String
+        public let day: Date
+        public let application: String?
+        public let destination: String?
+        public let bytesOut: UInt64
+        public let usualBytesOut: UInt64?
+        /// `expected`, `investigate`, or absent when not answered yet.
+        public let answer: String?
+        public let note: String?
+    }
+
+    /// `learning`, `lowByteCoverage` or `ready`. While learning the list is
+    /// empty because nothing can be judged, not because nothing stood out.
+    public let state: String
+    public let total: Int
+    public let entries: [Entry]
+
+    public static let entryLimit = 20
+
+    public init(report: OutboundCandidateReport, judgments: [String: OutboundCandidateJudgment]) {
+        switch report.state {
+        case .learning: state = "learning"
+        case .lowByteCoverage: state = "lowByteCoverage"
+        case .ready: state = "ready"
+        }
+        total = report.total
+        entries = report.candidates.prefix(Self.entryLimit).map { candidate in
+            let judgment = judgments[candidate.id]
+            let note = judgment?.note.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return Entry(
+                kind: candidate.kind.rawValue, day: candidate.at,
+                application: candidate.application.map { String($0.prefix(AgentLocalInsightBuilder.nameCharacterLimit)) },
+                destination: candidate.destination.map { String($0.prefix(AgentLocalInsightBuilder.nameCharacterLimit)) },
+                bytesOut: candidate.bytesOut, usualBytesOut: candidate.usualBytesOut,
+                answer: judgment?.verdict.rawValue, note: note.isEmpty ? nil : note
+            )
+        }
+    }
+}
+
 public struct AgentLocalInsightSnapshot: Equatable, Sendable {
     public let context: AgentLocalInsightContext
     public let previewSizeBytes: Int
+
+    /// The same snapshot after an answer changed, so the preview and the next
+    /// question carry it without waiting for the next refresh.
+    public func replacingCandidates(_ candidates: AgentLocalInsightCandidateList?) throws -> AgentLocalInsightSnapshot {
+        var context = context
+        context.outboundCandidates = candidates
+        return AgentLocalInsightSnapshot(context: context, previewSizeBytes: try context.encodedPreview().count)
+    }
 }
 
 public enum AgentLocalInsightBuilder {
@@ -54,7 +111,8 @@ public enum AgentLocalInsightBuilder {
         previous: [AppDestinationTotal],
         periodStart: Date,
         periodEnd: Date,
-        generatedAt: Date = Date()
+        generatedAt: Date = Date(),
+        candidates: AgentLocalInsightCandidateList? = nil
     ) throws -> AgentLocalInsightSnapshot {
         let context = AgentLocalInsightContext(
             schemaVersion: AgentLocalInsightContext.schemaVersion,
@@ -64,7 +122,8 @@ public enum AgentLocalInsightBuilder {
             current: counts(current),
             previous: counts(previous),
             topApplications: ranked(current, name: \AppDestinationTotal.processName),
-            topDestinations: ranked(current, name: \AppDestinationTotal.destination)
+            topDestinations: ranked(current, name: \AppDestinationTotal.destination),
+            outboundCandidates: candidates
         )
         return AgentLocalInsightSnapshot(
             context: context,
