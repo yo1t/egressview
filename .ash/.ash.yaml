@@ -61,6 +61,21 @@ global_settings:
     - path: 'docs/openapi.json'
       rule_id: 'CKV_OPENAPI_5'
       reason: 'Empty security is the explicit declaration that a route is public; only public routes carry it, enforced by test/unit/openapi-contract.test.js'
+    # ── Release-age wait ────────────────────────────────────────────────────
+    # These semgrep rules expect a 7-day wait. On 2026-11-14 the wait was set
+    # to 2 days for routine updates (moderate/low advisory fixes after 1 day,
+    # high/critical at once): hijacked npm releases have been caught within
+    # hours to about a day, while a week kept advisory fixes out of the Hub.
+    # The rules cannot be told a different minimum, so they are suppressed
+    # here and test/unit/release-age-policy.test.js keeps the wait in place:
+    # it fails if min-release-age or any Dependabot cooldown drops below 2
+    # days or is removed.
+    - path: '.npmrc'
+      rule_id: 'package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age'
+      reason: 'min-release-age is 2 days by decision (2026-11-14); the floor is enforced by test/unit/release-age-policy.test.js'
+    - path: '.github/dependabot.yml'
+      rule_id: 'package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown'
+      reason: 'cooldown is 2 days by decision (2026-11-14); the floor is enforced by test/unit/release-age-policy.test.js'
     # ── detect-secrets false positives ──────────────────────────────────────
     # These are the literal word "password"/"secret" appearing in translation
     # strings, npm script names, variable names and a token-alphabet constant —
