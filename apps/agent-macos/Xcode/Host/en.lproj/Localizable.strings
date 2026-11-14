@@ -933,7 +933,8 @@
 "Monitored %1$lld%% of %2$@." = "Monitored %1$lld%% of %2$@.";
 "Part of this time was not monitored, had no byte count, or is no longer kept connection by connection, so more may have been sent than shown." = "Part of this time was not monitored, had no byte count, or is no longer kept connection by connection, so more may have been sent than shown.";
 "%1$@ sent over %2$lld connections, %3$@" = "%1$@ sent over %2$lld connections, %3$@";
-"Does this matter to you?" = "Does this matter to you?";
+"Save note" = "Save note";
+"Answer with the buttons at the left of the row; a note typed here goes with it." = "Answer with the buttons at the left of the row; a note typed here goes with it.";
 "Note (optional)" = "Note (optional)";
 "Take back" = "Take back";
 "%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed." = "%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed.";

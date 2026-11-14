@@ -933,7 +933,8 @@
 "Monitored %1$lld%% of %2$@." = "%2$@のうち、監視していたのは%1$lld%%です。";
 "Part of this time was not monitored, had no byte count, or is no longer kept connection by connection, so more may have been sent than shown." = "この時間の一部は、監視していなかったか、送信量を測れなかったか、1件ずつの記録がもう残っていません。実際の送信はこれより多いかもしれません。";
 "%1$@ sent over %2$lld connections, %3$@" = "%2$lld回の通信で %1$@ 送信、%3$@";
-"Does this matter to you?" = "あなたにとって問題ですか？";
+"Save note" = "メモを保存";
+"Answer with the buttons at the left of the row; a note typed here goes with it." = "行の左のボタンで答えてください。ここに書いたメモも一緒に保存されます。";
 "Note (optional)" = "メモ（任意）";
 "Take back" = "取り消す";
 "%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed." = "%1$@ は、このMacの普段を学習し終えるまで %2$@ へ送ったことがありませんでした。%3$@ までの1週間に %4$@ 送り、新しい組み合わせを載せる 1 MB を超えました。";
