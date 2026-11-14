@@ -192,6 +192,29 @@ enum RenderCheck {
                  ).padding(16),
                  width: 560, height: 760,
                  to: "\(output)/outbound-candidates-judging-\(language).png")
+            // Answered from the row without opening it: one still open, one
+            // "Look into it", and "Checked" unfolded to show the filled-in
+            // button.
+            let answeredFromRow = [
+                candidates[0].id: OutboundCandidateJudgment(
+                    candidateID: candidates[0].id, candidateAt: day, verdict: .expected, judgedAt: day
+                ),
+                candidates[1].id: OutboundCandidateJudgment(
+                    candidateID: candidates[1].id, candidateAt: day, verdict: .investigate, judgedAt: day
+                ),
+            ]
+            save(AgentOutboundCandidatesView(
+                    report: OutboundCandidateReport(state: .ready, candidates: candidates, total: 3),
+                    judgments: answeredFromRow, actions: actions, showsChecked: true
+                 ).padding(16),
+                 width: 560, height: 520,
+                 to: "\(output)/outbound-candidates-row-buttons-\(language).png")
+            save(AgentOutboundCandidatesView(
+                    report: OutboundCandidateReport(state: .ready, candidates: candidates, total: 3),
+                    judgments: answeredFromRow, actions: actions, showsChecked: true
+                 ).padding(16),
+                 width: 1000, height: 360,
+                 to: "\(output)/outbound-candidates-row-buttons-wide-\(language).png")
 
             for (width, height) in [(1440.0, 900.0), (1100.0, 700.0), (820.0, 560.0)] {
                 save(AgentWorldMapChart(atlas: atlas, visitedCountryCodes: visited),

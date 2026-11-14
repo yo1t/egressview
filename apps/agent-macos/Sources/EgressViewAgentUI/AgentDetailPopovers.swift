@@ -255,9 +255,10 @@ public struct AgentOutboundAnomalyList: View {
 /// belong beside a period picker, and a list the pointer has to rest on to see
 /// is a list nobody finds. The popover keeps `summary(_:)`.
 ///
-/// A row opens to the connections behind it and a place to answer whether it
-/// matters (P3-194 phase 1). Answered rows fold into "Checked", so what is
-/// left open is what still needs a look.
+/// Each row is answered with the two buttons at its left, without opening it;
+/// a row opens to the connections behind it and a note (P3-194 phase 1).
+/// Answered rows fold into "Checked", so what is left open is what still
+/// needs a look.
 public struct AgentOutboundCandidatesView: View {
     /// Opens short because the AI conversation sits below it on the same screen.
     public static let collapsedCount = 10
@@ -270,6 +271,9 @@ public struct AgentOutboundCandidatesView: View {
     @State private var expandedID: String?
     @State private var showsChecked: Bool
     @State private var confirmsForget = false
+    /// Notes being typed, by candidate. Kept here rather than in the opened
+    /// row so the buttons on the row save what was typed below it.
+    @State private var notes: [String: String] = [:]
 
     public init(
         report: OutboundCandidateReport, showsAll: Bool = false,
@@ -381,39 +385,86 @@ public struct AgentOutboundCandidatesView: View {
     @ViewBuilder
     private func row(_ candidate: OutboundCandidate) -> some View {
         let isExpanded = expandedID == candidate.id
+        let judgment = judgments[candidate.id]
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if actions != nil {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .frame(width: 10)
+            HStack(alignment: .center, spacing: 8) {
+                if let actions {
+                    HStack(spacing: 4) {
+                        verdictButton(.expected, candidate: candidate, judgment: judgment, actions: actions)
+                        verdictButton(.investigate, candidate: candidate, judgment: judgment, actions: actions)
+                    }
+                    .fixedSize()
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title(candidate)).font(.callout)
-                    Text(detail(candidate)).font(.caption).foregroundStyle(.secondary)
+                // Outside the buttons, so pressing one answers without
+                // opening the row.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if actions != nil {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .frame(width: 10)
+                    }
+                    // Why it is listed sits under the name, so it is read
+                    // without opening the row.
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title(candidate)).font(.callout)
+                        Text(detail(candidate)).font(.caption).foregroundStyle(.secondary)
+                        Text(AgentOutboundCandidateDetail.reason(candidate))
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    if actions == nil, let judgment {
+                        Text(Self.verdictLabel(judgment.verdict))
+                            .font(.caption)
+                            .foregroundStyle(judgment.verdict == .investigate ? Color.orange : Color.secondary)
+                    }
                 }
-                Spacer(minLength: 8)
-                if let judgment = judgments[candidate.id] {
-                    Text(Self.verdictLabel(judgment.verdict))
-                        .font(.caption)
-                        .foregroundStyle(judgment.verdict == .investigate ? Color.orange : Color.secondary)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard actions != nil else { return }
+                    expandedID = isExpanded ? nil : candidate.id
                 }
+                .accessibilityAddTraits(actions != nil ? .isButton : [])
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                guard actions != nil else { return }
-                expandedID = isExpanded ? nil : candidate.id
-            }
-            .accessibilityAddTraits(actions != nil ? .isButton : [])
             if isExpanded, let actions {
                 AgentOutboundCandidateDetail(
-                    candidate: candidate, judgment: judgments[candidate.id], actions: actions,
-                    preloaded: preloadedEvidence[candidate.id]
+                    candidate: candidate, judgment: judgment, actions: actions,
+                    preloaded: preloadedEvidence[candidate.id],
+                    note: noteBinding(candidate),
+                    takeBack: { notes[candidate.id] = nil }
                 )
                 .padding(.leading, 16)
                 .padding(.vertical, 4)
             }
         }
+    }
+
+    private func noteBinding(_ candidate: OutboundCandidate) -> Binding<String> {
+        Binding(
+            get: { notes[candidate.id] ?? judgments[candidate.id]?.note ?? "" },
+            set: { notes[candidate.id] = $0 }
+        )
+    }
+
+    /// The chosen answer is filled in, so a row in "Checked" shows which it
+    /// was; pressing it again saves an edited note.
+    @ViewBuilder
+    private func verdictButton(
+        _ verdict: OutboundCandidateVerdict, candidate: OutboundCandidate,
+        judgment: OutboundCandidateJudgment?, actions: AgentOutboundCandidateActions
+    ) -> some View {
+        let label = Self.verdictLabel(verdict)
+        let save = { actions.judge(candidate, verdict, noteBinding(candidate).wrappedValue) }
+        Group {
+            if judgment?.verdict == verdict {
+                Button(label, action: save).buttonStyle(.borderedProminent)
+                    .tint(verdict == .investigate ? .orange : .accentColor)
+            } else {
+                Button(label, action: save).buttonStyle(.bordered)
+            }
+        }
+        .controlSize(.small)
+        .accessibilityLabel("\(label): \(title(candidate))")
     }
 
     static func verdictLabel(_ verdict: OutboundCandidateVerdict) -> String {
@@ -465,8 +516,8 @@ public struct AgentOutboundCandidateActions {
     }
 }
 
-/// One candidate opened: why it is listed, the connections behind it, how
-/// much of that time could be seen, and the person's answer (P3-194 phase 1).
+/// One candidate opened: the connections behind it, how much of that time
+/// could be seen, and a note for the answer (P3-194 phase 1).
 struct AgentOutboundCandidateDetail: View {
     let candidate: OutboundCandidate
     let judgment: OutboundCandidateJudgment?
@@ -475,7 +526,8 @@ struct AgentOutboundCandidateDetail: View {
 
     private enum Loaded { case loading, failed, done(OutboundCandidateEvidence) }
     @State private var loaded: Loaded
-    @State private var noteText: String
+    @Binding private var noteText: String
+    private let takeBack: () -> Void
     /// The person's choice in Settings > Hub (P3-194), read here so this
     /// screen says where an answer goes whenever it is typed.
     @AppStorage(OutboundCandidateSharingPreferences.enabledKey) private var sharesWithHub = false
@@ -483,21 +535,21 @@ struct AgentOutboundCandidateDetail: View {
 
     init(
         candidate: OutboundCandidate, judgment: OutboundCandidateJudgment?,
-        actions: AgentOutboundCandidateActions, preloaded: OutboundCandidateEvidence?
+        actions: AgentOutboundCandidateActions, preloaded: OutboundCandidateEvidence?,
+        note: Binding<String>, takeBack: @escaping () -> Void
     ) {
         self.candidate = candidate
         self.judgment = judgment
         self.actions = actions
         self.preloaded = preloaded
+        self.takeBack = takeBack
         _loaded = State(initialValue: preloaded.map { .done($0) } ?? .loading)
-        _noteText = State(initialValue: judgment?.note ?? "")
+        _noteText = note
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(Self.reason(candidate))
-                .font(.callout)
-                .fixedSize(horizontal: false, vertical: true)
+            // Why it is listed is on the row itself, open or not.
             evidence
             Divider()
             answer
@@ -564,20 +616,26 @@ struct AgentOutboundCandidateDetail: View {
 
     private var answer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(L("Does this matter to you?")).font(.caption.weight(.semibold))
             TextField(L("Note (optional)"), text: $noteText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption)
                 .lineLimit(1...3)
-            HStack(spacing: 8) {
-                verdictButton(.expected)
-                verdictButton(.investigate)
-                if judgment != nil {
-                    Button(L("Take back")) { actions.judge(candidate, nil, "") }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.tint)
-                        .font(.caption)
+            if let judgment {
+                HStack(spacing: 12) {
+                    if noteText != judgment.note {
+                        Button(L("Save note")) { actions.judge(candidate, judgment.verdict, noteText) }
+                            .buttonStyle(.bordered).controlSize(.small)
+                    }
+                    Button(L("Take back")) {
+                        takeBack()
+                        actions.judge(candidate, nil, "")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tint)
+                    .font(.caption)
                 }
+            } else {
+                caption(L("Answer with the buttons at the left of the row; a note typed here goes with it."))
             }
             caption(L("Your answer and note are kept on this Mac. They go to an AI provider only with a question you send, and the AI context preview shows them first."))
             if sharesWithHub {
@@ -585,18 +643,6 @@ struct AgentOutboundCandidateDetail: View {
                     ? L("Sending to the Hub is on: this list, your answers and your notes also go to the Hub. Change it in Settings > Hub.")
                     : L("Sending to the Hub is on: this list and your answers also go to the Hub, without your notes. Change it in Settings > Hub."))
             }
-        }
-    }
-
-    @ViewBuilder
-    private func verdictButton(_ verdict: OutboundCandidateVerdict) -> some View {
-        let label = AgentOutboundCandidatesView.verdictLabel(verdict)
-        if judgment?.verdict == verdict {
-            Button(label) { actions.judge(candidate, verdict, noteText) }
-                .buttonStyle(.borderedProminent).controlSize(.small)
-        } else {
-            Button(label) { actions.judge(candidate, verdict, noteText) }
-                .buttonStyle(.bordered).controlSize(.small)
         }
     }
 
