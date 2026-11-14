@@ -262,6 +262,8 @@ struct AgentMainView: View {
                 monitoringStatus: model.monitoringStatus,
                 isRefreshing: model.isRefreshing,
                 outboundCandidates: model.outboundCandidates,
+                outboundCandidateJudgments: model.outboundCandidateJudgments,
+                outboundCandidateActions: model.outboundCandidateActions,
                 ollama: model.ollama
             )
             .padding(.horizontal, 20)

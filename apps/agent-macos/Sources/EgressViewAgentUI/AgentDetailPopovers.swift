@@ -254,16 +254,37 @@ public struct AgentOutboundAnomalyList: View {
 /// Lives in Insights, not in the overview tile's popover: fourteen days do not
 /// belong beside a period picker, and a list the pointer has to rest on to see
 /// is a list nobody finds. The popover keeps `summary(_:)`.
+///
+/// A row opens to the connections behind it and a place to answer whether it
+/// matters (P3-194 phase 1). Answered rows fold into "Checked", so what is
+/// left open is what still needs a look.
 public struct AgentOutboundCandidatesView: View {
     /// Opens short because the AI conversation sits below it on the same screen.
     public static let collapsedCount = 10
 
     let report: OutboundCandidateReport
+    let judgments: [String: OutboundCandidateJudgment]
+    let actions: AgentOutboundCandidateActions?
+    let preloadedEvidence: [String: OutboundCandidateEvidence]
     @State private var showsAll: Bool
+    @State private var expandedID: String?
+    @State private var showsChecked: Bool
+    @State private var confirmsForget = false
 
-    public init(report: OutboundCandidateReport, showsAll: Bool = false) {
+    public init(
+        report: OutboundCandidateReport, showsAll: Bool = false,
+        judgments: [String: OutboundCandidateJudgment] = [:],
+        actions: AgentOutboundCandidateActions? = nil,
+        expandedID: String? = nil, showsChecked: Bool = false,
+        preloadedEvidence: [String: OutboundCandidateEvidence] = [:]
+    ) {
         self.report = report
+        self.judgments = judgments
+        self.actions = actions
+        self.preloadedEvidence = preloadedEvidence
         _showsAll = State(initialValue: showsAll)
+        _expandedID = State(initialValue: expandedID)
+        _showsChecked = State(initialValue: showsChecked)
     }
 
     /// One line for the overview tile. A low share keeps its warning here,
@@ -281,8 +302,16 @@ public struct AgentOutboundCandidatesView: View {
         }
     }
 
+    private var unchecked: [OutboundCandidate] {
+        report.candidates.filter { judgments[$0.id] == nil }
+    }
+
+    private var checked: [OutboundCandidate] {
+        report.candidates.filter { judgments[$0.id] != nil }
+    }
+
     private var visible: [OutboundCandidate] {
-        showsAll ? report.candidates : Array(report.candidates.prefix(Self.collapsedCount))
+        showsAll ? unchecked : Array(unchecked.prefix(Self.collapsedCount))
     }
 
     public var body: some View {
@@ -306,15 +335,12 @@ public struct AgentOutboundCandidatesView: View {
             if case .learning = report.state {} else {
                 if report.candidates.isEmpty {
                     note(L("Nothing stood out against this Mac's usual traffic."))
+                } else if unchecked.isEmpty {
+                    note(L("You have answered every one listed here."))
                 }
-                ForEach(visible) { candidate in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title(candidate)).font(.callout)
-                        Text(detail(candidate)).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                if visible.count < report.candidates.count {
-                    Button(L("Show all %lld", report.candidates.count)) { showsAll = true }
+                ForEach(visible) { candidate in row(candidate) }
+                if visible.count < unchecked.count {
+                    Button(L("Show all %lld", unchecked.count)) { showsAll = true }
                         .buttonStyle(.plain)
                         .foregroundStyle(.tint)
                         .font(.caption)
@@ -322,11 +348,79 @@ public struct AgentOutboundCandidatesView: View {
                     Text(L("Showing the newest %1$lld of %2$lld.", report.candidates.count, report.total))
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                if !checked.isEmpty {
+                    DisclosureGroup(isExpanded: $showsChecked) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(checked) { candidate in row(candidate) }
+                            if actions != nil {
+                                Button(L("Forget all answers…")) { confirmsForget = true }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(.tint)
+                                    .font(.caption)
+                            }
+                        }
+                        .padding(.top, 4)
+                    } label: {
+                        Text(L("Checked (%lld)", checked.count)).font(.callout)
+                    }
+                }
                 note(L("A place to start looking, not a verdict: your own uploads and updates appear here too. Small amounts, browsers, virtual machines and transfers within your network are not judged."))
             }
         }
         // A name here is what gets searched for or passed on next.
         .textSelection(.enabled)
+        .confirmationDialog(
+            L("Forget all answers?"), isPresented: $confirmsForget
+        ) {
+            Button(L("Forget all answers"), role: .destructive) { actions?.forgetAll() }
+        } message: {
+            Text(L("Every candidate goes back to the list, and the notes are deleted. The candidates themselves are not changed."))
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ candidate: OutboundCandidate) -> some View {
+        let isExpanded = expandedID == candidate.id
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if actions != nil {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .frame(width: 10)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title(candidate)).font(.callout)
+                    Text(detail(candidate)).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if let judgment = judgments[candidate.id] {
+                    Text(Self.verdictLabel(judgment.verdict))
+                        .font(.caption)
+                        .foregroundStyle(judgment.verdict == .investigate ? Color.orange : Color.secondary)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard actions != nil else { return }
+                expandedID = isExpanded ? nil : candidate.id
+            }
+            .accessibilityAddTraits(actions != nil ? .isButton : [])
+            if isExpanded, let actions {
+                AgentOutboundCandidateDetail(
+                    candidate: candidate, judgment: judgments[candidate.id], actions: actions,
+                    preloaded: preloadedEvidence[candidate.id]
+                )
+                .padding(.leading, 16)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    static func verdictLabel(_ verdict: OutboundCandidateVerdict) -> String {
+        switch verdict {
+        case .expected: return L("Expected")
+        case .investigate: return L("Look into it")
+        }
     }
 
     private func note(_ text: String) -> some View {
@@ -350,6 +444,191 @@ public struct AgentOutboundCandidatesView: View {
         case .aboveUsual: return L("%1$@: %2$@ sent in a day, usually up to %3$@", day, sent, usual)
         case .machine: return L("%1$@: %2$@ sent in 24 hours, usually up to %3$@", day, sent, usual)
         }
+    }
+}
+
+/// What the candidate list can ask of the app. Absent, rows do not open --
+/// as in the overview tile and the render check of the plain list.
+public struct AgentOutboundCandidateActions {
+    public var loadEvidence: @Sendable (OutboundCandidate) async -> OutboundCandidateEvidence?
+    public var judge: @MainActor (OutboundCandidate, OutboundCandidateVerdict?, String) -> Void
+    public var forgetAll: @MainActor () -> Void
+
+    public init(
+        loadEvidence: @escaping @Sendable (OutboundCandidate) async -> OutboundCandidateEvidence?,
+        judge: @escaping @MainActor (OutboundCandidate, OutboundCandidateVerdict?, String) -> Void,
+        forgetAll: @escaping @MainActor () -> Void = {}
+    ) {
+        self.loadEvidence = loadEvidence
+        self.judge = judge
+        self.forgetAll = forgetAll
+    }
+}
+
+/// One candidate opened: why it is listed, the connections behind it, how
+/// much of that time could be seen, and the person's answer (P3-194 phase 1).
+struct AgentOutboundCandidateDetail: View {
+    let candidate: OutboundCandidate
+    let judgment: OutboundCandidateJudgment?
+    let actions: AgentOutboundCandidateActions
+    let preloaded: OutboundCandidateEvidence?
+
+    private enum Loaded { case loading, failed, done(OutboundCandidateEvidence) }
+    @State private var loaded: Loaded
+    @State private var noteText: String
+
+    init(
+        candidate: OutboundCandidate, judgment: OutboundCandidateJudgment?,
+        actions: AgentOutboundCandidateActions, preloaded: OutboundCandidateEvidence?
+    ) {
+        self.candidate = candidate
+        self.judgment = judgment
+        self.actions = actions
+        self.preloaded = preloaded
+        _loaded = State(initialValue: preloaded.map { .done($0) } ?? .loading)
+        _noteText = State(initialValue: judgment?.note ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(Self.reason(candidate))
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            evidence
+            Divider()
+            answer
+        }
+        .task(id: candidate.id) {
+            if preloaded != nil { return }
+            loaded = .loading
+            if let value = await actions.loadEvidence(candidate) {
+                loaded = .done(value)
+            } else {
+                loaded = .failed
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var evidence: some View {
+        switch loaded {
+        case .loading:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                caption(L("Reading the connections…"))
+            }
+        case .failed:
+            caption(L("The connections could not be read."))
+        case .done(let evidence):
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("Connections behind it")).font(.caption.weight(.semibold))
+                if evidence.flows.isEmpty {
+                    caption(L("No connection is left in the history for this time."))
+                }
+                ForEach(evidence.flows) { flow in
+                    flowRow(flow)
+                }
+                if evidence.flowTotal > evidence.flows.count {
+                    caption(L("Showing the largest %1$lld of %2$lld.", evidence.flows.count, evidence.flowTotal))
+                }
+                caption(L(
+                    "Monitored %1$lld%% of %2$@.",
+                    Int((Double(evidence.monitoredSeconds) / max(1, evidence.window.duration) * 100).rounded()),
+                    Self.windowText(evidence.window)
+                ))
+                if evidence.mayUndercount {
+                    caption(L("Part of this time was not monitored, had no byte count, or is no longer kept connection by connection, so more may have been sent than shown."))
+                }
+            }
+        }
+    }
+
+    private func flowRow(_ flow: OutboundCandidateEvidence.Flow) -> some View {
+        let name = flow.hostname ?? flow.address
+        let place = flow.hostname == nil ? "" : " (\(flow.address))"
+        let app = candidate.application == nil ? "\(flow.application) → " : ""
+        return VStack(alignment: .leading, spacing: 1) {
+            Text("\(app)\(name)\(place)").font(.caption)
+            Text(L(
+                "%1$@ sent over %2$lld connections, %3$@",
+                AgentOutboundBaselineView.bytes(flow.bytesOut), flow.connections,
+                Self.spanText(flow.firstAt, flow.lastAt)
+            ))
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private var answer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L("Does this matter to you?")).font(.caption.weight(.semibold))
+            TextField(L("Note (optional)"), text: $noteText, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .lineLimit(1...3)
+            HStack(spacing: 8) {
+                verdictButton(.expected)
+                verdictButton(.investigate)
+                if judgment != nil {
+                    Button(L("Take back")) { actions.judge(candidate, nil, "") }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
+                        .font(.caption)
+                }
+            }
+            caption(L("Your answer and note stay on this Mac. They are not sent to the Hub or an AI provider."))
+        }
+    }
+
+    @ViewBuilder
+    private func verdictButton(_ verdict: OutboundCandidateVerdict) -> some View {
+        let label = AgentOutboundCandidatesView.verdictLabel(verdict)
+        if judgment?.verdict == verdict {
+            Button(label) { actions.judge(candidate, verdict, noteText) }
+                .buttonStyle(.borderedProminent).controlSize(.small)
+        } else {
+            Button(label) { actions.judge(candidate, verdict, noteText) }
+                .buttonStyle(.bordered).controlSize(.small)
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Why it is on the list, in one sentence, with the yardstick it was
+    /// held against.
+    static func reason(_ candidate: OutboundCandidate) -> String {
+        let day = candidate.at.formatted(date: .abbreviated, time: .omitted)
+        let sent = AgentOutboundBaselineView.bytes(candidate.bytesOut)
+        let usual = AgentOutboundBaselineView.bytes(candidate.usualBytesOut ?? 0)
+        let app = candidate.application ?? ""
+        let destination = candidate.destination ?? ""
+        switch candidate.kind {
+        case .newPair:
+            return L("%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed.", app, destination, day, sent)
+        case .aboveUsual:
+            return L("On %1$@, %2$@ sent %3$@ to %4$@. On most days it sends up to %5$@; a day is listed at 10 MB and five times that.", day, app, sent, destination, usual)
+        case .machine:
+            return L("In 24 hours on %1$@ this Mac sent %2$@. Its usual 24 hours reach up to %3$@; it is listed above one and a half times that.", day, sent, usual)
+        }
+    }
+
+    /// Named by the days it covers, as the list names the candidate's day:
+    /// the window ends a day after that day starts.
+    static func windowText(_ window: DateInterval) -> String {
+        let end = window.end.addingTimeInterval(-86_400)
+        let first = window.start.formatted(date: .abbreviated, time: .omitted)
+        let last = end.formatted(date: .abbreviated, time: .omitted)
+        return first == last ? first : "\(first)–\(last)"
+    }
+
+    static func spanText(_ first: Date, _ last: Date) -> String {
+        let start = first.formatted(date: .abbreviated, time: .shortened)
+        let end = Calendar.current.isDate(first, inSameDayAs: last)
+            ? last.formatted(date: .omitted, time: .shortened)
+            : last.formatted(date: .abbreviated, time: .shortened)
+        return start == end ? start : "\(start)–\(end)"
     }
 }
 

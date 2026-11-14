@@ -338,7 +338,7 @@ public final class ObservationStore: @unchecked Sendable {
     ///
     /// Named rather than counted from the code so the backup and the progress
     /// file can say where the migration is heading before it starts.
-    static let latestSchemaVersion = 19
+    static let latestSchemaVersion = 20
 
     private func migrate() throws {
         let version = try scalar("PRAGMA user_version") ?? 0
@@ -829,6 +829,27 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("INSERT OR IGNORE INTO baseline_state (id) VALUES (1)")
             try execute("PRAGMA user_version=19")
             reportMigrationStep(19)
+        }
+        if version < 20 {
+            // What the person decided about a candidate (P3-194 phase 1).
+            // Apart from the candidates, which are recomputed every time and
+            // never stored. Mac only for now; the Windows Agent follows once
+            // this has been used for two weeks.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS outbound_candidate_judgments (
+                candidate_id TEXT PRIMARY KEY,
+                candidate_at REAL NOT NULL,
+                verdict TEXT NOT NULL CHECK (verdict IN ('expected', 'investigate')),
+                note TEXT NOT NULL DEFAULT '',
+                judged_at REAL NOT NULL
+            ) WITHOUT ROWID
+            """)
+            try execute("""
+            CREATE INDEX IF NOT EXISTS outbound_candidate_judgments_at
+            ON outbound_candidate_judgments(candidate_at)
+            """)
+            try execute("PRAGMA user_version=20")
+            reportMigrationStep(20)
         }
     }
 
@@ -2622,6 +2643,11 @@ public final class ObservationStore: @unchecked Sendable {
         try execute("DELETE FROM baseline_pair_days WHERE day < \(pairDayCutoff)")
         try execute("DELETE FROM baseline_pairs WHERE last_seen < \(cutoff)")
         try execute("UPDATE baseline_pairs SET first_seen = \(cutoff) WHERE first_seen < \(cutoff)")
+        let judgmentCutoff = max(
+            cutoff,
+            now.timeIntervalSince1970 - OutboundCandidateRules.listWindow - OutboundCandidateRules.judgmentRetention
+        )
+        try execute("DELETE FROM outbound_candidate_judgments WHERE candidate_at < \(judgmentCutoff)")
     }
 
     /// Deleting history deletes what was derived from it. A pair first seen
@@ -2633,6 +2659,7 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("DELETE FROM baseline_hours")
             try execute("DELETE FROM baseline_pair_days")
             try execute("DELETE FROM baseline_pairs")
+            try execute("DELETE FROM outbound_candidate_judgments")
             // Nothing left to read back to, so the next hour starts afresh.
             try execute("""
             UPDATE baseline_state SET captured_through = \(Self.floorHour(Date().timeIntervalSince1970))
@@ -2643,6 +2670,8 @@ public final class ObservationStore: @unchecked Sendable {
         try execute("DELETE FROM baseline_hours WHERE hour_start < \(cutoff)")
         try execute("DELETE FROM baseline_pair_days WHERE day < \(cutoff)")
         try execute("DELETE FROM baseline_pairs WHERE first_seen < \(cutoff)")
+        // A judgment is about traffic in the deleted time, so it goes with it.
+        try execute("DELETE FROM outbound_candidate_judgments WHERE candidate_at < \(cutoff)")
     }
 
     public func outboundBaselineSummary() throws -> OutboundBaselineSummary {
@@ -2728,6 +2757,167 @@ public final class ObservationStore: @unchecked Sendable {
                 )] = sqlite3_column_double(pairRows, 2)
             }
             return OutboundCandidateRules.evaluate(hours: hours, pairDays: days, firstSeen: firstSeen, now: now)
+        }
+    }
+
+    // MARK: - Judging a candidate (P3-194 phase 1)
+
+    public func outboundCandidateJudgments() throws -> [String: OutboundCandidateJudgment] {
+        try lock.withLock {
+            let statement = try prepare("""
+            SELECT candidate_id, candidate_at, verdict, note, judged_at FROM outbound_candidate_judgments
+            """)
+            defer { sqlite3_finalize(statement) }
+            var result: [String: OutboundCandidateJudgment] = [:]
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let id = text(statement, 0),
+                      let verdict = text(statement, 2).flatMap(OutboundCandidateVerdict.init(rawValue:))
+                else { continue }
+                result[id] = OutboundCandidateJudgment(
+                    candidateID: id,
+                    candidateAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
+                    verdict: verdict,
+                    note: text(statement, 3) ?? "",
+                    judgedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+                )
+            }
+            return result
+        }
+    }
+
+    /// Records the answer, replacing any earlier one. `nil` takes it back.
+    public func setOutboundCandidateJudgment(
+        _ candidate: OutboundCandidate, verdict: OutboundCandidateVerdict?, note: String = "",
+        now: Date = Date()
+    ) throws {
+        try lock.withLock {
+            guard let verdict else {
+                let statement = try prepare("DELETE FROM outbound_candidate_judgments WHERE candidate_id = ?")
+                defer { sqlite3_finalize(statement) }
+                bindText(statement, 1, candidate.id)
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw ObservationStoreError.statement(lastMessage)
+                }
+                return
+            }
+            let statement = try prepare("""
+            INSERT OR REPLACE INTO outbound_candidate_judgments
+                (candidate_id, candidate_at, verdict, note, judged_at)
+            VALUES (?, ?, ?, ?, ?)
+            """)
+            defer { sqlite3_finalize(statement) }
+            bindText(statement, 1, candidate.id)
+            sqlite3_bind_double(statement, 2, candidate.at.timeIntervalSince1970)
+            bindText(statement, 3, verdict.rawValue)
+            bindText(statement, 4, String(note.prefix(Self.judgmentNoteLimit)))
+            sqlite3_bind_double(statement, 5, now.timeIntervalSince1970)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ObservationStoreError.statement(lastMessage)
+            }
+        }
+    }
+
+    public func removeAllOutboundCandidateJudgments() throws {
+        try lock.withLock { try execute("DELETE FROM outbound_candidate_judgments") }
+    }
+
+    /// A note is a reminder, not a document.
+    public static let judgmentNoteLimit = 500
+
+    /// The connections behind a candidate, from the raw history.
+    ///
+    /// Read an hour at a time, as the baseline is written, so a week of a
+    /// busy Mac does not hold the lock against the collector. Grouped and
+    /// keyed exactly as the baseline groups them, so what is shown adds up to
+    /// what was judged -- as far as the raw history still reaches.
+    public func outboundCandidateEvidence(
+        for candidate: OutboundCandidate, limit: Int = OutboundCandidateEvidence.flowLimit
+    ) throws -> OutboundCandidateEvidence {
+        let window = OutboundCandidateRules.evidenceWindow(for: candidate)
+        let start = window.start.timeIntervalSince1970
+        let end = window.end.timeIntervalSince1970
+        struct Key: Hashable { let application: String; let hostname: String?; let address: String }
+        var flows: [Key: OutboundCandidateEvidence.Flow] = [:]
+        var external: [String: Bool] = [:]
+        var hour = start
+        while hour < end {
+            let next = min(end, hour + 3600)
+            try lock.withLock {
+                let statement = try prepare("""
+                SELECT remote_address, NULLIF(remote_hostname, ''), bundle_id, process_name,
+                       COUNT(*), COALESCE(SUM(bytes_out), 0),
+                       MIN(first_observed_at), MAX(last_observed_at)
+                FROM observations
+                WHERE last_observed_at >= ? AND last_observed_at < ?
+                GROUP BY remote_address, NULLIF(remote_hostname, ''), bundle_id, process_name
+                """)
+                defer { sqlite3_finalize(statement) }
+                sqlite3_bind_double(statement, 1, hour)
+                sqlite3_bind_double(statement, 2, next)
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    let address = text(statement, 0) ?? ""
+                    let isExternal = external[address] ?? {
+                        let value = !NonPublicAddress.isExcludedFromOutboundAnomaly(address)
+                        external[address] = value
+                        return value
+                    }()
+                    guard isExternal else { continue }
+                    let hostname = text(statement, 1)
+                    let application = OutboundBaselineKeys.application(
+                        bundleID: text(statement, 2), processName: text(statement, 3)
+                    )
+                    if let wanted = candidate.application, let destination = candidate.destination {
+                        guard application == wanted,
+                              OutboundBaselineKeys.destination(hostname: hostname, address: address) == destination
+                        else { continue }
+                    }
+                    let sent = UInt64(max(0, sqlite3_column_int64(statement, 5)))
+                    let connections = Int(sqlite3_column_int64(statement, 4))
+                    let first = Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+                    let last = Date(timeIntervalSince1970: sqlite3_column_double(statement, 7))
+                    let key = Key(application: application, hostname: hostname, address: address)
+                    if var flow = flows[key] {
+                        flow.bytesOut &+= sent
+                        flow.connections += connections
+                        flow.firstAt = min(flow.firstAt, first)
+                        flow.lastAt = max(flow.lastAt, last)
+                        flows[key] = flow
+                    } else {
+                        flows[key] = .init(
+                            application: application, hostname: hostname, address: address,
+                            bytesOut: sent, connections: connections, firstAt: first, lastAt: last
+                        )
+                    }
+                }
+            }
+            hour = next
+        }
+        return try lock.withLock {
+            let statement = try prepare("""
+            SELECT COALESCE(SUM(monitored_seconds), 0), COALESCE(SUM(observations), 0),
+                   COALESCE(SUM(observations_with_bytes), 0)
+            FROM baseline_hours WHERE hour_start >= ? AND hour_start < ?
+            """)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, start)
+            sqlite3_bind_double(statement, 2, end)
+            var monitored = 0, observations = 0, withBytes = 0
+            if sqlite3_step(statement) == SQLITE_ROW {
+                monitored = Int(sqlite3_column_int64(statement, 0))
+                observations = Int(sqlite3_column_int64(statement, 1))
+                withBytes = Int(sqlite3_column_int64(statement, 2))
+            }
+            let oldestRaw = try scalarDouble("SELECT MIN(last_observed_at) FROM observations")
+            let sorted = flows.values.sorted { ($0.bytesOut, $1.id) > ($1.bytesOut, $0.id) }
+            return OutboundCandidateEvidence(
+                window: window,
+                flows: Array(sorted.prefix(max(0, limit))),
+                flowTotal: sorted.count,
+                bytesOut: sorted.reduce(0) { $0 &+ $1.bytesOut },
+                monitoredSeconds: min(monitored, Int(window.duration)),
+                byteShare: observations == 0 ? nil : Double(withBytes) / Double(observations),
+                rawHistoryIsPartial: oldestRaw.map { $0 > start } ?? true
+            )
         }
     }
 
