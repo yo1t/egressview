@@ -165,6 +165,34 @@ enum RenderCheck {
                  width: 760, height: 600,
                  to: "\(output)/outbound-candidates-expanded-\(language).png")
 
+            // One opened, with its connections and an answer, and one folded
+            // into "Checked" (P3-194).
+            let opened = candidates[2]
+            let evidence = OutboundCandidateEvidence(
+                window: OutboundCandidateRules.evidenceWindow(for: opened),
+                flows: [
+                    .init(application: opened.application!, hostname: "cdn-windows-client-a.example.com",
+                          address: "2001:db8:1234:5678::a1", bytesOut: 30_100_000, connections: 412,
+                          firstAt: day.addingTimeInterval(3_600), lastAt: day.addingTimeInterval(80_000)),
+                    .init(application: opened.application!, hostname: nil, address: "203.0.113.200",
+                          bytesOut: 4_900_000, connections: 3,
+                          firstAt: day.addingTimeInterval(40_000), lastAt: day.addingTimeInterval(40_100)),
+                ],
+                flowTotal: 23, bytesOut: 35_000_000, monitoredSeconds: 61_200, byteShare: 0.97,
+                rawHistoryIsPartial: false
+            )
+            let actions = AgentOutboundCandidateActions(loadEvidence: { _ in nil }, judge: { _, _, _ in })
+            let judged = [candidates[0].id: OutboundCandidateJudgment(
+                candidateID: candidates[0].id, candidateAt: day, verdict: .expected, judgedAt: day
+            )]
+            save(AgentOutboundCandidatesView(
+                    report: OutboundCandidateReport(state: .ready, candidates: candidates, total: 3),
+                    judgments: judged, actions: actions, expandedID: opened.id, showsChecked: true,
+                    preloadedEvidence: [opened.id: evidence]
+                 ).padding(16),
+                 width: 560, height: 760,
+                 to: "\(output)/outbound-candidates-judging-\(language).png")
+
             for (width, height) in [(1440.0, 900.0), (1100.0, 700.0), (820.0, 560.0)] {
                 save(AgentWorldMapChart(atlas: atlas, visitedCountryCodes: visited),
                      width: width, height: height,

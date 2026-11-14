@@ -10,6 +10,8 @@ struct AgentInsightPanel: View {
     /// Not part of `snapshot`: that is the bounded context an AI request may
     /// send, and these stay on this Mac.
     let outboundCandidates: OutboundCandidateReport?
+    var outboundCandidateJudgments: [String: OutboundCandidateJudgment] = [:]
+    var outboundCandidateActions: AgentOutboundCandidateActions?
     @ObservedObject var ollama: AgentOllamaController
 
     @State private var question = ""
@@ -441,7 +443,10 @@ struct AgentInsightPanel: View {
     @ViewBuilder
     private var candidates: some View {
         if let outboundCandidates {
-            AgentOutboundCandidatesView(report: outboundCandidates)
+            AgentOutboundCandidatesView(
+                report: outboundCandidates, judgments: outboundCandidateJudgments,
+                actions: outboundCandidateActions
+            )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
                 .background(cardBackground)

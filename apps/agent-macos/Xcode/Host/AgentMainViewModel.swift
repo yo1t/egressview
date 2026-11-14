@@ -293,6 +293,8 @@ final class AgentMainViewModel: ObservableObject {
     /// rather than the selected period (P3-192 phase 2). Nil when it could not
     /// be read.
     @Published private(set) var outboundCandidates: OutboundCandidateReport?
+    /// The person's answers to those candidates, by candidate ID (P3-194).
+    @Published private(set) var outboundCandidateJudgments: [String: OutboundCandidateJudgment] = [:]
     let ollama: AgentOllamaController
     @Published private(set) var coverage = CoverageSummary(
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
@@ -524,6 +526,39 @@ final class AgentMainViewModel: ObservableObject {
     /// on the period -- see `TimeScale.liveFollowInterval`.
     private var networkPacer = LiveLogPacer(interval: TimeScale.hour.liveFollowInterval)
     private var networkPacerScale = TimeScale.hour
+
+    /// What the candidate list may ask for (P3-194). The connections are
+    /// read off the main thread: a new pair's week is up to 168 hours of raw
+    /// history.
+    var outboundCandidateActions: AgentOutboundCandidateActions? {
+        guard let store else { return nil }
+        return AgentOutboundCandidateActions(
+            loadEvidence: { candidate in
+                await Task.detached(priority: .userInitiated) {
+                    try? store.outboundCandidateEvidence(for: candidate)
+                }.value
+            },
+            judge: { [weak self] candidate, verdict, note in
+                self?.judge(candidate, verdict: verdict, note: note)
+            },
+            forgetAll: { [weak self] in
+                guard let self, let store = self.store else { return }
+                try? store.removeAllOutboundCandidateJudgments()
+                self.outboundCandidateJudgments = (try? store.outboundCandidateJudgments()) ?? [:]
+            }
+        )
+    }
+
+    private func judge(_ candidate: OutboundCandidate, verdict: OutboundCandidateVerdict?, note: String) {
+        guard let store else { return }
+        do {
+            try store.setOutboundCandidateJudgment(candidate, verdict: verdict, note: note)
+            outboundCandidateJudgments = try store.outboundCandidateJudgments()
+        } catch {
+            // Left as it was: the row stays where it is, which is what the
+            // person sees, rather than moving to "Checked" without being kept.
+        }
+    }
 
     /// New observations have been written to the store.
     ///
@@ -760,6 +795,7 @@ final class AgentMainViewModel: ObservableObject {
                 // The overview tile counts them and Insights lists them.
                 if tab == .network || tab == .insights {
                     data.outboundCandidates = .some(try? store.outboundCandidates())
+                    data.outboundCandidateJudgments = (try? store.outboundCandidateJudgments()) ?? [:]
                 }
 
                 if tab == .insights {
@@ -862,6 +898,7 @@ final class AgentMainViewModel: ObservableObject {
         /// Outer nil: this tab did not read them. Inner nil: the read failed,
         /// which must clear the list rather than leave an old one standing.
         var outboundCandidates: OutboundCandidateReport??
+        var outboundCandidateJudgments: [String: OutboundCandidateJudgment]?
         var sankey: SankeyModel?
         var timeline: TimelineModel?
         var globe: GlobeModel?
@@ -879,6 +916,7 @@ final class AgentMainViewModel: ObservableObject {
         if let value = data.summary { summary = value }
         if let value = data.localInsights { localInsights = value }
         if let value = data.outboundCandidates { outboundCandidates = value }
+        if let value = data.outboundCandidateJudgments { outboundCandidateJudgments = value }
         if let value = data.sankey { sankey = value }
         if let value = data.timeline { timeline = value }
         if let value = data.globe { globe = value }

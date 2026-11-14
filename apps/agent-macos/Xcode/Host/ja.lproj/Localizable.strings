@@ -919,3 +919,28 @@
 "%1$@: first time together, %2$@ sent within a week" = "%1$@: 初めての組み合わせで、1週間以内に %2$@ 送信";
 "%1$@: %2$@ sent in a day, usually up to %3$@" = "%1$@: 1日に %2$@ 送信（普段は多くて %3$@）";
 "%1$@: %2$@ sent in 24 hours, usually up to %3$@" = "%1$@: 24時間に %2$@ 送信（普段は多くて %3$@）";
+
+/* P3-194: judging a candidate */
+"You have answered every one listed here." = "ここにあるものには、すべて答えました。";
+"Checked (%lld)" = "確認済み（%lld件）";
+"Expected" = "想定内";
+"Look into it" = "要調査";
+"Reading the connections…" = "通信を読み込んでいます…";
+"The connections could not be read." = "通信を読み込めませんでした。";
+"Connections behind it" = "もとになった通信";
+"No connection is left in the history for this time." = "この時間の通信は、履歴にもう残っていません。";
+"Showing the largest %1$lld of %2$lld." = "%2$lld件のうち、多い順に%1$lld件を表示しています。";
+"Monitored %1$lld%% of %2$@." = "%2$@のうち、監視していたのは%1$lld%%です。";
+"Part of this time was not monitored, had no byte count, or is no longer kept connection by connection, so more may have been sent than shown." = "この時間の一部は、監視していなかったか、送信量を測れなかったか、1件ずつの記録がもう残っていません。実際の送信はこれより多いかもしれません。";
+"%1$@ sent over %2$lld connections, %3$@" = "%2$lld回の通信で %1$@ 送信、%3$@";
+"Does this matter to you?" = "あなたにとって問題ですか？";
+"Note (optional)" = "メモ（任意）";
+"Take back" = "取り消す";
+"Your answer and note stay on this Mac. They are not sent to the Hub or an AI provider." = "答えとメモはこのMacにだけ残ります。HubやAIのサービスへは送りません。";
+"%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed." = "%1$@ は、このMacの普段を学習し終えるまで %2$@ へ送ったことがありませんでした。%3$@ までの1週間に %4$@ 送り、新しい組み合わせを載せる 1 MB を超えました。";
+"On %1$@, %2$@ sent %3$@ to %4$@. On most days it sends up to %5$@; a day is listed at 10 MB and five times that." = "%1$@ に、%2$@ が %4$@ へ %3$@ 送りました。普段の日は多くて %5$@ で、10 MB 以上かつその5倍以上の日を載せています。";
+"In 24 hours on %1$@ this Mac sent %2$@. Its usual 24 hours reach up to %3$@; it is listed above one and a half times that." = "%1$@ の24時間に、このMacは %2$@ 送りました。普段の24時間は多くて %3$@ で、その1.5倍を超えると載せています。";
+"Forget all answers…" = "答えをすべて消す…";
+"Forget all answers?" = "答えをすべて消しますか？";
+"Forget all answers" = "すべて消す";
+"Every candidate goes back to the list, and the notes are deleted. The candidates themselves are not changed." = "候補はすべて一覧に戻り、メモは消えます。候補そのものは変わりません。";

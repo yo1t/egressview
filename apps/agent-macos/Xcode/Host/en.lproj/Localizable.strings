@@ -919,3 +919,28 @@
 "%1$@: first time together, %2$@ sent within a week" = "%1$@: first time together, %2$@ sent within a week";
 "%1$@: %2$@ sent in a day, usually up to %3$@" = "%1$@: %2$@ sent in a day, usually up to %3$@";
 "%1$@: %2$@ sent in 24 hours, usually up to %3$@" = "%1$@: %2$@ sent in 24 hours, usually up to %3$@";
+
+/* P3-194: judging a candidate */
+"You have answered every one listed here." = "You have answered every one listed here.";
+"Checked (%lld)" = "Checked (%lld)";
+"Expected" = "Expected";
+"Look into it" = "Look into it";
+"Reading the connections…" = "Reading the connections…";
+"The connections could not be read." = "The connections could not be read.";
+"Connections behind it" = "Connections behind it";
+"No connection is left in the history for this time." = "No connection is left in the history for this time.";
+"Showing the largest %1$lld of %2$lld." = "Showing the largest %1$lld of %2$lld.";
+"Monitored %1$lld%% of %2$@." = "Monitored %1$lld%% of %2$@.";
+"Part of this time was not monitored, had no byte count, or is no longer kept connection by connection, so more may have been sent than shown." = "Part of this time was not monitored, had no byte count, or is no longer kept connection by connection, so more may have been sent than shown.";
+"%1$@ sent over %2$lld connections, %3$@" = "%1$@ sent over %2$lld connections, %3$@";
+"Does this matter to you?" = "Does this matter to you?";
+"Note (optional)" = "Note (optional)";
+"Take back" = "Take back";
+"Your answer and note stay on this Mac. They are not sent to the Hub or an AI provider." = "Your answer and note stay on this Mac. They are not sent to the Hub or an AI provider.";
+"%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed." = "%1$@ had not sent to %2$@ before this Mac's usual was learned. In the week up to %3$@ it sent %4$@, past the 1 MB at which a new pair is listed.";
+"On %1$@, %2$@ sent %3$@ to %4$@. On most days it sends up to %5$@; a day is listed at 10 MB and five times that." = "On %1$@, %2$@ sent %3$@ to %4$@. On most days it sends up to %5$@; a day is listed at 10 MB and five times that.";
+"In 24 hours on %1$@ this Mac sent %2$@. Its usual 24 hours reach up to %3$@; it is listed above one and a half times that." = "In 24 hours on %1$@ this Mac sent %2$@. Its usual 24 hours reach up to %3$@; it is listed above one and a half times that.";
+"Forget all answers…" = "Forget all answers…";
+"Forget all answers?" = "Forget all answers?";
+"Forget all answers" = "Forget all answers";
+"Every candidate goes back to the list, and the notes are deleted. The candidates themselves are not changed." = "Every candidate goes back to the list, and the notes are deleted. The candidates themselves are not changed.";
