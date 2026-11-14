@@ -546,6 +546,7 @@ final class AgentMainViewModel: ObservableObject {
                 try? store.removeAllOutboundCandidateJudgments()
                 self.outboundCandidateJudgments = (try? store.outboundCandidateJudgments()) ?? [:]
                 self.refreshInsightCandidates()
+                NotificationCenter.default.post(name: .outboundCandidateAnswersChanged, object: nil)
             }
         )
     }
@@ -565,6 +566,7 @@ final class AgentMainViewModel: ObservableObject {
             try store.setOutboundCandidateJudgment(candidate, verdict: verdict, note: note)
             outboundCandidateJudgments = try store.outboundCandidateJudgments()
             refreshInsightCandidates()
+            NotificationCenter.default.post(name: .outboundCandidateAnswersChanged, object: nil)
         } catch {
             // Left as it was: the row stays where it is, which is what the
             // person sees, rather than moving to "Checked" without being kept.

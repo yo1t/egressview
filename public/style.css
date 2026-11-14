@@ -171,6 +171,13 @@
   .settings-agent-list { margin-bottom: 8px; font-size: 11px; }
   .settings-agent-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
   .settings-agent-details { display: grid; flex: 1; gap: 2px; min-width: 0; }
+  .settings-agent-candidates { padding: 8px 0 4px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .settings-agent-candidates .settings-agent-row { padding-left: 12px; }
+  .settings-agent-details > * { overflow-wrap: anywhere; }
+  .settings-agent-note { white-space: pre-wrap; opacity: 0.85; }
+  .settings-agent-answer { flex: none; padding: 1px 8px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.15); }
+  .settings-agent-answer-investigate { border-color: #f59e0b; color: #f59e0b; }
+  .settings-agent-answer-expected { opacity: 0.8; }
   .settings-agent-host { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
   .settings-agent-revoked { color: var(--red); font-size: 10px; }
   .settings-session-revoke-all { width: auto; min-height: 32px; padding: 6px 14px; margin-top: 8px; font-size: 12px; background: transparent; border: 1px solid var(--border); color: var(--muted); }

@@ -248,15 +248,112 @@ export function initAgentSettings(showStatus) {
     }
   });
 
+  function formatBytes(value) {
+    const bytes = Number(value) || 0;
+    if (bytes < 1000) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let scaled = bytes;
+    let unit = -1;
+    do { scaled /= 1000; unit += 1; } while (scaled >= 1000 && unit < units.length - 1);
+    return `${scaled.toFixed(scaled >= 10 ? 1 : 2)} ${units[unit]}`;
+  }
+
+  // The day is a UTC day on the Agent, so it is shown as one.
+  function formatDay(ms) {
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+
+  function candidateLine(entry) {
+    const vars = {
+      day: formatDay(entry.day),
+      bytes: formatBytes(entry.bytesOut),
+      usual: formatBytes(entry.usualBytesOut),
+    };
+    if (entry.kind === 'newPair') return tVars('settings.agents.candidates.newPair', vars);
+    if (entry.kind === 'machine') return tVars('settings.agents.candidates.machineAmount', vars);
+    return tVars('settings.agents.candidates.aboveUsual', vars);
+  }
+
+  /**
+   * What each Agent's user chose to send of its "worth a look" list (P3-194).
+   * Hidden while no Agent shares, which is the default: the setting is off on
+   * every Agent until its user turns it on.
+   */
+  async function loadCandidates() {
+    const block = document.getElementById('agent-candidates-block');
+    const box = document.getElementById('agent-candidates-list');
+    if (!block || !box) return;
+    try {
+      const response = await apiFetch(_BASE + '/api/agents/outbound-candidates');
+      // A Hub without the route, or a viewer without auth.admin: not shown.
+      if (!response.ok) { block.hidden = true; return; }
+      const body = await response.json();
+      const agents = body.agents || [];
+      block.hidden = agents.length === 0;
+      box.replaceChildren(...agents.map(agent => {
+        const group = textElement('div', '', 'settings-agent-candidates');
+        const head = textElement('div', '', 'settings-agent-details');
+        head.append(
+          textElement('strong', agent.hostName || agent.agentId, 'settings-agent-host'),
+          // While learning there is nothing to count, and "0" would read as
+          // "nothing unusual".
+          textElement('span', agent.state === 'learning'
+            ? tVars('settings.agents.candidates.receivedOnly', { time: fmtTs(agent.receivedAt) })
+            : tVars('settings.agents.candidates.received', { time: fmtTs(agent.receivedAt), total: agent.total }),
+          'settings-session-muted')
+        );
+        group.appendChild(head);
+        if (agent.state === 'learning') {
+          group.appendChild(textElement('div', t('settings.agents.candidates.learning'), 'settings-session-muted'));
+        } else if (agent.state === 'lowByteCoverage') {
+          group.appendChild(textElement('div', t('settings.agents.candidates.lowCoverage'), 'settings-session-muted'));
+        }
+        if (!agent.entries.length && agent.state !== 'learning') {
+          group.appendChild(textElement('div', t('settings.agents.candidates.empty'), 'settings-session-muted'));
+        }
+        for (const entry of agent.entries) {
+          const row = textElement('div', '', 'settings-agent-row');
+          const details = textElement('span', '', 'settings-agent-details');
+          const who = entry.kind === 'machine'
+            ? t('settings.agents.candidates.machine')
+            : `${entry.application || '?'} → ${entry.destination || '?'}`;
+          details.append(
+            textElement('strong', who),
+            textElement('span', candidateLine(entry), 'settings-session-muted')
+          );
+          if (entry.note) {
+            details.appendChild(textElement('span',
+              tVars('settings.agents.candidates.note', { note: entry.note }), 'settings-agent-note'));
+          }
+          row.appendChild(details);
+          const answer = entry.answer === 'expected' || entry.answer === 'investigate'
+            ? entry.answer : 'unanswered';
+          row.appendChild(textElement('span', t(`settings.agents.candidates.${answer}`),
+            `settings-agent-answer settings-agent-answer-${answer}`));
+          group.appendChild(row);
+        }
+        const more = agent.total - agent.entries.length;
+        if (more > 0) {
+          group.appendChild(textElement('div',
+            tVars('settings.agents.candidates.more', { count: more }), 'settings-session-muted'));
+        }
+        return group;
+      }));
+    } catch {
+      block.hidden = true;
+    }
+  }
+
   function loadAll() {
     loadTransport();
     loadRequests();
     loadAgents();
+    loadCandidates();
   }
 
   // Lives on the L3/L4 tab: an operator thinks about data sources in one place.
   document.querySelector('[data-tab="l3l4"]')?.addEventListener('click', loadAll);
   // The log screen reads the same list, so opening it directly still fills it.
   document.querySelector('[data-tab="log"]')?.addEventListener('click', loadAgents);
-  return { loadAgents, loadRequests, loadTransport, loadAll };
+  return { loadAgents, loadRequests, loadTransport, loadCandidates, loadAll };
 }

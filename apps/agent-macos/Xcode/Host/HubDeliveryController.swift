@@ -741,6 +741,7 @@ private struct AgentSettingsView: View {
     @ObservedObject var threats: ThreatIntelController
     @ObservedObject var ollama: AgentOllamaController
     @ObservedObject private var notifications = AgentUserNotifier.shared
+    @ObservedObject private var candidateSharing = OutboundCandidateSharingController.shared
     @ObservedObject private var language = AgentLanguageSettings.shared
     @AppStorage(AgentGlobeFrameRate.defaultsKey)
     private var globeFrameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
@@ -1032,6 +1033,24 @@ private struct AgentSettingsView: View {
                 Button(L("Send now")) { hub.sendNow() }.disabled(!hub.deliveryEnabled)
             }
             .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
+            candidateSharingSettings
+                .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
+        }
+    }
+
+    /// Off by default, and the note behind a second switch: the list says
+    /// what this Mac sent, and a note is the person's own words about it,
+    /// while the Hub is often someone else's (P3-194).
+    private var candidateSharingSettings: some View {
+        settingsGroup(L("Worth a look")) {
+            Toggle(L("Send the \"worth a look\" list and your answers to the Hub"), isOn: $candidateSharing.isEnabled)
+            Toggle(L("Include your notes"), isOn: $candidateSharing.includesNotes)
+                .disabled(!candidateSharing.isEnabled)
+                .padding(.leading, 20)
+            Text(L("Sent: each app and destination on the list for the last 14 days, the day, how much was sent and how much is usual, and your answer. Not sent: connections, addresses, or your notes unless you include them. Turning this off removes the list from the Hub."))
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(candidateSharing.statusText).font(.callout).foregroundStyle(.secondary)
         }
     }
 

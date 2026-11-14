@@ -50,7 +50,7 @@ developer or an external service operated for the developer.
 
 | Host | When | What is sent | What comes back |
 |---|---|---|---|
-| **Your Hub** (the address you entered) | Only after you enrol, and only if delivery is on | This Mac's host name and observed connection metadata: local/remote addresses and ports, protocol, process name and ID, bundle ID when available, timestamps, byte counts, collector and confidence, and the destination host name when one was observed | Acknowledgement; threat feed data; map locations for addresses you have already observed |
+| **Your Hub** (the address you entered) | Only after you enrol, and only if delivery is on. The "worth a look" list has its own switch, off by default ([below](#the-worth-a-look-list-only-if-you-turn-it-on)) | This Mac's host name and observed connection metadata: local/remote addresses and ports, protocol, process name and ID, bundle ID when available, timestamps, byte counts, collector and confidence, and the destination host name when one was observed | Acknowledgement; threat feed data; map locations for addresses you have already observed |
 | **`dl.egressview.com`** | Update check on a schedule, and when you press Check for Updates | An HTTPS GET with the agent and OS versions. No identifier, no account, no observation data | A release manifest, and the `.pkg` if you choose to install |
 | **`feodotracker.abuse.ch`, `threatfox-api.abuse.ch`, `urlhaus-api.abuse.ch`, `www.spamhaus.org`** | **Only if you turn on direct feed download**, which is off when a Hub supplies feeds. ThreatFox and URLhaus are requested only if you have saved an abuse.ch Auth-Key | An ordinary HTTPS GET for the whole public list. For ThreatFox and URLhaus, the abuse.ch Auth-Key you saved is part of the address. **Your observations are not sent** — matching happens on your Mac, against the downloaded list | The public indicator lists |
 | **`download.maxmind.com`** | Only if you configure a local GeoLite2 country table | Your MaxMind account ID and licence key; no observed destination address | The GeoLite2 database |
@@ -104,6 +104,18 @@ credential is sent as a Bearer token to that Hub.
 
 This is the same list the agent shows before enrolling. Enrolment cannot start
 until you confirm you have read it.
+
+### The "worth a look" list, only if you turn it on
+
+Separately from observations, and **off unless you turn it on** in Settings >
+Hub (macOS agent 0.5.141 and later, with a Hub that accepts it): the
+"worth a look" list of the last 14 days and your answers to it. Your notes go
+only if you also turn on **Include your notes**. Turning sending off removes
+the list from the Hub. The Hub's administrator can read what was sent.
+
+`schemaVersion`, `sharing`, `generatedAt`, `state`, `total`, `entries` (`candidateId` — a SHA-256 of the item, not its text — `kind`, `day`, `application`, `destination`, `bytesOut`, `usualBytesOut`, `answer`, `answeredAt`, `note`)
+
+Individual connections, addresses and ports are not part of it.
 
 ## Counting bytes from packet headers
 

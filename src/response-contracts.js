@@ -117,6 +117,37 @@ function createRegistry() {
   // GET /api/agent/capabilities -- constants, so this can be exact.
   registry.declare('GET /api/agent/capabilities', 200, agentCapabilities);
 
+  // PUT /api/agent/outbound-candidates -- how many rows the send left (P3-194).
+  registry.declare('PUT /api/agent/outbound-candidates', 200, z.object({
+    stored: z.number(),
+    sharing: z.boolean(),
+  }).strict());
+
+  // GET /api/agents/outbound-candidates -- one report per enrolled Agent that
+  // shares, each at most 20 entries (`MAX_ENTRIES`).
+  registry.declare('GET /api/agents/outbound-candidates', 200, z.object({
+    agents: z.array(z.object({
+      agentId: z.string(),
+      hostName: z.string().nullable(),
+      state: z.string().nullable(),
+      total: z.number(),
+      generatedAt: z.number(),
+      receivedAt: z.number(),
+      entries: z.array(z.object({
+        candidateId: z.string(),
+        kind: z.string(),
+        day: z.number(),
+        application: z.string().nullable(),
+        destination: z.string().nullable(),
+        bytesOut: z.number(),
+        usualBytesOut: z.number().nullable(),
+        answer: z.string().nullable(),
+        answeredAt: z.number().nullable(),
+        note: z.string().nullable(),
+      }).strict()).max(BOUNDED_ARRAY_LIMIT),
+    }).strict()).max(BOUNDED_ARRAY_LIMIT),
+  }).strict());
+
   // GET /api/notes -- one note per device on this network.
   registry.declare('GET /api/notes', 200, z.object({
     notes: z.union([
