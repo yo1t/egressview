@@ -985,6 +985,16 @@ describe('outbound candidates shared by an Agent', () => {
     assert.ok(Buffer.byteLength(JSON.stringify(body)) < 64 * 1024);
   });
 
+  it('Mac Agentが作る見本をそのまま受け取る', async () => {
+    const golden = JSON.parse(fs.readFileSync(
+      path.join(__dirname, '../../protocol/agent-outbound-candidates/v1/golden.json'), 'utf8'
+    ));
+    const { app, authorization } = await sharingAgent();
+    const response = await request(app, 'PUT', '/api/agent/outbound-candidates', { body: golden, headers: authorization });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { stored: 3, sharing: true });
+  });
+
   it('Agentのトークンが無ければ受け取らない', async () => {
     const { app } = makeApp();
     const response = await request(app, 'PUT', '/api/agent/outbound-candidates', { body: report() });

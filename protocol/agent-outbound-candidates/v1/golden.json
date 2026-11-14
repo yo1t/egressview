@@ -1,0 +1,36 @@
+{
+  "entries": [
+    {
+      "answer": "expected",
+      "answeredAt": "2023-11-14T01:00:00Z",
+      "application": "com.example.backup",
+      "bytesOut": 9500000000,
+      "candidateId": "ce8b20ff51cd75c9574faa961f0a2fe040150ae3fc83f1756bce32bd2b91db0b",
+      "day": "2023-11-14T00:00:00Z",
+      "destination": "example.net",
+      "kind": "aboveUsual",
+      "note": "My weekly backup",
+      "usualBytesOut": 400000000
+    },
+    {
+      "application": "curl",
+      "bytesOut": 120000000,
+      "candidateId": "31edf31d09919222998324a8b4a8d2bb89c5644eb6032fc537077480f7b0eec1",
+      "day": "2023-11-13T00:00:00Z",
+      "destination": "example.org",
+      "kind": "newPair"
+    },
+    {
+      "bytesOut": 12300000000,
+      "candidateId": "407ecebc1118cc075110f182d5e83344d1af8e8fd0046a4cabdb097dc6e71f37",
+      "day": "2023-11-13T00:00:00Z",
+      "kind": "machine",
+      "usualBytesOut": 8100000000
+    }
+  ],
+  "generatedAt": "2023-11-14T02:00:00Z",
+  "schemaVersion": 1,
+  "sharing": true,
+  "state": "ready",
+  "total": 3
+}
