@@ -29,6 +29,7 @@ const {
   AGENT_INGEST_MAX_BODY_BYTES,
 } = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
+const { outboundCandidatesSchema } = require('../agent-outbound-candidates');
 const { isLoopbackAddress } = require('../deployment-profile');
 const { isPrivateIpLiteral } = require('../offline-mode');
 const { isBlockedOutboundIpLiteral } = require('../ssrf-guard');
@@ -435,6 +436,24 @@ module.exports = function agentRoutes({
     }
   });
 
+  // What each Agent chose to share of its outbound candidates (P3-194). Only
+  // Agents still enrolled are listed, under the name they enrolled with.
+  router.get('/agents/outbound-candidates', requireAdmin, (_req, res) => {
+    if (!agentIngest) return res.status(503).json({ error: 'Agent storage is unavailable' });
+    try {
+      const enrolled = new Map(agentIdentities.listAgents()
+        .filter(agent => !agent.revokedAt)
+        .map(agent => [agent.agentId, agent]));
+      const agents = agentIngest.listOutboundCandidates()
+        .filter(report => enrolled.has(report.agentId))
+        .map(report => ({ ...report, hostName: enrolled.get(report.agentId).hostName ?? null }));
+      res.json({ agents });
+    } catch (error) {
+      logger.error('[agents] Listing outbound candidates failed:', error.message);
+      res.status(500).json({ error: 'Outbound candidate listing failed' });
+    }
+  });
+
   router.get('/agents/ingest-metrics', requireAdmin, (req, res) => {
     // Ingest writes to SQLite synchronously, on the loop that also answers the
     // web UI. Throughput therefore says nothing about whether the Hub is still
@@ -550,7 +569,40 @@ module.exports = function agentRoutes({
       // counted by the Agent from packet headers (P3-191). Stored and
       // reported; an Agent sends them only when this says true.
       inboundProbes: true,
+      // What the Agent found worth a look against its own usual traffic, and
+      // the person's answers, when they chose to share them (P3-194). Sent to
+      // PUT /api/agent/outbound-candidates only when this says true.
+      outboundCandidates: true,
     });
+  });
+
+  // The person at an Agent turned on "share with the Hub" (P3-194). The whole
+  // list replaces what was held for this Agent; `sharing: false` deletes it.
+  // Small and rare -- at most once an hour, and only on a change -- so it
+  // shares the ingest rate window rather than having one of its own.
+  router.put('/agent/outbound-candidates', requireAgent, (req, res) => {
+    const agentId = req.agentIdentity.agentId;
+    const limited = acquireAgentWindow(agentId, Date.now());
+    if (limited) {
+      res.setHeader('Retry-After', Math.max(1, Math.ceil((limited.resetAt - Date.now()) / 1000)));
+      return res.status(429).json({ error: 'Agent rate limit exceeded' });
+    }
+    const parsed = parseRequest(outboundCandidatesSchema, req.body, res);
+    if (!parsed.ok) {
+      audit(req, 'agent_outbound_candidates', 'failure', { reason: 'invalid_request' });
+      return;
+    }
+    if (!agentIngest) return res.status(503).json({ error: 'Agent storage is unavailable' });
+    try {
+      const result = agentIngest.storeOutboundCandidates(agentId, parsed.data);
+      audit(req, 'agent_outbound_candidates', 'success', {
+        sharing: result.sharing, entries: result.stored,
+      });
+      res.json({ stored: result.stored, sharing: result.sharing });
+    } catch (error) {
+      logger.error('[agents] Storing outbound candidates failed:', error.message);
+      res.status(500).json({ error: 'Storing outbound candidates failed' });
+    }
   });
 
   // Locations for the destinations an agent observes, so its map can be drawn

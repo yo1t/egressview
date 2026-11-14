@@ -629,40 +629,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "schemaVersion": {
-                      "type": "integer"
-                    },
-                    "generatedAt": {
-                      "type": "string"
-                    },
-                    "entries": {
-                      "type": "array",
-                      "items": {
-                        "type": "array",
-                        "items": {
-                          "type": [
-                            "number",
-                            "string"
-                          ]
-                        }
-                      }
-                    }
-                  },
-                  "required": [
-                    "entries",
-                    "generatedAt",
-                    "schemaVersion"
-                  ],
-                  "x-observed": true
-                }
-              }
-            }
+            "description": "Handled."
           },
           "401": {
             "description": "No usable credential. Shape observed under test, not a guarantee: responses are not validated on the way out.",
@@ -896,6 +863,71 @@
                       ],
                       "additionalProperties": false
                     }
+                  },
+                  "inboundProbes": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "windowStart": {
+                          "type": "string",
+                          "maxLength": 32,
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                        },
+                        "windowSeconds": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 3600
+                        },
+                        "localAddress": {
+                          "type": "string",
+                          "maxLength": 45
+                        },
+                        "sourceAddress": {
+                          "type": "string",
+                          "maxLength": 45
+                        },
+                        "networkProtocol": {
+                          "type": "string",
+                          "enum": [
+                            "tcp",
+                            "udp"
+                          ]
+                        },
+                        "distinctPorts": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 65535
+                        },
+                        "packets": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100000000
+                        },
+                        "samplePorts": {
+                          "maxItems": 10,
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 65535
+                          }
+                        }
+                      },
+                      "required": [
+                        "windowStart",
+                        "windowSeconds",
+                        "localAddress",
+                        "sourceAddress",
+                        "networkProtocol",
+                        "distinctPorts",
+                        "packets",
+                        "samplePorts"
+                      ],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "required": [
@@ -978,11 +1010,7 @@
                     "requestId": {}
                   },
                   "required": [
-                    "error",
-                    "hint",
-                    "requestId",
-                    "requested",
-                    "supported"
+                    "error"
                   ],
                   "x-observed": true
                 }
@@ -1069,6 +1097,243 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/agent/outbound-candidates": {
+      "put": {
+        "summary": "PUT /api/agent/outbound-candidates",
+        "description": "Requires an enrolled agent token.",
+        "security": [
+          {
+            "agentToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "sharing": {
+                    "type": "boolean"
+                  },
+                  "generatedAt": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "state": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "learning",
+                          "lowByteCoverage",
+                          "ready"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "entries": {
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "candidateId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 600
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "newPair",
+                            "aboveUsual",
+                            "machine"
+                          ]
+                        },
+                        "day": {
+                          "type": "string",
+                          "maxLength": 40
+                        },
+                        "application": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 255
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "destination": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 255
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "bytesOut": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "usualBytesOut": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "answer": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "expected",
+                                "investigate"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "answeredAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 40
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "note": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 500
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "candidateId",
+                        "kind",
+                        "day",
+                        "bytesOut"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "schemaVersion",
+                  "sharing",
+                  "generatedAt",
+                  "total",
+                  "entries"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Declared by the server, and checked in CI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stored": {
+                      "type": "number"
+                    },
+                    "sharing": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "stored",
+                    "sharing"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
           }
         }
       }
@@ -1756,6 +2021,161 @@
                     "requests"
                   ],
                   "x-observed": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents/outbound-candidates": {
+      "get": {
+        "summary": "GET /api/agents/outbound-candidates",
+        "description": "Requires `auth.admin`. The request body is not described here.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Declared by the server, and checked in CI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agents": {
+                      "maxItems": 500,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "hostName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "state": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "total": {
+                            "type": "number"
+                          },
+                          "generatedAt": {
+                            "type": "number"
+                          },
+                          "receivedAt": {
+                            "type": "number"
+                          },
+                          "entries": {
+                            "maxItems": 500,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "candidateId": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string"
+                                },
+                                "day": {
+                                  "type": "number"
+                                },
+                                "application": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "destination": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "bytesOut": {
+                                  "type": "number"
+                                },
+                                "usualBytesOut": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "answer": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "answeredAt": {
+                                  "type": [
+                                    "number",
+                                    "null"
+                                  ]
+                                },
+                                "note": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "candidateId",
+                                "kind",
+                                "day",
+                                "application",
+                                "destination",
+                                "bytesOut",
+                                "usualBytesOut",
+                                "answer",
+                                "answeredAt",
+                                "note"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "hostName",
+                          "state",
+                          "total",
+                          "generatedAt",
+                          "receivedAt",
+                          "entries"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "agents"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
@@ -5009,7 +5429,7 @@
                       "type": "string",
                       "maxLength": 320,
                       "format": "email",
-                      "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                      "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                     }
                   },
                   "allowedDomains": {
@@ -7280,6 +7700,30 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "lanScan": {
+                    "type": "object",
+                    "properties": {
+                      "slack": {
+                        "type": "boolean"
+                      },
+                      "history": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "agentSilent": {
+                    "type": "object",
+                    "properties": {
+                      "slack": {
+                        "type": "boolean"
+                      },
+                      "history": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -7330,9 +7774,41 @@
                             "history",
                             "slack"
                           ]
+                        },
+                        "lanScan": {
+                          "type": "object",
+                          "properties": {
+                            "slack": {
+                              "type": "boolean"
+                            },
+                            "history": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "history",
+                            "slack"
+                          ]
+                        },
+                        "agentSilent": {
+                          "type": "object",
+                          "properties": {
+                            "slack": {
+                              "type": "boolean"
+                            },
+                            "history": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "history",
+                            "slack"
+                          ]
                         }
                       },
                       "required": [
+                        "agentSilent",
+                        "lanScan",
                         "newDevice",
                         "threat"
                       ]
@@ -10571,6 +11047,7 @@
       "GET /api/agent/capabilities",
       "GET /api/agent/threat-intel",
       "GET /api/agents",
+      "GET /api/agents/outbound-candidates",
       "GET /api/ai/conversations",
       "GET /api/ai/conversations/:id",
       "GET /api/ai/facts",
@@ -10591,7 +11068,8 @@
       "GET /api/notes",
       "GET /api/routers",
       "GET /api/status",
-      "POST /api/agent/ingest"
+      "POST /api/agent/ingest",
+      "PUT /api/agent/outbound-candidates"
     ],
     "observedOnly": [
       "DELETE /api/ai/conversations/:id",

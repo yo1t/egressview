@@ -194,6 +194,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `POST /api/agents/enrollment-requests/:requestId/reject` | `auth.admin`必須。申請を却下する |
 | Agent | `GET /api/agents` | `auth.admin`必須。credential hashは返さない |
 | Agent | `GET /api/agents/ingest-metrics` | `auth.admin`必須。集約counterと上限だけを返す |
+| Agent | `GET /api/agents/outbound-candidates` | `auth.admin`必須。登録中のAgentごとに、利用者が送ると決めた候補と答えを返す |
 | Agent | `POST /api/agents/:agentId/revoke` | `auth.admin`必須 |
 | Agent | `POST /api/agent/token/rotate` | Agent bearerの`agent.ingest`だけ |
 | Agent | `POST /api/agent/registration/revoke` | Agent bearer。認証されたAgent自身だけを失効 |
@@ -201,6 +202,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `GET /api/agent/capabilities` | Agent bearerの`agent.ingest`。受理するschema versionとbatch上限を返し、Agentが双方の話せるversionを選べるようにする |
 | Agent | `GET /api/agent/geo-cache` | Agent bearerの`agent.ingest`。位置キャッシュを全件返す。**Agentは宛先を送らない** — 絞り込みは「どの宛先に関心があるか」を伝えることになるため。`ETag`/`304`に対応 |
 | Agent | `GET /api/agent/threat-intel` | Agent bearerの`agent.ingest`。脅威指標を全件返す。**Agentは宛先を送らない** — 「危ないか」を尋ねるために宛先を送ると、何を気にしているかを相手に伝えることになるため。フィード未設定のHubでは`available: false`を返し、Agentはこれを**「脅威が無い」と読んではならない**。`ETag`/`304`に対応 |
+| Agent | `PUT /api/agent/outbound-candidates` | Agent bearerの`agent.ingest`。Agentが自分のふだんの通信と比べて見つけた「見ておきたい送信」と、利用者の答え。**利用者がAgentの設定で送ると決めたときだけ**届く。メモは別のスイッチを入れたときだけ。送るたびにそのAgentの分を置き換え、`sharing: false`で消す |
 | Router初期設定 | `POST /api/nonce` | 認証必須 |
 | Router初期設定 | `POST /api/yamaha/detect` | 認証必須 |
 | Router初期設定 | `POST /api/cisco/detect` | 認証必須 |
