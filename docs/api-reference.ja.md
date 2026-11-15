@@ -194,6 +194,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `POST /api/agents/enrollment-requests/:requestId/reject` | `auth.admin`必須。申請を却下する |
 | Agent | `GET /api/agents` | `auth.admin`必須。credential hashは返さない |
 | Agent | `GET /api/agents/ingest-metrics` | `auth.admin`必須。集約counterと上限だけを返す |
+| Agent | `GET /api/agents/inbound-probes` | `auth.admin`必須。登録中のAgentごとに、直近14日にそのコンピューターの10ポート以上へ届いたLAN内の送り元（検出ログと同じ基準）。送り元ごとに最大20件と、その前の総数 |
 | Agent | `GET /api/agents/outbound-candidates` | `auth.admin`必須。登録中のAgentごとに、利用者が送ると決めた候補と答えを返す |
 | Agent | `POST /api/agents/:agentId/revoke` | `auth.admin`必須 |
 | Agent | `POST /api/agent/token/rotate` | Agent bearerの`agent.ingest`だけ |

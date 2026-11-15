@@ -123,6 +123,28 @@ function createRegistry() {
     sharing: z.boolean(),
   }).strict());
 
+  // GET /api/agents/inbound-probes -- per enrolled Agent, at most 20 senders
+  // (`LIST_MAX_SENDERS`), with the total before that cut.
+  registry.declare('GET /api/agents/inbound-probes', 200, z.object({
+    days: z.number(),
+    minPorts: z.number(),
+    agents: z.array(z.object({
+      agentId: z.string(),
+      total: z.number(),
+      senders: z.array(z.object({
+        sourceAddress: z.string(),
+        networkProtocol: z.string(),
+        windows: z.number(),
+        maxPorts: z.number(),
+        packets: z.number(),
+        firstAt: z.number(),
+        lastAt: z.number(),
+        localAddress: z.string().nullable(),
+        samplePorts: z.array(z.number()),
+      }).strict()),
+    }).strict()),
+  }).strict());
+
   // GET /api/agents/outbound-candidates -- one report per enrolled Agent that
   // shares, each at most 20 entries (`MAX_ENTRIES`).
   registry.declare('GET /api/agents/outbound-candidates', 200, z.object({

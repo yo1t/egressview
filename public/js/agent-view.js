@@ -2,8 +2,9 @@
 //
 // An overview of every enrolled Agent, then one card for the Agent picked:
 // whether it is delivering, and what its user chose to share of its "worth a
-// look" list (P3-194). Enrolment, approval and revocation stay in
-// Settings > L3/L4, so this screen is for reading only.
+// look" list (P3-194), and the LAN devices that probed it (P3-191).
+// Enrolment, approval and revocation stay in Settings > L3/L4, so this
+// screen is for reading only.
 //
 // The tab is shown only when /api/agents answers, which needs auth.admin, and
 // lists at least one enrolled Agent. A Hub fed only by routers does not grow a
@@ -172,7 +173,54 @@ function renderCandidates(agent, report) {
   return section;
 }
 
-function renderCard(agent, report, now) {
+// Only the macOS Agent counts devices probing its computer, and only while
+// its user has packet-header counting on (P3-191).
+function countsProbes(agent) {
+  return agent.platform === 'macos';
+}
+
+function renderProbes(agent, probes, minPorts) {
+  const section = textElement('div', '', 'agent-card-section');
+  section.appendChild(textElement('div', t('agents.probes.title'), 'agent-card-section-title'));
+  if (!countsProbes(agent)) {
+    section.appendChild(textElement('div',
+      tVars('agents.probes.unsupported', { platform: PLATFORM_NAMES[agent.platform] || agent.platform || '?' }),
+      'agent-card-empty'));
+    return section;
+  }
+  const senders = Array.isArray(probes?.senders) ? probes.senders : [];
+  if (!senders.length) {
+    section.appendChild(textElement('div', t('agents.probes.none'), 'agent-card-empty'));
+    return section;
+  }
+  section.appendChild(textElement('div', tVars('agents.probes.hint', { ports: minPorts }), 'agent-card-meta'));
+  const list = textElement('div', '', 'agent-candidates');
+  for (const sender of senders) {
+    const row = textElement('div', '', 'agent-candidate agent-probe');
+    const body = textElement('div', '', 'agent-candidate-body');
+    body.append(
+      textElement('div', tVars('agents.probes.target', {
+        source: sender.sourceAddress, local: sender.localAddress || '?',
+      }), 'agent-candidate-title'),
+      textElement('div', tVars('agents.probes.line', {
+        protocol: String(sender.networkProtocol || '').toUpperCase(),
+        ports: sender.maxPorts, windows: sender.windows, time: fmtTs(sender.lastAt),
+      }), 'agent-candidate-line')
+    );
+    if (Array.isArray(sender.samplePorts) && sender.samplePorts.length) {
+      body.appendChild(textElement('div',
+        tVars('agents.probes.sample', { ports: sender.samplePorts.join(', ') }), 'agent-candidate-line'));
+    }
+    row.appendChild(body);
+    list.appendChild(row);
+  }
+  section.appendChild(list);
+  const more = (Number(probes.total) || 0) - senders.length;
+  if (more > 0) section.appendChild(textElement('div', tVars('agents.probes.more', { count: more }), 'agent-card-meta'));
+  return section;
+}
+
+function renderCard(agent, report, now, probes, minPorts) {
   const card = textElement('article', '', 'agent-card');
   const head = textElement('div', '', 'agent-card-head');
   const title = textElement('div', '', 'agent-card-title');
@@ -182,7 +230,7 @@ function renderCard(agent, report, now) {
       .filter(Boolean).join(' · '), 'agent-card-meta')
   );
   head.append(title, deliveryLine(agent, now));
-  card.append(head, renderCandidates(agent, report));
+  card.append(head, renderCandidates(agent, report), renderProbes(agent, probes, minPorts));
   return card;
 }
 
@@ -210,13 +258,17 @@ function answerOf(entry) {
  * but answers are known only for the entries that reached the Hub, so the
  * answer counts say how many entries they cover when that is fewer.
  */
-function summarize(agents, reports, now) {
+function summarize(agents, reports, now, probes = new Map()) {
   const summary = {
     agents: agents.length, delivering: 0, capable: 0, sharing: 0,
     candidates: 0, shown: 0, expected: 0, investigate: 0, unanswered: 0,
+    probeSenders: 0, probedAgents: 0,
   };
   for (const agent of agents) {
     if (deliveryState(agent, now) === 'delivering') summary.delivering += 1;
+    const probed = Number(probes.get(agent.agentId)?.total) || 0;
+    summary.probeSenders += probed;
+    if (probed > 0) summary.probedAgents += 1;
     if (listsCandidates(agent)) summary.capable += 1;
     const report = reports.get(agent.agentId);
     if (!report) continue;
@@ -254,6 +306,9 @@ function renderKpis(summary) {
     kpi(t('agents.candidates.unanswered'), shared ? summary.unanswered : '—', '',
       summary.unanswered > 0 ? 'warn' : 'neutral'),
     kpi(t('agents.candidates.expected'), shared ? summary.expected : '—', '', 'ok'),
+    kpi(t('agents.overview.probes'), summary.probeSenders,
+      tVars('agents.overview.probesSub', { agents: summary.probedAgents }),
+      summary.probeSenders > 0 ? 'warn' : 'neutral'),
   ];
 }
 
@@ -272,6 +327,12 @@ function countCell(report, answer, tone) {
   return textElement('span', String(count), count > 0 ? `agent-count agent-count-${tone}` : 'agent-cell-muted');
 }
 
+function probeCell(agent, probes) {
+  if (!countsProbes(agent)) return textElement('span', t('agents.short.unsupported'), 'agent-cell-muted');
+  const total = Number(probes?.total) || 0;
+  return textElement('span', String(total), total > 0 ? 'agent-count agent-count-warn' : 'agent-cell-muted');
+}
+
 function cell(child, className = '') {
   const td = textElement('td', '', className);
   td.appendChild(child);
@@ -280,12 +341,13 @@ function cell(child, className = '') {
 
 // One row per Agent, so a stopped one or one with open questions stands out
 // without opening each in turn. A row picks that Agent for the detail.
-function renderTable(agents, reports, now, selectedId) {
+function renderTable(agents, reports, now, selectedId, probes) {
   const table = textElement('table', '', 'agent-table');
   const headRow = document.createElement('tr');
   for (const [key, className] of [
     ['agents.table.agent', ''], ['agents.table.delivery', ''], ['agents.table.candidates', 'agent-table-num'],
     ['agents.candidates.investigate', 'agent-table-num'], ['agents.candidates.unanswered', 'agent-table-num'],
+    ['agents.table.probes', 'agent-table-num'],
   ]) {
     const th = textElement('th', t(key), className);
     th.scope = 'col';
@@ -312,13 +374,20 @@ function renderTable(agents, reports, now, selectedId) {
     const delivery = textElement('div', '', 'agent-table-delivery');
     delivery.appendChild(statusPill(state, t(`agents.short.${state}`)));
     if (lastSeenAt) delivery.appendChild(textElement('span', ago(lastSeenAt, now), 'agent-table-os'));
-    row.append(
-      cell(name),
-      cell(delivery),
-      cell(candidateCell(agent, report), 'agent-table-num'),
-      cell(countCell(report, 'investigate', 'alert'), 'agent-table-num'),
-      cell(countCell(report, 'unanswered', 'warn'), 'agent-table-num')
-    );
+    const counts = [
+      ['agents.table.candidates', candidateCell(agent, report)],
+      ['agents.candidates.investigate', countCell(report, 'investigate', 'alert')],
+      ['agents.candidates.unanswered', countCell(report, 'unanswered', 'warn')],
+      ['agents.table.probes', probeCell(agent, probes.get(agent.agentId))],
+    ];
+    // The same counts, labelled, for a phone where the columns are hidden.
+    const stats = textElement('td', '', 'agent-table-stats');
+    for (const [key, value] of counts) {
+      const stat = textElement('span', t(key), 'agent-stat');
+      stat.appendChild(textElement('span', value.textContent, 'agent-stat-value'));
+      stats.appendChild(stat);
+    }
+    row.append(cell(name), cell(delivery), ...counts.map(([, value]) => cell(value, 'agent-table-num')), stats);
     tbody.appendChild(row);
   }
   table.append(thead, tbody);
@@ -346,7 +415,7 @@ function drawView() {
   const overview = document.getElementById('agent-view-overview');
   const select = document.getElementById('agent-view-select');
   if (!list || !lastView) return;
-  const { agents, reports, now } = lastView;
+  const { agents, reports, now, probes, minPorts } = lastView;
   const pickRow = select?.closest('.agent-view-pick');
   if (!agents.length) {
     kpis?.replaceChildren();
@@ -358,9 +427,9 @@ function drawView() {
   const stored = lastView.selectedId || readSelected();
   const selected = agents.find(agent => agent.agentId === stored) || agents[0];
   lastView.selectedId = selected.agentId;
-  const summary = summarize(agents, reports, now);
+  const summary = summarize(agents, reports, now, probes);
   kpis?.replaceChildren(...renderKpis(summary));
-  const tableParts = [renderTable(agents, reports, now, selected.agentId)];
+  const tableParts = [renderTable(agents, reports, now, selected.agentId, probes)];
   if (summary.shown < summary.candidates) {
     tableParts.push(textElement('div',
       tVars('agents.overview.answersOf', { shown: summary.shown }), 'agent-card-meta agent-view-note'));
@@ -376,7 +445,8 @@ function drawView() {
     select.value = selected.agentId;
   }
   if (pickRow) pickRow.hidden = false;
-  list.replaceChildren(renderCard(selected, reports.get(selected.agentId), now));
+  list.replaceChildren(renderCard(selected, reports.get(selected.agentId), now,
+    probes.get(selected.agentId), minPorts));
 }
 
 function selectAgent(agentId) {
@@ -401,10 +471,11 @@ async function loadAgentView() {
   if (!list) return null;
   loading = (async () => {
     try {
-      const [agentsResult, candidatesResult] = await Promise.all([
+      const [agentsResult, candidatesResult, probesResult] = await Promise.all([
         readJson('/api/agents'),
         // A Hub older than P3-194 answers 404 here; the cards still show.
         readJson('/api/agents/outbound-candidates').catch(() => ({ ok: false, body: {} })),
+        readJson('/api/agents/inbound-probes').catch(() => ({ ok: false, body: {} })),
       ]);
       if (!agentsResult.ok) throw new Error(agentsResult.body.error || t('agents.loadFailed'));
       // By name, so the picker and the table keep their order between visits.
@@ -413,7 +484,10 @@ async function loadAgentView() {
       setAgentTabAgents(agents);
       const reports = new Map((candidatesResult.ok ? candidatesResult.body.agents || [] : [])
         .map(report => [report.agentId, report]));
-      lastView = { agents, reports, now: Date.now(), selectedId: lastView?.selectedId || '' };
+      const probes = new Map((probesResult.ok ? probesResult.body.agents || [] : [])
+        .map(report => [report.agentId, report]));
+      const minPorts = Number(probesResult.body?.minPorts) || 10;
+      lastView = { agents, reports, probes, minPorts, now: Date.now(), selectedId: lastView?.selectedId || '' };
       drawView();
     } catch (error) {
       lastView = null;

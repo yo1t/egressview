@@ -844,6 +844,53 @@ describe('inbound probe summaries', () => {
     assert.equal(agentIngestStore._dbForTest().prepare("SELECT distinctPorts FROM agent_inbound_probes WHERE networkProtocol = 'tcp'").get().distinctPorts, 30);
   });
 
+  it('Agentごとに、検出ログと同じ基準（10ポート以上）を超えた送り元を新しい順に返す', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const now = Math.floor(Date.now() / 120000) * 120000;
+    const at = ms => new Date(ms).toISOString();
+    const envelope = ingestEnvelope();
+    envelope.inboundProbes = [
+      probe({ windowStart: at(now - 3_600_000), distinctPorts: 12, samplePorts: [22, 23] }),
+      probe({ windowStart: at(now), distinctPorts: 40, samplePorts: [80, 443, 445] }),
+      probe({ sourceAddress: '192.168.1.88', windowStart: at(now - 600_000), distinctPorts: 15 }),
+      // Below the threshold: counted by the Agent, not reported by the Hub.
+      probe({ sourceAddress: '192.168.1.99', distinctPorts: 6 }),
+      // Older than 14 days.
+      probe({ sourceAddress: '192.168.1.66', windowStart: at(now - 15 * 86_400_000) }),
+    ];
+    assert.equal((await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers: authorization })).status, 200);
+
+    const listed = await request(app, 'GET', '/api/agents/inbound-probes');
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.days, 14);
+    assert.equal(listed.body.minPorts, 10);
+    const [agent] = listed.body.agents;
+    assert.equal(agent.agentId, enrolled.body.agentId);
+    assert.equal(agent.total, 2);
+    assert.deepEqual(agent.senders.map(sender => sender.sourceAddress), ['192.168.1.77', '192.168.1.88']);
+    const [first] = agent.senders;
+    assert.equal(first.windows, 2);
+    assert.equal(first.maxPorts, 40);
+    assert.equal(first.firstAt, now - 3_600_000);
+    assert.equal(first.lastAt, now + 120_000);
+    assert.deepEqual(first.samplePorts, [80, 443, 445], 'ports from the latest window');
+    assert.equal(first.localAddress, '192.168.1.53');
+  });
+
+  it('取り消したAgentの記録は返さない', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    envelope.inboundProbes = [probe()];
+    await request(app, 'POST', '/api/agent/ingest', {
+      body: envelope, headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    await request(app, 'POST', `/api/agents/${enrolled.body.agentId}/revoke`);
+    assert.deepEqual((await request(app, 'GET', '/api/agents/inbound-probes')).body.agents, []);
+  });
+
   it('形の合わない記録は受け取らない', async () => {
     const { app } = makeApp();
     const { enrolled } = await enrolledAgent(app);

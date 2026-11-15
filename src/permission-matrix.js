@@ -144,6 +144,9 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   // A note can name people and places at the Agent's end, so it is read at
   // the same level as the Agent list itself.
   httpRoute('GET', '/api/agents/outbound-candidates', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  // Names LAN addresses next to the computer they probed; read at the level
+  // of the Agent list.
+  httpRoute('GET', '/api/agents/inbound-probes', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/agents/enrollment-tokens', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   // Approving a request mints a long-lived credential, so it sits at the same
   // level as the other authentication administration routes.

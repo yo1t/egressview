@@ -30,6 +30,10 @@ const {
 } = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
 const { outboundCandidatesSchema } = require('../agent-outbound-candidates');
+const { PROBE_NOTIFY_MIN_PORTS } = require('../agent-inbound-probes');
+
+// The same window the Agent tab uses for worth-a-look candidates.
+const INBOUND_PROBE_LIST_DAYS = 14;
 const { isLoopbackAddress } = require('../deployment-profile');
 const { isPrivateIpLiteral } = require('../offline-mode');
 const { isBlockedOutboundIpLiteral } = require('../ssrf-guard');
@@ -451,6 +455,25 @@ module.exports = function agentRoutes({
     } catch (error) {
       logger.error('[agents] Listing outbound candidates failed:', error.message);
       res.status(500).json({ error: 'Outbound candidate listing failed' });
+    }
+  });
+
+  // Devices on the LAN that probed each enrolled Agent's computer in the last
+  // 14 days (P3-191), at the threshold the detection log reports at. Answered
+  // per Agent so the Agent tab can say which computer was the target.
+  router.get('/agents/inbound-probes', requireAdmin, (_req, res) => {
+    if (!agentIngest) return res.status(503).json({ error: 'Agent storage is unavailable' });
+    try {
+      const enrolled = new Set(agentIdentities.listAgents()
+        .filter(agent => !agent.revokedAt)
+        .map(agent => agent.agentId));
+      const since = Date.now() - INBOUND_PROBE_LIST_DAYS * 24 * 60 * 60 * 1000;
+      const agents = agentIngest.listInboundProbes({ since })
+        .filter(report => enrolled.has(report.agentId));
+      res.json({ days: INBOUND_PROBE_LIST_DAYS, minPorts: PROBE_NOTIFY_MIN_PORTS, agents });
+    } catch (error) {
+      logger.error('[agents] Listing inbound probes failed:', error.message);
+      res.status(500).json({ error: 'Inbound probe listing failed' });
     }
   });
 

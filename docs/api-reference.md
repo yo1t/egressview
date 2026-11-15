@@ -194,6 +194,7 @@ All 101 implemented HTTP endpoints are listed below. **Public** means no browser
 | Agent | `POST /api/agents/enrollment-requests/:requestId/reject` | `auth.admin`; rejects the request |
 | Agent | `GET /api/agents` | Protected; `auth.admin`, never returns credential hashes |
 | Agent | `GET /api/agents/ingest-metrics` | Protected; `auth.admin`, aggregate counters and limits only |
+| Agent | `GET /api/agents/inbound-probes` | Protected; `auth.admin`. Per enrolled Agent, the LAN senders that reached 10 or more of its computer's ports in the last 14 days (the detection log's threshold): up to 20 senders, with the total before that cut |
 | Agent | `GET /api/agents/outbound-candidates` | Protected; `auth.admin`. What each enrolled Agent chose to share of its outbound candidates and answers |
 | Agent | `POST /api/agents/:agentId/revoke` | Protected; `auth.admin` |
 | Agent | `POST /api/agent/token/rotate` | Agent bearer; `agent.ingest` only |

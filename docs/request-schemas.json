@@ -2266,6 +2266,92 @@
         ]
       }
     },
+    "GET /api/agents/inbound-probes": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer"
+          },
+          "minPorts": {
+            "type": "integer"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "agentId": {
+                  "type": "string"
+                },
+                "total": {
+                  "type": "integer"
+                },
+                "senders": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sourceAddress": {
+                        "type": "string"
+                      },
+                      "networkProtocol": {
+                        "type": "string"
+                      },
+                      "windows": {
+                        "type": "integer"
+                      },
+                      "maxPorts": {
+                        "type": "integer"
+                      },
+                      "packets": {
+                        "type": "integer"
+                      },
+                      "firstAt": {
+                        "type": "integer"
+                      },
+                      "lastAt": {
+                        "type": "integer"
+                      },
+                      "localAddress": {
+                        "type": "string"
+                      },
+                      "samplePorts": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "required": [
+                      "firstAt",
+                      "lastAt",
+                      "localAddress",
+                      "maxPorts",
+                      "networkProtocol",
+                      "packets",
+                      "samplePorts",
+                      "sourceAddress",
+                      "windows"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "agentId",
+                "senders",
+                "total"
+              ]
+            }
+          }
+        },
+        "required": [
+          "agents",
+          "days",
+          "minPorts"
+        ]
+      }
+    },
     "GET /api/agents/ingest-metrics": {
       "200": {
         "type": "object",
