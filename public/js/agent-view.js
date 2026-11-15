@@ -71,21 +71,61 @@ function candidateLine(entry) {
   return tVars('agents.candidates.aboveUsual', vars);
 }
 
-function deliveryLine(agent, now) {
-  const lastSeenAt = Number(agent.lastSeenAt) || 0;
-  if (!lastSeenAt) return { text: t('agents.status.never'), state: 'stopped' };
-  const time = fmtTs(lastSeenAt);
-  if (now - lastSeenAt <= DELIVERING_WITHIN_MS) {
-    return { text: tVars('agents.status.delivering', { time }), state: 'delivering' };
-  }
-  return { text: tVars('agents.status.stopped', { time }), state: 'stopped' };
+// Only the macOS Agent builds a "worth a look" list (P3-194). Saying "not
+// shared" for a Windows Agent would send its user looking for a switch
+// that does not exist.
+function listsCandidates(agent) {
+  return agent.platform === 'macos';
 }
 
-function renderCandidates(report) {
+const PLATFORM_NAMES = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
+
+// "Microsoft Windows NT 10.0.26300.0" says the platform twice; keep the version.
+function platformLabel(agent) {
+  const name = PLATFORM_NAMES[agent.platform] || agent.platform || '';
+  const version = String(agent.osVersion || '').replace(/^Microsoft Windows NT\s+/i, '');
+  return [name, version].filter(Boolean).join(' ');
+}
+
+function deliveryState(agent, now) {
+  const lastSeenAt = Number(agent.lastSeenAt) || 0;
+  if (!lastSeenAt) return 'never';
+  return now - lastSeenAt <= DELIVERING_WITHIN_MS ? 'delivering' : 'stopped';
+}
+
+function ago(ms, now) {
+  const minutes = Math.max(0, Math.floor((now - ms) / 60000));
+  if (minutes < 1) return t('agents.ago.now');
+  if (minutes < 60) return tVars('agents.ago.minutes', { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return tVars('agents.ago.hours', { count: hours });
+  return tVars('agents.ago.days', { count: Math.floor(hours / 24) });
+}
+
+function statusPill(state, text) {
+  const pill = textElement('span', '', `agent-pill agent-pill-${state}`);
+  pill.append(textElement('span', '', 'agent-pill-dot'), textElement('span', text));
+  return pill;
+}
+
+function deliveryLine(agent, now) {
+  const lastSeenAt = Number(agent.lastSeenAt) || 0;
+  const state = deliveryState(agent, now);
+  if (state === 'never') return statusPill(state, t('agents.status.never'));
+  return statusPill(state, tVars(`agents.status.${state}`, { time: fmtTs(lastSeenAt) }));
+}
+
+function renderCandidates(agent, report) {
   const section = textElement('div', '', 'agent-card-section');
   section.appendChild(textElement('div', t('agents.candidates.title'), 'agent-card-section-title'));
+  if (!listsCandidates(agent)) {
+    section.appendChild(textElement('div',
+      tVars('agents.candidates.unsupported', { platform: PLATFORM_NAMES[agent.platform] || agent.platform || '?' }),
+      'agent-card-empty'));
+    return section;
+  }
   if (!report) {
-    section.appendChild(textElement('div', t('agents.candidates.notShared'), 'settings-session-muted'));
+    section.appendChild(textElement('div', t('agents.candidates.notShared'), 'agent-card-empty'));
     return section;
   }
   // While learning there is nothing to count, and "0" would read as
@@ -93,56 +133,56 @@ function renderCandidates(report) {
   section.appendChild(textElement('div', report.state === 'learning'
     ? tVars('agents.candidates.receivedOnly', { time: fmtTs(report.receivedAt) })
     : tVars('agents.candidates.received', { time: fmtTs(report.receivedAt), total: report.total }),
-  'settings-session-muted'));
+  'agent-card-meta'));
   if (report.state === 'learning') {
-    section.appendChild(textElement('div', t('agents.candidates.learning'), 'settings-session-muted'));
+    section.appendChild(textElement('div', t('agents.candidates.learning'), 'agent-card-empty'));
   } else if (report.state === 'lowByteCoverage') {
-    section.appendChild(textElement('div', t('agents.candidates.lowCoverage'), 'settings-session-muted'));
+    section.appendChild(textElement('div', t('agents.candidates.lowCoverage'), 'agent-card-caution'));
   }
   const entries = Array.isArray(report.entries) ? report.entries : [];
   if (!entries.length && report.state !== 'learning') {
-    section.appendChild(textElement('div', t('agents.candidates.empty'), 'settings-session-muted'));
+    section.appendChild(textElement('div', t('agents.candidates.empty'), 'agent-card-empty'));
   }
+  const list = textElement('div', '', 'agent-candidates');
   for (const entry of entries) {
-    const row = textElement('div', '', 'settings-agent-row');
-    const details = textElement('span', '', 'settings-agent-details');
+    const answer = answerOf(entry);
+    const row = textElement('div', '', `agent-candidate agent-candidate-${answer}`);
+    const details = textElement('div', '', 'agent-candidate-body');
     const who = entry.kind === 'machine'
       ? t('agents.candidates.machine')
       : `${entry.application || '?'} → ${entry.destination || '?'}`;
     details.append(
-      textElement('strong', who),
-      textElement('span', candidateLine(entry), 'settings-session-muted')
+      textElement('div', who, 'agent-candidate-title'),
+      textElement('div', candidateLine(entry), 'agent-candidate-line')
     );
     if (entry.note) {
-      details.appendChild(textElement('span',
-        tVars('agents.candidates.note', { note: entry.note }), 'settings-agent-note'));
+      details.appendChild(textElement('div',
+        tVars('agents.candidates.note', { note: entry.note }), 'agent-candidate-note'));
     }
-    row.appendChild(details);
-    const answer = entry.answer === 'expected' || entry.answer === 'investigate'
-      ? entry.answer : 'unanswered';
-    row.appendChild(textElement('span', t(`agents.candidates.${answer}`),
-      `settings-agent-answer settings-agent-answer-${answer}`));
-    section.appendChild(row);
+    row.append(details, textElement('span', t(`agents.candidates.${answer}`),
+      `agent-answer agent-answer-${answer}`));
+    list.appendChild(row);
   }
+  if (entries.length) section.appendChild(list);
   const more = (Number(report.total) || 0) - entries.length;
   if (more > 0) {
     section.appendChild(textElement('div',
-      tVars('agents.candidates.more', { count: more }), 'settings-session-muted'));
+      tVars('agents.candidates.more', { count: more }), 'agent-card-meta'));
   }
   return section;
 }
 
 function renderCard(agent, report, now) {
-  const card = textElement('section', '', 'agent-card');
+  const card = textElement('article', '', 'agent-card');
   const head = textElement('div', '', 'agent-card-head');
-  const delivery = deliveryLine(agent, now);
-  head.append(
-    textElement('strong', agent.hostName || agent.agentId, 'settings-agent-host agent-card-host'),
-    textElement('span', `${agent.platform || ''} ${agent.osVersion || ''} · ${agent.agentVersion || ''}`.trim(),
-      'settings-session-muted'),
-    textElement('span', delivery.text, `agent-card-status agent-card-status-${delivery.state}`)
+  const title = textElement('div', '', 'agent-card-title');
+  title.append(
+    textElement('div', agent.hostName || agent.agentId, 'agent-card-host'),
+    textElement('div', [platformLabel(agent), agent.agentVersion ? `Agent ${agent.agentVersion}` : '']
+      .filter(Boolean).join(' · '), 'agent-card-meta')
   );
-  card.append(head, renderCandidates(report));
+  head.append(title, deliveryLine(agent, now));
+  card.append(head, renderCandidates(agent, report));
   return card;
 }
 
@@ -161,12 +201,6 @@ function storeSelected(agentId) {
 // The last answer, so picking another Agent redraws without a request.
 let lastView = null;
 
-function deliveryState(agent, now) {
-  const lastSeenAt = Number(agent.lastSeenAt) || 0;
-  if (!lastSeenAt) return 'never';
-  return now - lastSeenAt <= DELIVERING_WITHIN_MS ? 'delivering' : 'stopped';
-}
-
 function answerOf(entry) {
   return entry.answer === 'expected' || entry.answer === 'investigate' ? entry.answer : 'unanswered';
 }
@@ -178,11 +212,12 @@ function answerOf(entry) {
  */
 function summarize(agents, reports, now) {
   const summary = {
-    agents: agents.length, delivering: 0, sharing: 0,
+    agents: agents.length, delivering: 0, capable: 0, sharing: 0,
     candidates: 0, shown: 0, expected: 0, investigate: 0, unanswered: 0,
   };
   for (const agent of agents) {
     if (deliveryState(agent, now) === 'delivering') summary.delivering += 1;
+    if (listsCandidates(agent)) summary.capable += 1;
     const report = reports.get(agent.agentId);
     if (!report) continue;
     summary.sharing += 1;
@@ -195,59 +230,64 @@ function summarize(agents, reports, now) {
   return summary;
 }
 
-function tile(label, value, sub = '', tone = '') {
-  const box = textElement('div', '', `agent-tile${tone ? ` agent-tile-${tone}` : ''}`);
-  box.append(textElement('div', label, 'agent-tile-label'), textElement('div', value, 'agent-tile-value'));
-  if (sub) box.appendChild(textElement('div', sub, 'agent-tile-sub'));
+function kpi(label, value, sub, tone) {
+  const box = textElement('div', '', `agent-kpi agent-kpi-${tone}`);
+  box.append(textElement('div', label, 'agent-kpi-label'), textElement('div', value, 'agent-kpi-value'));
+  box.appendChild(textElement('div', sub || ' ', 'agent-kpi-sub'));
   return box;
 }
 
-function candidateCell(report) {
-  if (!report) return t('agents.short.notShared');
-  if (report.state === 'learning') return t('agents.short.learning');
-  const entries = Array.isArray(report.entries) ? report.entries : [];
-  return String(Math.max(Number(report.total) || 0, entries.length));
-}
-
-function countCell(report, answer) {
-  if (!report || report.state === 'learning') return '—';
-  const entries = Array.isArray(report.entries) ? report.entries : [];
-  return String(entries.filter(entry => answerOf(entry) === answer).length);
-}
-
-function renderOverview(agents, reports, now, selectedId) {
-  const summary = summarize(agents, reports, now);
-  const tiles = textElement('div', '', 'agent-tiles');
+function renderKpis(summary) {
   const shared = summary.sharing > 0;
-  tiles.append(
-    tile(t('agents.overview.agents'), summary.agents,
-      tVars('agents.overview.delivery', {
-        delivering: summary.delivering, stopped: summary.agents - summary.delivering,
-      })),
-    tile(t('agents.candidates.title'), shared ? summary.candidates : '—',
+  const stopped = summary.agents - summary.delivering;
+  return [
+    kpi(t('agents.overview.agents'), summary.agents,
+      tVars('agents.overview.delivery', { delivering: summary.delivering, stopped }),
+      stopped > 0 ? 'warn' : 'ok'),
+    kpi(t('agents.candidates.title'), shared ? summary.candidates : '—',
       shared
-        ? tVars('agents.overview.sharing', { sharing: summary.sharing, total: summary.agents })
-        : t('agents.overview.noneShared')),
-    tile(t('agents.candidates.investigate'), shared ? summary.investigate : '—', '',
-      summary.investigate > 0 ? 'alert' : ''),
-    tile(t('agents.candidates.unanswered'), shared ? summary.unanswered : '—', '',
-      summary.unanswered > 0 ? 'warn' : ''),
-    tile(t('agents.candidates.expected'), shared ? summary.expected : '—')
-  );
-  const parts = [tiles];
-  if (summary.shown < summary.candidates) {
-    parts.push(textElement('div',
-      tVars('agents.overview.answersOf', { shown: summary.shown }), 'settings-session-muted agent-view-note'));
-  }
+        ? tVars('agents.overview.sharing', { sharing: summary.sharing, total: summary.capable })
+        : t('agents.overview.noneShared'),
+      'info'),
+    kpi(t('agents.candidates.investigate'), shared ? summary.investigate : '—', '',
+      summary.investigate > 0 ? 'alert' : 'neutral'),
+    kpi(t('agents.candidates.unanswered'), shared ? summary.unanswered : '—', '',
+      summary.unanswered > 0 ? 'warn' : 'neutral'),
+    kpi(t('agents.candidates.expected'), shared ? summary.expected : '—', '', 'ok'),
+  ];
+}
 
-  // One row per Agent, so a stopped one or one with open questions stands out
-  // without opening each in turn. A row's name picks it below.
-  const wrap = textElement('div', '', 'agent-table-wrap');
+function candidateCell(agent, report) {
+  if (!listsCandidates(agent)) return textElement('span', t('agents.short.unsupported'), 'agent-cell-muted');
+  if (!report) return textElement('span', t('agents.short.notShared'), 'agent-cell-muted');
+  if (report.state === 'learning') return textElement('span', t('agents.short.learning'), 'agent-cell-muted');
+  const entries = Array.isArray(report.entries) ? report.entries : [];
+  return textElement('span', String(Math.max(Number(report.total) || 0, entries.length)));
+}
+
+function countCell(report, answer, tone) {
+  if (!report || report.state === 'learning') return textElement('span', '—', 'agent-cell-muted');
+  const entries = Array.isArray(report.entries) ? report.entries : [];
+  const count = entries.filter(entry => answerOf(entry) === answer).length;
+  return textElement('span', String(count), count > 0 ? `agent-count agent-count-${tone}` : 'agent-cell-muted');
+}
+
+function cell(child, className = '') {
+  const td = textElement('td', '', className);
+  td.appendChild(child);
+  return td;
+}
+
+// One row per Agent, so a stopped one or one with open questions stands out
+// without opening each in turn. A row picks that Agent for the detail.
+function renderTable(agents, reports, now, selectedId) {
   const table = textElement('table', '', 'agent-table');
   const headRow = document.createElement('tr');
-  for (const key of ['agents.table.agent', 'agents.table.delivery', 'agents.table.candidates',
-    'agents.candidates.investigate', 'agents.candidates.unanswered']) {
-    const th = textElement('th', t(key));
+  for (const [key, className] of [
+    ['agents.table.agent', ''], ['agents.table.delivery', ''], ['agents.table.candidates', 'agent-table-num'],
+    ['agents.candidates.investigate', 'agent-table-num'], ['agents.candidates.unanswered', 'agent-table-num'],
+  ]) {
+    const th = textElement('th', t(key), className);
     th.scope = 'col';
     headRow.appendChild(th);
   }
@@ -259,26 +299,32 @@ function renderOverview(agents, reports, now, selectedId) {
     const state = deliveryState(agent, now);
     const row = document.createElement('tr');
     if (agent.agentId === selectedId) row.setAttribute('aria-current', 'true');
-    const nameCell = document.createElement('td');
+    row.addEventListener('click', event => {
+      if (event.target.closest('button')) return;
+      selectAgent(agent.agentId);
+    });
+    const name = textElement('div', '', 'agent-table-name');
     const pick = textElement('button', agent.hostName || agent.agentId, 'agent-table-pick');
     pick.type = 'button';
-    pick.addEventListener('click', () => selectAgent(agent.agentId, { scroll: true }));
-    nameCell.appendChild(pick);
-    const investigate = countCell(report, 'investigate');
-    const unanswered = countCell(report, 'unanswered');
+    pick.addEventListener('click', () => selectAgent(agent.agentId));
+    name.append(pick, textElement('span', platformLabel(agent), 'agent-table-os'));
+    const lastSeenAt = Number(agent.lastSeenAt) || 0;
+    const delivery = textElement('div', '', 'agent-table-delivery');
+    delivery.appendChild(statusPill(state, t(`agents.short.${state}`)));
+    if (lastSeenAt) delivery.appendChild(textElement('span', ago(lastSeenAt, now), 'agent-table-os'));
     row.append(
-      nameCell,
-      textElement('td', t(`agents.short.${state}`), `agent-card-status-${state === 'delivering' ? 'delivering' : 'stopped'}`),
-      textElement('td', candidateCell(report), 'agent-table-num'),
-      textElement('td', investigate, `agent-table-num${Number(investigate) > 0 ? ' agent-table-alert' : ''}`),
-      textElement('td', unanswered, 'agent-table-num')
+      cell(name),
+      cell(delivery),
+      cell(candidateCell(agent, report), 'agent-table-num'),
+      cell(countCell(report, 'investigate', 'alert'), 'agent-table-num'),
+      cell(countCell(report, 'unanswered', 'warn'), 'agent-table-num')
     );
     tbody.appendChild(row);
   }
   table.append(thead, tbody);
+  const wrap = textElement('div', '', 'agent-table-wrap');
   wrap.appendChild(table);
-  parts.push(wrap);
-  return parts;
+  return wrap;
 }
 
 // Two Macs can share a name, so a repeated one carries the start of its id.
@@ -296,13 +342,15 @@ function optionLabels(agents) {
 
 function drawView() {
   const list = document.getElementById('agent-view-list');
+  const kpis = document.getElementById('agent-view-kpis');
   const overview = document.getElementById('agent-view-overview');
   const select = document.getElementById('agent-view-select');
   if (!list || !lastView) return;
   const { agents, reports, now } = lastView;
   const pickRow = select?.closest('.agent-view-pick');
   if (!agents.length) {
-    overview?.replaceChildren(textElement('div', t('agents.none'), 'settings-session-muted'));
+    kpis?.replaceChildren();
+    overview?.replaceChildren(textElement('div', t('agents.none'), 'agent-card-empty'));
     if (pickRow) pickRow.hidden = true;
     list.replaceChildren();
     return;
@@ -310,7 +358,14 @@ function drawView() {
   const stored = lastView.selectedId || readSelected();
   const selected = agents.find(agent => agent.agentId === stored) || agents[0];
   lastView.selectedId = selected.agentId;
-  overview?.replaceChildren(...renderOverview(agents, reports, now, selected.agentId));
+  const summary = summarize(agents, reports, now);
+  kpis?.replaceChildren(...renderKpis(summary));
+  const tableParts = [renderTable(agents, reports, now, selected.agentId)];
+  if (summary.shown < summary.candidates) {
+    tableParts.push(textElement('div',
+      tVars('agents.overview.answersOf', { shown: summary.shown }), 'agent-card-meta agent-view-note'));
+  }
+  overview?.replaceChildren(...tableParts);
   if (select) {
     const labels = optionLabels(agents);
     select.replaceChildren(...agents.map((agent, index) => {
@@ -324,12 +379,14 @@ function drawView() {
   list.replaceChildren(renderCard(selected, reports.get(selected.agentId), now));
 }
 
-function selectAgent(agentId, { scroll = false } = {}) {
+function selectAgent(agentId) {
   if (!lastView) return;
   lastView.selectedId = agentId;
   storeSelected(agentId);
   drawView();
-  if (scroll) document.getElementById('agent-view-select')?.scrollIntoView?.({ block: 'nearest' });
+  // Side by side the card is already in view; stacked, it is below the table.
+  document.getElementById('agent-view-select')?.closest('.agent-panel')
+    ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
 }
 
 async function readJson(path) {
@@ -361,6 +418,7 @@ async function loadAgentView() {
     } catch (error) {
       lastView = null;
       document.getElementById('agent-view-overview')?.replaceChildren();
+      document.getElementById('agent-view-kpis')?.replaceChildren();
       list.replaceChildren(textElement('div', error.message || t('agents.loadFailed'), 'agent-view-error'));
     } finally {
       loading = null;
