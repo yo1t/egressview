@@ -10,13 +10,13 @@ final class AgentDeliveryQueueTests: XCTestCase {
 
         let first = try XCTUnwrap(queue.prepareBatch(
             limit: 200,
-            sentAt: Date(timeIntervalSince1970: 20),
+            sentAt: Date(),
             metadata: metadata()
         ))
         let restarted = try AgentDeliveryQueue(fileURL: url)
         let replay = try XCTUnwrap(restarted.prepareBatch(
             limit: 200,
-            sentAt: Date(timeIntervalSince1970: 30),
+            sentAt: Date().addingTimeInterval(10),
             metadata: metadata()
         ))
 
@@ -244,6 +244,63 @@ final class AgentDeliveryQueueTests: XCTestCase {
         XCTAssertNotEqual(remade.batchId, first.batchId)
     }
 
+    // 2026-11-15. A Windows PC off for nine days came back with 290 of 9,509
+    // queued observations older than the Hub's seven days; the Hub refused
+    // every batch holding one, delivery stopped, and the queue overflowed.
+    // Dropped when the batch is made, a week-old observation costs nothing
+    // and is counted under its own rule.
+    func testObservationsLastSeenMoreThanTheHubKeepsAreDroppedWhenTheBatchIsMade() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        let now = Date()
+        let eightDaysAgo = now.addingTimeInterval(-8 * 86_400)
+        let stale = ConnectionObservation(
+            networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: 49_153,
+            remoteAddress: "203.0.113.10", remotePort: 443, processID: 42, processName: "TestApp",
+            firstObservedAt: eightDaysAgo, lastObservedAt: eightDaysAgo,
+            collector: .networkExtension, confidence: .exact
+        )
+        // Six days old is still inside what the Hub keeps.
+        let sixDaysAgo = now.addingTimeInterval(-6 * 86_400)
+        let older = ConnectionObservation(
+            networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: 49_154,
+            remoteAddress: "203.0.113.11", remotePort: 443, processID: 42, processName: "TestApp",
+            firstObservedAt: sixDaysAgo, lastObservedAt: sixDaysAgo,
+            collector: .networkExtension, confidence: .exact
+        )
+        try queue.enqueue([stale, older, observation(remotePort: 2)])
+        XCTAssertEqual(queue.status().pendingCount, 3, "kept until it is about to be sent")
+
+        let batch = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: now, metadata: metadata()))
+        XCTAssertEqual(batch.observations.count, 2)
+        XCTAssertEqual(queue.status().pendingCount, 2)
+        XCTAssertEqual(queue.status().contractRejectedCount, 1)
+        XCTAssertEqual(queue.status().contractRejectionReasons["outsideHubRetention"], 1)
+        XCTAssertEqual(queue.status().abandonedCount, 0)
+    }
+
+    func testABatchAlreadyInFlightIsRemadeWithoutTheObservationTheHubNoLongerKeeps() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        let now = Date()
+        let sixDaysAndTwentyThreeHoursAgo = now.addingTimeInterval(-(7 * 86_400 - 3_600 - 60))
+        let aging = ConnectionObservation(
+            networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: 49_153,
+            remoteAddress: "203.0.113.10", remotePort: 443, processID: 42, processName: "TestApp",
+            firstObservedAt: sixDaysAndTwentyThreeHoursAgo, lastObservedAt: sixDaysAndTwentyThreeHoursAgo,
+            collector: .networkExtension, confidence: .exact
+        )
+        try queue.enqueue([aging, observation(remotePort: 1)])
+        // Made just before it crossed the line, then not acknowledged.
+        let first = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: now, metadata: metadata()))
+        XCTAssertEqual(first.observations.count, 2)
+
+        let remade = try XCTUnwrap(queue.prepareBatch(
+            limit: 200, sentAt: now.addingTimeInterval(120), metadata: metadata()
+        ))
+        XCTAssertEqual(remade.observations.count, 1)
+        XCTAssertNotEqual(remade.batchId, first.batchId)
+        XCTAssertEqual(queue.status().contractRejectionReasons["outsideHubRetention"], 1)
+    }
+
     // A reply about a batch that is no longer in flight -- a slow 400 arriving
     // after the batch it names was acknowledged -- must not cut the batch that
     // replaced it.
@@ -370,8 +427,9 @@ final class AgentDeliveryQueueTests: XCTestCase {
             remotePort: remotePort,
             processID: 42,
             processName: "TestApp",
-            firstObservedAt: Date(timeIntervalSince1970: 10),
-            lastObservedAt: Date(timeIntervalSince1970: 11),
+            // Recent: the queue drops what the Hub no longer keeps (7 days).
+            firstObservedAt: Date().addingTimeInterval(-60),
+            lastObservedAt: Date().addingTimeInterval(-59),
             bytesOut: bytesOut,
             collector: .networkExtension,
             confidence: .exact

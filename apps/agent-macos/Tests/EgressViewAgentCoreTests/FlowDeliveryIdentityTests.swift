@@ -2,6 +2,11 @@ import Foundation
 import XCTest
 @testable import EgressViewAgentCore
 
+// An hour ago, so the observations are recent: the queue drops anything last
+// seen longer ago than the Hub keeps (7 days) before sending.
+// Whole seconds, as the fixed times these tests used before were.
+private let testEpoch = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 - 3_600).rounded(.down))
+
 /// Two connections from one process to one server share protocol, both
 /// endpoints and PID often enough -- a local port is reused, or a client opens
 /// several short connections -- and before P3-164 the second replaced the
@@ -107,7 +112,7 @@ final class FlowDeliveryIdentityTests: XCTestCase {
     /// minute was taken for a repeat of the first and never queued.
     func test_送信前の間引きも別のflowを同じものとみなさない() {
         var sampler = ObservationPersistenceSampler(refreshInterval: 60)
-        let at = Date(timeIntervalSince1970: 100)
+        let at = testEpoch.addingTimeInterval(100)
 
         XCTAssertEqual(sampler.observationsToPersist([observation(flowID: first)], observedAt: at).count, 1)
         XCTAssertEqual(
@@ -120,7 +125,7 @@ final class FlowDeliveryIdentityTests: XCTestCase {
 
     func test_送信前の間引きは同じflowの繰り返しを従来どおり間引く() {
         var sampler = ObservationPersistenceSampler(refreshInterval: 60)
-        let at = Date(timeIntervalSince1970: 100)
+        let at = testEpoch.addingTimeInterval(100)
 
         _ = sampler.observationsToPersist([observation(flowID: first)], observedAt: at)
 
@@ -135,7 +140,7 @@ final class FlowDeliveryIdentityTests: XCTestCase {
     /// Mac's rows where it had 50% before.
     func test_送信前の間引きは終了時の報告を捨てない() {
         var sampler = ObservationPersistenceSampler(refreshInterval: 60)
-        let at = Date(timeIntervalSince1970: 100)
+        let at = testEpoch.addingTimeInterval(100)
 
         let opening = sampler.observationsToPersist([observation(flowID: first)], observedAt: at)
         let closing = sampler.observationsToPersist(
@@ -151,7 +156,7 @@ final class FlowDeliveryIdentityTests: XCTestCase {
     /// the same flow inside the interval is still a repeat.
     func test_送信前の間引きはバイト数のある報告の繰り返しは間引く() {
         var sampler = ObservationPersistenceSampler(refreshInterval: 60)
-        let at = Date(timeIntervalSince1970: 100)
+        let at = testEpoch.addingTimeInterval(100)
 
         _ = sampler.observationsToPersist([observation(flowID: first, bytesOut: 700)], observedAt: at)
 
@@ -164,7 +169,7 @@ final class FlowDeliveryIdentityTests: XCTestCase {
     /// arrives from the extension.
     func test_同じバッチの開始と終了の報告は両方残す() {
         var sampler = ObservationPersistenceSampler(refreshInterval: 60)
-        let at = Date(timeIntervalSince1970: 100)
+        let at = testEpoch.addingTimeInterval(100)
 
         let both = sampler.observationsToPersist(
             [observation(flowID: first), observation(flowID: first, bytesOut: 700)], observedAt: at
@@ -179,7 +184,7 @@ final class FlowDeliveryIdentityTests: XCTestCase {
     func test_終了時の報告が送信待ちの開始の報告にバイト数を足す() throws {
         var sampler = ObservationPersistenceSampler(refreshInterval: 60)
         let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
-        let at = Date(timeIntervalSince1970: 100)
+        let at = testEpoch.addingTimeInterval(100)
 
         try queue.enqueue(sampler.observationsToPersist([observation(flowID: first, hostname: "api.example")], observedAt: at))
         try queue.enqueue(sampler.observationsToPersist(
@@ -217,8 +222,8 @@ final class FlowDeliveryIdentityTests: XCTestCase {
             remotePort: 443,
             processID: 42,
             processName: "TestApp",
-            firstObservedAt: Date(timeIntervalSince1970: 10),
-            lastObservedAt: Date(timeIntervalSince1970: lastObservedAt),
+            firstObservedAt: testEpoch.addingTimeInterval(10),
+            lastObservedAt: testEpoch.addingTimeInterval(lastObservedAt),
             bytesOut: bytesOut,
             collector: .networkExtension,
             confidence: .exact,

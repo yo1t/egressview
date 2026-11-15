@@ -290,6 +290,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     ) throws -> AgentIngestEnvelope? {
         try lock.withLock {
             try discardStampedAfter(sentAt.addingTimeInterval(AgentIngestSender.hubFutureBound))
+            try discardLastSeenBefore(sentAt.addingTimeInterval(-AgentIngestSender.hubRetentionBound))
             guard !state.pending.isEmpty else { return nil }
             let active: ActiveBatch
             if let existing = state.activeBatch {
@@ -340,9 +341,29 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     /// before being given up on -- a dozen requests apiece (P3-148,
     /// 2026-10-29). Caller holds the lock.
     private func discardStampedAfter(_ limit: Date) throws {
+        try discard(as: .stampedInFuture) {
+            $0.firstObservedAt > limit || $0.lastObservedAt > limit
+        }
+    }
+
+    /// Drops what was last seen before `limit`, counted under its rule.
+    ///
+    /// The Hub keeps seven days and refuses a batch holding anything older
+    /// with 422. A computer that was off or asleep for longer comes back with
+    /// such observations at the front of its queue; refused, each would be
+    /// found by halving -- eight requests apiece, one at a time -- while
+    /// everything behind it waited. A Windows PC off for nine days had 290 of
+    /// them among 9,509 queued; delivery stopped and the queue filled up and
+    /// overflowed (2026-11-15). Caller holds the lock.
+    private func discardLastSeenBefore(_ limit: Date) throws {
+        try discard(as: .outsideHubRetention) { $0.lastObservedAt < limit }
+    }
+
+    private func discard(
+        as reason: ContractRejection, where matches: (ConnectionObservation) -> Bool
+    ) throws {
         let late = Set(state.pending.compactMap { entry -> UUID? in
-            entry.observation.firstObservedAt > limit || entry.observation.lastObservedAt > limit
-                ? entry.observationID : nil
+            matches(entry.observation) ? entry.observationID : nil
         })
         guard !late.isEmpty else { return }
         state.pending.removeAll { late.contains($0.observationID) }
@@ -358,7 +379,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         }
         state.contractRejectedCount = (state.contractRejectedCount ?? 0) + late.count
         var reasonCounts = state.contractRejectionReasons ?? [:]
-        reasonCounts[ContractRejection.stampedInFuture.rawValue, default: 0] += late.count
+        reasonCounts[reason.rawValue, default: 0] += late.count
         state.contractRejectionReasons = reasonCounts
         try persist()
     }
@@ -600,6 +621,10 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         /// Only a clock that was wrong when it was recorded does this, and the
         /// Hub refuses it (P3-148).
         case stampedInFuture
+        /// Last seen more than the Hub keeps before the moment it was about to
+        /// be sent: the computer was off or asleep for over a week. The Hub
+        /// refuses it with 422.
+        case outsideHubRetention
     }
 
     static func contractRejection(_ observation: ConnectionObservation) -> ContractRejection? {

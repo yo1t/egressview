@@ -492,6 +492,12 @@ public actor AgentIngestSender {
     /// The Hub's bound on how far ahead an observation may be, mirrored for
     /// the queue's own check. The Hub refuses anything later with 422.
     static let hubFutureBound: TimeInterval = 24 * 60 * 60
+    /// How far back an observation may have been last seen, mirrored for the
+    /// queue's own check: the Hub keeps seven days and refuses anything older
+    /// with 422 (`outside_retention`). An hour short of it, so a clock a little
+    /// behind the Hub's, or a batch that takes a while to arrive, does not
+    /// send one the Hub has just started to refuse.
+    static let hubRetentionBound: TimeInterval = 7 * 24 * 60 * 60 - 60 * 60
     /// How far apart the two clocks must be before a time refusal is blamed
     /// on this Mac's clock rather than on the observations.
     static let clockSkewThreshold: TimeInterval = 60 * 60

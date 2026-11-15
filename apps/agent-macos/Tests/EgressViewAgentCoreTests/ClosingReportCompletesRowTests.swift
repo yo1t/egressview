@@ -2,6 +2,11 @@ import Foundation
 import XCTest
 @testable import EgressViewAgentCore
 
+// An hour ago, so the observations are recent: the queue drops anything last
+// seen longer ago than the Hub keeps (7 days) before sending.
+// Whole seconds, as the fixed times these tests used before were.
+private let testEpoch = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 - 3_600).rounded(.down))
+
 /// A flow's closing report goes to the Hub under the id of its opening report
 /// when the Hub has said it completes such a row, so one connection is one row
 /// with its byte counts (P3-170).
@@ -12,7 +17,7 @@ final class ClosingReportCompletesRowTests: XCTestCase {
         ConnectionObservation(
             networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: bytes == nil ? 0 : 50_000,
             remoteAddress: "203.0.113.10", remotePort: 443, processID: 42, processName: "TestApp",
-            firstObservedAt: Date(timeIntervalSince1970: 10), lastObservedAt: Date(timeIntervalSince1970: bytes == nil ? 10 : 12),
+            firstObservedAt: testEpoch.addingTimeInterval(10), lastObservedAt: testEpoch.addingTimeInterval(bytes == nil ? 10 : 12),
             bytesIn: bytes, bytesOut: bytes, collector: .networkExtension, confidence: .exact,
             flowID: flow
         )
@@ -23,7 +28,7 @@ final class ClosingReportCompletesRowTests: XCTestCase {
         ConnectionObservation(
             networkProtocol: .udp, localAddress: "192.0.2.10", localPort: 55_264,
             remoteAddress: "203.0.113.10", remotePort: 3722, processID: 42, processName: "rapportd",
-            firstObservedAt: Date(timeIntervalSince1970: start), lastObservedAt: Date(timeIntervalSince1970: end),
+            firstObservedAt: testEpoch.addingTimeInterval(start), lastObservedAt: testEpoch.addingTimeInterval(end),
             bytesIn: bytes, bytesOut: bytes, collector: .networkExtension, confidence: .exact,
             flowID: flow
         )
@@ -173,7 +178,7 @@ final class ClosingReportCompletesRowTests: XCTestCase {
             try queue.enqueue([ConnectionObservation(
                 networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: 0,
                 remoteAddress: "203.0.113.10", remotePort: 443, processID: 42, processName: "TestApp",
-                firstObservedAt: Date(timeIntervalSince1970: 10), lastObservedAt: Date(timeIntervalSince1970: 10),
+                firstObservedAt: testEpoch.addingTimeInterval(10), lastObservedAt: testEpoch.addingTimeInterval(10),
                 collector: .networkExtension, confidence: .exact, flowID: id
             )])
         }
@@ -185,7 +190,7 @@ final class ClosingReportCompletesRowTests: XCTestCase {
         try queue.enqueue([ConnectionObservation(
             networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: 50_000,
             remoteAddress: "203.0.113.10", remotePort: 443, processID: 42, processName: "TestApp",
-            firstObservedAt: Date(timeIntervalSince1970: 10), lastObservedAt: Date(timeIntervalSince1970: 12),
+            firstObservedAt: testEpoch.addingTimeInterval(10), lastObservedAt: testEpoch.addingTimeInterval(12),
             bytesIn: 1, bytesOut: 1, collector: .networkExtension, confidence: .exact, flowID: oldest
         )])
         let sent = try deliver(queue)
@@ -226,7 +231,7 @@ final class ClosingReportCompletesRowTests: XCTestCase {
         ConnectionObservation(
             networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: localPort,
             remoteAddress: "203.0.113.10", remotePort: 443, processID: 42, processName: "TestApp",
-            firstObservedAt: Date(timeIntervalSince1970: start), lastObservedAt: Date(timeIntervalSince1970: end),
+            firstObservedAt: testEpoch.addingTimeInterval(start), lastObservedAt: testEpoch.addingTimeInterval(end),
             bytesIn: nil, bytesOut: nil, collector: .networkExtension, confidence: .exact,
             flowID: flow
         )
