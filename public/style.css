@@ -500,7 +500,7 @@
   .agent-view-wrap { max-width: 1440px; display: grid; gap: 16px; }
   .agent-view-hint { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 0; max-width: 110ch; }
   .agent-view-error { color: var(--red); }
-  .agent-view-heading { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  .agent-view-heading { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); margin: 0; }
   .agent-view-overview { display: grid; gap: 8px; }
   .agent-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
   .agent-kpi {
@@ -559,7 +559,7 @@
   .agent-card-empty { color: var(--muted); font-size: 12px; line-height: 1.6; padding: 12px; border: 1px dashed var(--border); border-radius: 8px; }
   .agent-card-caution { color: var(--yellow); font-size: 11px; }
   .agent-card-section { display: grid; gap: 8px; }
-  .agent-card-section-title { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .agent-card-section-title { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); }
   .agent-candidates { display: grid; gap: 8px; }
   .agent-candidate {
     display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
