@@ -802,6 +802,23 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
       firstAt: now - 86_400_000, lastAt: now - 1_800_000, localAddress: '192.0.2.53', samplePorts: [21, 22, 23, 80, 443],
     }] }] }),
   }));
+  const appDays = [];
+  await page.route(/\/api\/agents\/app-bytes\?days=\d$/, route => {
+    const days = Number(new URL(route.request().url()).searchParams.get('days'));
+    appDays.push(days);
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ days, startedAt: now - 3_600_000, agents: [{
+        agentId: agents[0].agentId, flows: 1000, flowsWithBytes: 990,
+        beyond: { bytesOut: 1_200_000_000 * days, totalApps: 12, apps: [
+          { appIdentity: 'com.example.a-very-long-application-identifier-for-a-phone',
+            processName: 'An application with a name far too long for one line on a phone',
+            bytesOut: 900_000_000 * days, flows: 400 },
+        ] },
+        private: { bytesOut: 160_000_000_000 * days, unnamedBytesOut: 159_000_000_000 * days },
+      }] }),
+    });
+  });
   await authPage(page);
 
   await page.click('#btn-agents');
@@ -821,6 +838,15 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
   await expect(page.locator('.agent-card-host')).toHaveText('office-pc');
   await page.locator('.agent-table tbody tr').first().click();
   await expect(page.locator('.agent-card-host')).toHaveText(agents[0].hostName);
+
+  // The period switch is tapped with a finger and reloads only the app list.
+  await expect(page.locator('.agent-app')).toHaveCount(1);
+  const periods = page.locator('.agent-segmented-option');
+  const periodHeights = await periods.evaluateAll(els => els.map(el => el.getBoundingClientRect().height));
+  for (const height of periodHeights) expect(height, 'the period buttons should be touchable').toBeGreaterThanOrEqual(38);
+  await periods.nth(1).click();
+  await expect(periods.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  expect(appDays).toContain(7);
 
   const overflow = await page.evaluate(() => {
     const body = document.querySelector('.agent-view-body');

@@ -123,6 +123,32 @@ function createRegistry() {
     sharing: z.boolean(),
   }).strict());
 
+  // GET /api/agents/app-bytes -- per enrolled Agent, at most 10 applications
+  // (`LIST_MAX_APPS`) beyond private addresses, and the private-address total.
+  registry.declare('GET /api/agents/app-bytes', 200, z.object({
+    days: z.number(),
+    startedAt: z.number().nullable(),
+    agents: z.array(z.object({
+      agentId: z.string(),
+      flows: z.number(),
+      flowsWithBytes: z.number(),
+      beyond: z.object({
+        bytesOut: z.number(),
+        totalApps: z.number(),
+        apps: z.array(z.object({
+          appIdentity: z.string(),
+          processName: z.string(),
+          bytesOut: z.number(),
+          flows: z.number(),
+        }).strict()),
+      }).strict(),
+      private: z.object({
+        bytesOut: z.number(),
+        unnamedBytesOut: z.number(),
+      }).strict(),
+    }).strict()),
+  }).strict());
+
   // GET /api/agents/inbound-probes -- per enrolled Agent, at most 20 senders
   // (`LIST_MAX_SENDERS`), with the total before that cut.
   registry.declare('GET /api/agents/inbound-probes', 200, z.object({

@@ -194,6 +194,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `POST /api/agents/enrollment-requests/:requestId/reject` | `auth.admin`必須。申請を却下する |
 | Agent | `GET /api/agents` | `auth.admin`必須。credential hashは返さない |
 | Agent | `GET /api/agents/ingest-metrics` | `auth.admin`必須。集約counterと上限だけを返す |
+| Agent | `GET /api/agents/app-bytes` | `auth.admin`必須。`days`は`1`か`7`（既定`1`）。登録中のAgentごとに、プライベートアドレス以外へ送信量の多いアプリ（最大10件）と、プライベートアドレス宛ての合計（うちアプリ名のない分）、送信量の分かる通信の割合。Hubが受け取った時点で1時間ごとに数えるので、`startedAt`より前の分は入らない |
 | Agent | `GET /api/agents/inbound-probes` | `auth.admin`必須。登録中のAgentごとに、直近14日にそのコンピューターの10ポート以上へ届いたLAN内の送り元（検出ログと同じ基準）。送り元ごとに最大20件と、その前の総数 |
 | Agent | `GET /api/agents/outbound-candidates` | `auth.admin`必須。登録中のAgentごとに、利用者が送ると決めた候補と答えを返す |
 | Agent | `POST /api/agents/:agentId/revoke` | `auth.admin`必須 |

@@ -54,6 +54,8 @@ const approveSchema = z.object({ replaceExisting: z.boolean().optional() }).stri
 const transportConsentSchema = z.object({ allowPlaintext: z.boolean() }).strict();
 const requestIdSchema = z.object({ requestId: z.string().uuid() }).strict();
 const agentIdSchema = z.object({ agentId: z.string().uuid() }).strict();
+// The Agent tab offers the last day or the last week of sent bytes.
+const appBytesQuerySchema = z.object({ days: z.enum(['1', '7']).default('1') }).strict();
 const MAX_FAILURE_BUCKETS = 2048;
 const MAX_FAILURES = 5;
 const FAILURE_WINDOW_MS = 5 * 60 * 1000;
@@ -474,6 +476,31 @@ module.exports = function agentRoutes({
     } catch (error) {
       logger.error('[agents] Listing inbound probes failed:', error.message);
       res.status(500).json({ error: 'Inbound probe listing failed' });
+    }
+  });
+
+  // What each enrolled Agent's applications sent, beyond private addresses
+  // and to them, over the last day or week (P3-194).
+  router.get('/agents/app-bytes', requireAdmin, (req, res) => {
+    const parsed = parseRequest(appBytesQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    if (!agentIngest) return res.status(503).json({ error: 'Agent storage is unavailable' });
+    try {
+      const days = Number(parsed.data.days);
+      const enrolled = new Set(agentIdentities.listAgents()
+        .filter(agent => !agent.revokedAt)
+        .map(agent => agent.agentId));
+      // The current hour is partly over, so the window reaches back one hour
+      // further rather than one short.
+      const report = agentIngest.listAppBytes({ since: Date.now() - days * 24 * 60 * 60 * 1000 });
+      res.json({
+        days,
+        startedAt: report.startedAt,
+        agents: report.agents.filter(agent => enrolled.has(agent.agentId)),
+      });
+    } catch (error) {
+      logger.error('[agents] Listing app bytes failed:', error.message);
+      res.status(500).json({ error: 'App byte listing failed' });
     }
   });
 

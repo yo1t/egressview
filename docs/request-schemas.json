@@ -2214,6 +2214,116 @@
         ]
       }
     },
+    "GET /api/agents/app-bytes": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer"
+          },
+          "startedAt": {
+            "type": "integer"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "agentId": {
+                  "type": "string"
+                },
+                "flows": {
+                  "type": "integer"
+                },
+                "flowsWithBytes": {
+                  "type": "integer"
+                },
+                "beyond": {
+                  "type": "object",
+                  "properties": {
+                    "bytesOut": {
+                      "type": "integer"
+                    },
+                    "apps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "appIdentity": {
+                            "type": "string"
+                          },
+                          "processName": {
+                            "type": "string"
+                          },
+                          "bytesOut": {
+                            "type": "integer"
+                          },
+                          "flows": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "appIdentity",
+                          "bytesOut",
+                          "flows",
+                          "processName"
+                        ]
+                      }
+                    },
+                    "totalApps": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "apps",
+                    "bytesOut",
+                    "totalApps"
+                  ]
+                },
+                "private": {
+                  "type": "object",
+                  "properties": {
+                    "bytesOut": {
+                      "type": "integer"
+                    },
+                    "unnamedBytesOut": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "bytesOut",
+                    "unnamedBytesOut"
+                  ]
+                }
+              },
+              "required": [
+                "agentId",
+                "beyond",
+                "flows",
+                "flowsWithBytes",
+                "private"
+              ]
+            }
+          }
+        },
+        "required": [
+          "agents",
+          "days",
+          "startedAt"
+        ]
+      },
+      "400": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    },
     "GET /api/agents/enrollment-requests": {
       "200": {
         "type": "object",

@@ -220,7 +220,100 @@ function renderProbes(agent, probes, minPorts) {
   return section;
 }
 
-function renderCard(agent, report, now, probes, minPorts) {
+// Which period the app list covers, per viewer. Storage may refuse access.
+const APP_DAYS_KEY = 'egressview_agent_view_app_days';
+
+function readAppDays() {
+  try { return localStorage.getItem(APP_DAYS_KEY) === '7' ? 7 : 1; } catch { return 1; }
+}
+
+function storeAppDays(days) {
+  try { localStorage.setItem(APP_DAYS_KEY, String(days)); } catch { /* per-viewer convenience only */ }
+}
+
+function periodSwitch(days) {
+  const group = textElement('div', '', 'agent-segmented');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', t('agents.apps.periodLabel'));
+  for (const value of [1, 7]) {
+    const button = textElement('button', t(`agents.apps.period${value}`), 'agent-segmented-option');
+    button.type = 'button';
+    button.setAttribute('aria-pressed', String(value === days));
+    button.addEventListener('click', () => { if (value !== days) setAppDays(value); });
+    group.appendChild(button);
+  }
+  return group;
+}
+
+function renderApps(appBytes, appState) {
+  const section = textElement('div', '', 'agent-card-section');
+  const head = textElement('div', '', 'agent-card-section-head');
+  head.append(textElement('div', t('agents.apps.title'), 'agent-card-section-title'), periodSwitch(appState.days));
+  section.appendChild(head);
+  if (!appState.ok) {
+    section.appendChild(textElement('div', t('agents.apps.unavailable'), 'agent-card-empty'));
+    return section;
+  }
+  const beyond = appBytes?.beyond || { bytesOut: 0, apps: [], totalApps: 0 };
+  const apps = Array.isArray(beyond.apps) ? beyond.apps : [];
+  if (!apps.length) {
+    section.appendChild(textElement('div', t('agents.apps.none'), 'agent-card-empty'));
+  } else {
+    section.appendChild(textElement('div',
+      tVars('agents.apps.total', { bytes: formatBytes(beyond.bytesOut), apps: beyond.totalApps }), 'agent-card-meta'));
+    // Bars are scaled to the largest, so the list reads at a glance on a
+    // phone where a table of numbers would not.
+    const top = Math.max(1, ...apps.map(entry => Number(entry.bytesOut) || 0));
+    const list = textElement('ol', '', 'agent-apps');
+    for (const entry of apps) {
+      const item = textElement('li', '', 'agent-app');
+      const label = textElement('div', '', 'agent-app-label');
+      label.append(
+        textElement('span', entry.processName || entry.appIdentity, 'agent-app-name'),
+        textElement('span', formatBytes(entry.bytesOut), 'agent-app-bytes')
+      );
+      const meter = document.createElement('meter');
+      meter.className = 'agent-app-bar';
+      meter.min = 0;
+      meter.max = top;
+      meter.value = Number(entry.bytesOut) || 0;
+      meter.setAttribute('aria-hidden', 'true');
+      item.title = entry.appIdentity;
+      item.append(label, meter);
+      list.appendChild(item);
+    }
+    section.appendChild(list);
+    const more = (Number(beyond.totalApps) || 0) - apps.length;
+    if (more > 0) section.appendChild(textElement('div', tVars('agents.apps.more', { count: more }), 'agent-card-meta'));
+  }
+  const privateBytes = Number(appBytes?.private?.bytesOut) || 0;
+  if (privateBytes > 0) {
+    section.appendChild(textElement('div',
+      tVars('agents.apps.private', { bytes: formatBytes(privateBytes) }), 'agent-card-meta'));
+    const unnamed = Number(appBytes.private.unnamedBytesOut) || 0;
+    if (unnamed > 0) {
+      section.appendChild(textElement('div',
+        tVars('agents.apps.privateUnnamed', { bytes: formatBytes(unnamed) }), 'agent-card-meta'));
+    }
+  }
+  const flows = Number(appBytes?.flows) || 0;
+  if (flows > 0) {
+    const counted = Number(appBytes.flowsWithBytes) || 0;
+    section.appendChild(textElement('div', tVars('agents.apps.coverage', {
+      percent: (Math.floor((counted / flows) * 1000) / 10).toFixed(1),
+      counted: counted.toLocaleString(), flows: flows.toLocaleString(),
+    }), 'agent-card-meta'));
+  }
+  // Counting began when this Hub version first ran; a period reaching back
+  // before that is short, and says so.
+  const startedAt = Number(appState.startedAt) || 0;
+  if (startedAt && Date.now() - startedAt < appState.days * 24 * 60 * 60 * 1000) {
+    section.appendChild(textElement('div', tVars('agents.apps.since', { time: fmtTs(startedAt) }), 'agent-card-meta'));
+  }
+  return section;
+}
+
+function renderCard(agent, report, now, probes, minPorts, appBytes, appState) {
   const card = textElement('article', '', 'agent-card');
   const head = textElement('div', '', 'agent-card-head');
   const title = textElement('div', '', 'agent-card-title');
@@ -230,7 +323,9 @@ function renderCard(agent, report, now, probes, minPorts) {
       .filter(Boolean).join(' · '), 'agent-card-meta')
   );
   head.append(title, deliveryLine(agent, now));
-  card.append(head, renderCandidates(agent, report), renderProbes(agent, probes, minPorts));
+  // Answers waiting first, then what it sends, then what reached it.
+  card.append(head, renderCandidates(agent, report), renderApps(appBytes, appState),
+    renderProbes(agent, probes, minPorts));
   return card;
 }
 
@@ -341,13 +436,13 @@ function cell(child, className = '') {
 
 // One row per Agent, so a stopped one or one with open questions stands out
 // without opening each in turn. A row picks that Agent for the detail.
-function renderTable(agents, reports, now, selectedId, probes) {
+function renderTable(agents, reports, now, selectedId, probes, appBytes) {
   const table = textElement('table', '', 'agent-table');
   const headRow = document.createElement('tr');
   for (const [key, className] of [
     ['agents.table.agent', ''], ['agents.table.delivery', ''], ['agents.table.candidates', 'agent-table-num'],
     ['agents.candidates.investigate', 'agent-table-num'], ['agents.candidates.unanswered', 'agent-table-num'],
-    ['agents.table.probes', 'agent-table-num'],
+    ['agents.table.probes', 'agent-table-num'], ['agents.table.beyond', 'agent-table-num'],
   ]) {
     const th = textElement('th', t(key), className);
     th.scope = 'col';
@@ -379,6 +474,9 @@ function renderTable(agents, reports, now, selectedId, probes) {
       ['agents.candidates.investigate', countCell(report, 'investigate', 'alert')],
       ['agents.candidates.unanswered', countCell(report, 'unanswered', 'warn')],
       ['agents.table.probes', probeCell(agent, probes.get(agent.agentId))],
+      ['agents.table.beyond', textElement('span',
+        appBytes.has(agent.agentId) ? formatBytes(appBytes.get(agent.agentId).beyond?.bytesOut) : '—',
+        appBytes.has(agent.agentId) ? '' : 'agent-cell-muted')],
     ];
     // The same counts, labelled, for a phone where the columns are hidden.
     const stats = textElement('td', '', 'agent-table-stats');
@@ -415,7 +513,7 @@ function drawView() {
   const overview = document.getElementById('agent-view-overview');
   const select = document.getElementById('agent-view-select');
   if (!list || !lastView) return;
-  const { agents, reports, now, probes, minPorts } = lastView;
+  const { agents, reports, now, probes, minPorts, appBytes, appState } = lastView;
   const pickRow = select?.closest('.agent-view-pick');
   if (!agents.length) {
     kpis?.replaceChildren();
@@ -429,7 +527,7 @@ function drawView() {
   lastView.selectedId = selected.agentId;
   const summary = summarize(agents, reports, now, probes);
   kpis?.replaceChildren(...renderKpis(summary));
-  const tableParts = [renderTable(agents, reports, now, selected.agentId, probes)];
+  const tableParts = [renderTable(agents, reports, now, selected.agentId, probes, appBytes)];
   if (summary.shown < summary.candidates) {
     tableParts.push(textElement('div',
       tVars('agents.overview.answersOf', { shown: summary.shown }), 'agent-card-meta agent-view-note'));
@@ -446,7 +544,7 @@ function drawView() {
   }
   if (pickRow) pickRow.hidden = false;
   list.replaceChildren(renderCard(selected, reports.get(selected.agentId), now,
-    probes.get(selected.agentId), minPorts));
+    probes.get(selected.agentId), minPorts, appBytes.get(selected.agentId), appState));
 }
 
 function selectAgent(agentId) {
@@ -465,17 +563,36 @@ async function readJson(path) {
   return { ok: response.ok, status: response.status, body };
 }
 
+async function readAppBytes(days) {
+  const result = await readJson(`/api/agents/app-bytes?days=${days}`).catch(() => ({ ok: false, body: {} }));
+  return {
+    appBytes: new Map((result.ok ? result.body.agents || [] : []).map(report => [report.agentId, report])),
+    appState: { days, ok: result.ok, startedAt: result.body?.startedAt ?? null },
+  };
+}
+
+// Switching the period reloads only the app list; the rest stays as it was.
+async function setAppDays(days) {
+  storeAppDays(days);
+  if (!lastView) return;
+  const apps = await readAppBytes(days);
+  if (!lastView) return;
+  Object.assign(lastView, apps);
+  drawView();
+}
+
 async function loadAgentView() {
   if (loading) return loading;
   const list = document.getElementById('agent-view-list');
   if (!list) return null;
   loading = (async () => {
     try {
-      const [agentsResult, candidatesResult, probesResult] = await Promise.all([
+      const [agentsResult, candidatesResult, probesResult, apps] = await Promise.all([
         readJson('/api/agents'),
         // A Hub older than P3-194 answers 404 here; the cards still show.
         readJson('/api/agents/outbound-candidates').catch(() => ({ ok: false, body: {} })),
         readJson('/api/agents/inbound-probes').catch(() => ({ ok: false, body: {} })),
+        readAppBytes(readAppDays()),
       ]);
       if (!agentsResult.ok) throw new Error(agentsResult.body.error || t('agents.loadFailed'));
       // By name, so the picker and the table keep their order between visits.
@@ -487,7 +604,9 @@ async function loadAgentView() {
       const probes = new Map((probesResult.ok ? probesResult.body.agents || [] : [])
         .map(report => [report.agentId, report]));
       const minPorts = Number(probesResult.body?.minPorts) || 10;
-      lastView = { agents, reports, probes, minPorts, now: Date.now(), selectedId: lastView?.selectedId || '' };
+      lastView = {
+        agents, reports, probes, minPorts, ...apps, now: Date.now(), selectedId: lastView?.selectedId || '',
+      };
       drawView();
     } catch (error) {
       lastView = null;

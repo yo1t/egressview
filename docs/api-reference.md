@@ -194,6 +194,7 @@ All 101 implemented HTTP endpoints are listed below. **Public** means no browser
 | Agent | `POST /api/agents/enrollment-requests/:requestId/reject` | `auth.admin`; rejects the request |
 | Agent | `GET /api/agents` | Protected; `auth.admin`, never returns credential hashes |
 | Agent | `GET /api/agents/ingest-metrics` | Protected; `auth.admin`, aggregate counters and limits only |
+| Agent | `GET /api/agents/app-bytes` | Protected; `auth.admin`. `days` is `1` or `7` (default `1`). Per enrolled Agent, the applications that sent most to non-private addresses (up to 10), the private-address total with the part no application was named for, and how many flows carried a sent-bytes count. Counted per hour as the Hub receives observations, so nothing before `startedAt` is included |
 | Agent | `GET /api/agents/inbound-probes` | Protected; `auth.admin`. Per enrolled Agent, the LAN senders that reached 10 or more of its computer's ports in the last 14 days (the detection log's threshold): up to 20 senders, with the total before that cut |
 | Agent | `GET /api/agents/outbound-candidates` | Protected; `auth.admin`. What each enrolled Agent chose to share of its outbound candidates and answers |
 | Agent | `POST /api/agents/:agentId/revoke` | Protected; `auth.admin` |
