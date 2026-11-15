@@ -80,6 +80,7 @@ const APP_SCRIPT_FILES = [
   'settings.js',
   'time-filter.js',
   'router-settings.js',
+  'agent-view.js',
   'main.js',
 ];
 
@@ -511,6 +512,23 @@ describe('Frontend TDZ lint', () => {
     assert.doesNotMatch(section, /\.style\./);
     assert.match(html, /id="agents-list"/);
     assert.match(html, /id="agent-enrollment-create-btn"/);
+  });
+
+  it('Agentタブは端末が名乗った名前とメモをDOM APIで描く', () => {
+    const view = moduleSources['agent-view.js'];
+    assert.ok(view);
+    assert.doesNotMatch(view, /\.innerHTML\s*=/);
+    assert.doesNotMatch(view, /insertAdjacentHTML/);
+    assert.doesNotMatch(view, /\.style\./);
+    assert.match(html, /id="btn-agents"[^>]*\bhidden\b/);
+    assert.match(html, /id="agents-container"/);
+    assert.match(html, /id="agent-view-list"/);
+  });
+
+  it('調べる候補は設定ではなくAgentタブに出す', () => {
+    assert.doesNotMatch(html, /id="agent-candidates-block"/);
+    assert.doesNotMatch(moduleSources['settings-agents.js'], /outbound-candidates/);
+    assert.match(moduleSources['agent-view.js'], /\/api\/agents\/outbound-candidates/);
   });
 
   it('graph tooltips use DOM APIs and only runtime position styles', () => {

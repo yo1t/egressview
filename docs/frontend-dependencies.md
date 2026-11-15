@@ -41,7 +41,9 @@ entry point; imports determine evaluation order and cache-busted asset URLs.
       asks for it to be redrawn, so it imports none of the others
     - `ai-notification-settings.js` — when the Hub speaks on its own
     - `ai-insights.js` — facts, chat, and the panel's lifecycle
-19. `main.js`
+19. `agent-view.js` — the Agent tab: whether each enrolled Agent is delivering,
+    and the "worth a look" list its user chose to share (P3-194)
+20. `main.js`
 
 `socket.io`, D3, and topojson are loaded before the app scripts.
 

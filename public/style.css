@@ -171,8 +171,6 @@
   .settings-agent-list { margin-bottom: 8px; font-size: 11px; }
   .settings-agent-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
   .settings-agent-details { display: grid; flex: 1; gap: 2px; min-width: 0; }
-  .settings-agent-candidates { padding: 8px 0 4px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-  .settings-agent-candidates .settings-agent-row { padding-left: 12px; }
   .settings-agent-details > * { overflow-wrap: anywhere; }
   .settings-agent-note { white-space: pre-wrap; opacity: 0.85; }
   .settings-agent-answer { flex: none; padding: 1px 8px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.15); }
@@ -416,6 +414,7 @@
   }
   .view-tab.active { background: var(--accent); color: #fff; }
   .view-tab:not(.active):hover { background: var(--border); color: var(--text); }
+  .view-tab[hidden] { display: none; }
   /* ── Settings button ─────────────────────────────── */
   .settings-btn {
     margin-left: 8px; padding: 5px 10px; background: transparent;
@@ -495,6 +494,20 @@
   /* Connection Log */
   .activity-view { display: none; flex-direction: column; flex: 1; overflow: hidden; background: var(--bg); padding: 10px; gap: 8px; }
   .activity-view.view-active { display: flex; }
+  /* ── Agent view ─────────────────────────────────── */
+  .agent-view-body { overflow-y: auto; flex: 1; padding: 0 8px 8px; font-size: 11px; }
+  .agent-view-hint { color: var(--muted); font-size: 11px; margin: 0 0 10px; max-width: 72ch; }
+  .agent-view-list { display: grid; gap: 10px; max-width: 960px; }
+  .agent-view-error { color: var(--red); }
+  .agent-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--panel, transparent); }
+  .agent-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .agent-card-host { font-size: 13px; }
+  .agent-card-status { margin-left: auto; font-size: 11px; }
+  .agent-card-status-delivering { color: var(--green); }
+  .agent-card-status-stopped { color: #f59e0b; }
+  .agent-card-section { display: grid; gap: 2px; padding-top: 8px; }
+  .agent-card-section-title { font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .agent-card-section .settings-agent-row { padding-left: 0; }
   .ai-view {
     overflow-y: auto; padding: clamp(16px, 3vw, 40px); gap: 18px;
     background:
@@ -1158,7 +1171,8 @@
     .source-filter-select { max-width: 112px; font-size: 9px; }
     .view-tabs {
       grid-column: 1 / -1; grid-row: 2;
-      display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+      /* One column per visible tab: the Agent tab is there only on some Hubs. */
+      display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
       width: 100%; padding: 2px;
     }
     .view-tab {

@@ -73,7 +73,7 @@ const PHASE2_JS_FILES = [
   'stats-helpers.js', 'stats-charts.js', 'stats-map.js',
   'view-tabs.js', 'log.js', 'ai-insights.js', 'beacon.js', 'threat-popup.js',
   'devices.js', 'notif-log.js', 'main.js',
-  'settings-ai.js', 'settings-security.js', 'settings-agents.js',
+  'settings-ai.js', 'settings-security.js', 'settings-agents.js', 'agent-view.js',
 ];
 for (const file of PHASE2_JS_FILES) {
   test(`js/${file} is served (200)`, async ({ request }) => {

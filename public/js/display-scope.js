@@ -223,6 +223,10 @@ function updateAgentSources(agents, options = {}) {
   if (options.complete !== false) agentCatalogLoaded = true;
   renderSelector();
   reconcileScope();
+  // The Agent tab shows itself only while an Agent is enrolled (agent-view.js).
+  if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('egressview:agents', { detail: { agents: rawAgents } }));
+  }
 }
 
 async function initDisplayScopeSelector({ request, notify, onChange } = {}) {

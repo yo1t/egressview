@@ -15,6 +15,7 @@ import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
 import './router-settings.js?v=__ASSET_VERSION__';
 import { startAiInsights, stopAiInsights, refreshAiInsights, aiInsightsLiveTick } from './ai-insights.js?v=__ASSET_VERSION__';
 import { getDisplayScope, initDisplayScopeSelector } from './display-scope.js?v=__ASSET_VERSION__';
+import { initAgentView, loadAgentView } from './agent-view.js?v=__ASSET_VERSION__';
 
 // ─── Cross-module reference injection ────────────────────────────────────────
 // auth-socket.js and graph.js both need devicesData but can't import from devices.js
@@ -32,11 +33,14 @@ setViewTabHandlers({
   onLog: () => { updateLogView(); loadBeacons(); },
   onDevices: loadDevicesView,
   onNotifLog: loadNotifLog,
+  onAgents: loadAgentView,
   onAi: startAiInsights,
   onAiRefresh: refreshAiInsights,
   onLeaveAi: stopAiInsights,
   onDeviceSearch: () => { applyFilter(lastClients); applyGraphFilter(); },
 });
+// Revoking the last Agent while its tab is open falls back to the first tab.
+initAgentView({ onHidden: () => switchView('ai') });
 // ─── Main socket event handlers ───────────────────────────────────────────────
 
 socket.on('auth-required', () => {
