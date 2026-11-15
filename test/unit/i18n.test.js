@@ -66,8 +66,9 @@ describe('shared i18n catalog', () => {
     // Grew by 6 on 2026-11-02: an Agent quiet while a router sees its computer (P3-103).
     // Grew by 16 on 2026-11-14: candidates an Agent's user chose to share (P3-194).
     // Grew by 9 on 2026-11-15: the Agent tab those candidates moved to.
-    assert.equal(jaKeys.size, 990);
-    assert.equal(enKeys.size, 990);
+    // Grew by 15 on 2026-11-15: the Agent tab's overview and Agent picker.
+    assert.equal(jaKeys.size, 1005);
+    assert.equal(enKeys.size, 1005);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
