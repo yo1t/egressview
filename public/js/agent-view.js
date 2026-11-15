@@ -313,7 +313,66 @@ function renderApps(appBytes, appState) {
   return section;
 }
 
-function renderCard(agent, report, now, probes, minPorts, appBytes, appState) {
+function factRow(label, value, className = '') {
+  const row = textElement('div', '', `agent-fact ${className}`.trim());
+  const term = textElement('dt', label, 'agent-fact-label');
+  const detail = textElement('dd', '', 'agent-fact-value');
+  if (value instanceof Node) detail.append(value); else detail.textContent = value;
+  row.append(term, detail);
+  return row;
+}
+
+// What the Hub knows of the computer: what the Agent enrolled with, and the
+// addresses its flows left from, with what a router recorded for the LAN one.
+function renderFacts(agent, details, detailsOk, now) {
+  const section = textElement('details', '', 'agent-card-section agent-facts');
+  section.open = true;
+  section.append(textElement('summary', t('agents.facts.title'), 'agent-card-section-title'));
+  const list = textElement('dl', '', 'agent-facts-list');
+  list.append(
+    factRow(t('agents.facts.os'), platformLabel(agent) || '—'),
+    factRow(t('agents.facts.agent'), agent.agentVersion || '—'),
+    factRow(t('agents.facts.enrolled'), agent.createdAt ? fmtTs(agent.createdAt) : '—'),
+    factRow(t('agents.facts.lastSeen'), agent.lastSeenAt
+      ? `${fmtTs(agent.lastSeenAt)} · ${ago(agent.lastSeenAt, now)}` : t('agents.status.never')),
+  );
+  const notes = [];
+  if (!detailsOk) {
+    notes.push(t('agents.facts.unavailable'));
+  } else {
+    const addresses = details?.addresses || [];
+    // The address a router also knows is the one on the LAN.
+    const lan = addresses.find(entry => entry.device);
+    if (lan) {
+      const device = lan.device;
+      list.append(factRow(t('agents.facts.lanAddress'), lan.address, 'agent-fact-mono'));
+      if (device.mac) list.append(factRow(t('agents.facts.mac'), device.mac, 'agent-fact-mono'));
+      if (device.vendor) list.append(factRow(t('agents.facts.vendor'), device.vendor));
+      const names = [...new Set([device.dnsName, device.mdnsName, device.netbiosName].filter(Boolean))];
+      if (names.length) list.append(factRow(t('agents.facts.names'), names.join(', ')));
+    }
+    const others = addresses.filter(entry => entry !== lan).map(entry => entry.address);
+    if (others.length) {
+      list.append(factRow(t('agents.facts.otherAddresses'), others.join(', '), 'agent-fact-mono agent-fact-wide'));
+    }
+    const collectors = details?.collectors || [];
+    if (collectors.length) {
+      list.append(factRow(t('agents.facts.collector'), collectors
+        .map(name => {
+          const key = `agents.facts.collector.${name}`;
+          const label = t(key);
+          return label === key ? name : label;
+        }).join(', '), 'agent-fact-wide'));
+    }
+    if (!addresses.length) notes.push(t('agents.facts.noAddress'));
+    else if (!lan) notes.push(t('agents.facts.noRouterMatch'));
+    if (others.length) notes.push(t('agents.facts.otherHint'));
+  }
+  section.append(list, ...notes.map(note => textElement('div', note, 'agent-card-meta')));
+  return section;
+}
+
+function renderCard(agent, report, now, probes, minPorts, appBytes, appState, details, detailsOk) {
   const card = textElement('article', '', 'agent-card');
   const head = textElement('div', '', 'agent-card-head');
   const title = textElement('div', '', 'agent-card-title');
@@ -327,7 +386,7 @@ function renderCard(agent, report, now, probes, minPorts, appBytes, appState) {
   // first two share a row when the card is wide enough.
   const pair = textElement('div', '', 'agent-card-pair');
   pair.append(renderCandidates(agent, report), renderApps(appBytes, appState));
-  card.append(head, pair, renderProbes(agent, probes, minPorts));
+  card.append(head, pair, renderProbes(agent, probes, minPorts), renderFacts(agent, details, detailsOk, now));
   return card;
 }
 
@@ -515,7 +574,7 @@ function drawView() {
   const overview = document.getElementById('agent-view-overview');
   const select = document.getElementById('agent-view-select');
   if (!list || !lastView) return;
-  const { agents, reports, now, probes, minPorts, appBytes, appState } = lastView;
+  const { agents, reports, now, probes, minPorts, appBytes, appState, details, detailsOk } = lastView;
   const pickRow = select?.closest('.agent-view-pick');
   if (!agents.length) {
     kpis?.replaceChildren();
@@ -546,7 +605,8 @@ function drawView() {
   }
   if (pickRow) pickRow.hidden = false;
   list.replaceChildren(renderCard(selected, reports.get(selected.agentId), now,
-    probes.get(selected.agentId), minPorts, appBytes.get(selected.agentId), appState));
+    probes.get(selected.agentId), minPorts, appBytes.get(selected.agentId), appState,
+    details.get(selected.agentId), detailsOk));
 }
 
 function selectAgent(agentId) {
@@ -589,12 +649,13 @@ async function loadAgentView() {
   if (!list) return null;
   loading = (async () => {
     try {
-      const [agentsResult, candidatesResult, probesResult, apps] = await Promise.all([
+      const [agentsResult, candidatesResult, probesResult, apps, detailsResult] = await Promise.all([
         readJson('/api/agents'),
         // A Hub older than P3-194 answers 404 here; the cards still show.
         readJson('/api/agents/outbound-candidates').catch(() => ({ ok: false, body: {} })),
         readJson('/api/agents/inbound-probes').catch(() => ({ ok: false, body: {} })),
         readAppBytes(readAppDays()),
+        readJson('/api/agents/details').catch(() => ({ ok: false, body: {} })),
       ]);
       if (!agentsResult.ok) throw new Error(agentsResult.body.error || t('agents.loadFailed'));
       // By name, so the picker and the table keep their order between visits.
@@ -606,8 +667,11 @@ async function loadAgentView() {
       const probes = new Map((probesResult.ok ? probesResult.body.agents || [] : [])
         .map(report => [report.agentId, report]));
       const minPorts = Number(probesResult.body?.minPorts) || 10;
+      const details = new Map((detailsResult.ok ? detailsResult.body.agents || [] : [])
+        .map(report => [report.agentId, report]));
       lastView = {
-        agents, reports, probes, minPorts, ...apps, now: Date.now(), selectedId: lastView?.selectedId || '',
+        agents, reports, probes, minPorts, ...apps, details, detailsOk: detailsResult.ok,
+        now: Date.now(), selectedId: lastView?.selectedId || '',
       };
       drawView();
     } catch (error) {

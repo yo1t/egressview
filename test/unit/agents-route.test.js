@@ -42,6 +42,7 @@ function makeApp({
   threatIntel = null,
   ingestAuditSummary = null,
   onInboundProbes = null,
+  devices = null,
 } = {}) {
   const audits = [];
   const app = express();
@@ -75,6 +76,7 @@ function makeApp({
     authAudit: { append: event => audits.push(event) },
     ingestAuditSummary,
     onInboundProbes,
+    devices,
   }));
   return { app, audits };
 }
@@ -1135,5 +1137,60 @@ describe('outbound candidates shared by an Agent', () => {
     for (const value of ['com.example.backup', 'example.net', 'バックアップ']) {
       assert.equal(text.includes(value), false, value);
     }
+  });
+});
+
+// P3-194: what the Hub knows of each Agent's computer: the addresses its
+// flows left from, and what the routers recorded for the LAN one.
+describe('Agent details', () => {
+  function observation(overrides = {}) {
+    const now = Date.now();
+    return {
+      ...structuredClone(golden.observations[0]),
+      firstObservedAt: new Date(now - 1000).toISOString(),
+      lastObservedAt: new Date(now).toISOString(),
+      ...overrides,
+    };
+  }
+
+  it('Agentの通信の自分側アドレスを新しい順に返し、ルーターが知っているアドレスにはMACとメーカーを付ける', async () => {
+    const known = {
+      '192.0.2.10': {
+        ip: '192.0.2.10', mac: '00:11:22:aa:bb:cc', vendor: 'Example Inc.', dnsName: 'studio.example',
+        mdnsName: null, netbiosName: null, firstSeen: 1, lastSeen: 2,
+      },
+    };
+    const { app } = makeApp({ devices: { getByIp: ip => known[ip] || null } });
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const now = Date.now();
+    const envelope = ingestEnvelope();
+    envelope.observations = [
+      observation({ observationId: '00000000-0000-4000-8000-0000000000d1',
+        lastObservedAt: new Date(now - 2000).toISOString(), firstObservedAt: new Date(now - 3000).toISOString() }),
+      observation({ observationId: '00000000-0000-4000-8000-0000000000d2', localAddress: '198.51.100.7' }),
+      observation({ observationId: '00000000-0000-4000-8000-0000000000d3', localAddress: '127.0.0.1' }),
+    ];
+    assert.equal((await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers: authorization })).status, 200);
+
+    const listed = await request(app, 'GET', '/api/agents/details');
+    assert.equal(listed.status, 200);
+    const [agent] = listed.body.agents;
+    assert.equal(agent.agentId, enrolled.body.agentId);
+    assert.deepEqual(agent.collectors, ['network-extension']);
+    assert.deepEqual(agent.addresses.map(entry => entry.address), ['198.51.100.7', '192.0.2.10']);
+    assert.equal(agent.addresses[0].device, null);
+    assert.deepEqual(agent.addresses[1].device, {
+      mac: '00:11:22:aa:bb:cc', vendor: 'Example Inc.', dnsName: 'studio.example',
+      mdnsName: null, netbiosName: null, firstSeen: 1, lastSeen: 2,
+    });
+  });
+
+  it('まだ何も届いていないAgentはアドレスなしで返し、ルーターの機器一覧がなくても答える', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const listed = await request(app, 'GET', '/api/agents/details');
+    assert.equal(listed.status, 200);
+    assert.deepEqual(listed.body.agents, [{ agentId: enrolled.body.agentId, collectors: [], addresses: [] }]);
   });
 });

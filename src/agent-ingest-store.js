@@ -5,6 +5,7 @@ const {
 } = require('./agent-inbound-probes');
 const outboundCandidates = require('./agent-outbound-candidates');
 const appBytes = require('./agent-app-bytes');
+const agentAddresses = require('./agent-addresses');
 
 const runtimeProfiler = require('./runtime-profiler');
 
@@ -784,6 +785,10 @@ function listAppBytes(options) {
   return appBytes.listAppBytes(requireDb(), options);
 }
 
+function listAgentAddresses(options) {
+  return agentAddresses.listAgentAddresses(requireDb(), options);
+}
+
 function listInboundProbes(options) {
   return listInboundProbesIn(requireDb(), options);
 }
@@ -815,6 +820,7 @@ module.exports = {
   listOutboundCandidates,
   listInboundProbes,
   listAppBytes,
+  listAgentAddresses,
   _dbForTest,
   _initForTest,
 };

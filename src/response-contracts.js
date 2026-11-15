@@ -123,6 +123,29 @@ function createRegistry() {
     sharing: z.boolean(),
   }).strict());
 
+  // GET /api/agents/details -- per enrolled Agent, the addresses its flows left
+  // from in its last reported hour, with what the routers know of each.
+  registry.declare('GET /api/agents/details', 200, z.object({
+    agents: z.array(z.object({
+      agentId: z.string(),
+      collectors: z.array(z.string()),
+      addresses: z.array(z.object({
+        address: z.string(),
+        lastUsedAt: z.number(),
+        flows: z.number(),
+        device: z.object({
+          mac: z.string().nullable(),
+          vendor: z.string().nullable(),
+          dnsName: z.string().nullable(),
+          mdnsName: z.string().nullable(),
+          netbiosName: z.string().nullable(),
+          firstSeen: z.number().nullable(),
+          lastSeen: z.number().nullable(),
+        }).strict().nullable(),
+      }).strict()),
+    }).strict()),
+  }).strict());
+
   // GET /api/agents/app-bytes -- per enrolled Agent, at most 10 applications
   // (`LIST_MAX_APPS`) beyond private addresses, and the private-address total.
   registry.declare('GET /api/agents/app-bytes', 200, z.object({

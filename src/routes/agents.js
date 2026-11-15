@@ -121,6 +121,10 @@ module.exports = function agentRoutes({
   // Told about inbound-probe summaries this Hub had not seen before (P3-191),
   // to decide whether to notify. Absent in the unit tests.
   onInboundProbes = null,
+  // The routers' device list, to tell which of an Agent's addresses is the
+  // one on the LAN and what the router knows of it. Absent, the addresses are
+  // listed without that.
+  devices = null,
 }) {
   const router = Router();
   const failedEnrollments = new Map();
@@ -501,6 +505,43 @@ module.exports = function agentRoutes({
     } catch (error) {
       logger.error('[agents] Listing app bytes failed:', error.message);
       res.status(500).json({ error: 'App byte listing failed' });
+    }
+  });
+
+  // What the Hub knows of each enrolled Agent's computer beyond what it
+  // enrolled with: the addresses its flows left from in its last reported
+  // hour, and for an address a router also knows, the MAC address, maker and
+  // names the router side recorded.
+  router.get('/agents/details', requireAdmin, (_req, res) => {
+    if (!agentIngest) return res.status(503).json({ error: 'Agent storage is unavailable' });
+    try {
+      const agents = agentIdentities.listAgents()
+        .filter(agent => !agent.revokedAt)
+        .map(agent => {
+          const found = agent.lastSeenAt == null
+            ? { addresses: [], collectors: [] }
+            : agentIngest.listAgentAddresses({ agentId: agent.agentId, until: agent.lastSeenAt });
+          const addresses = found.addresses.map(entry => {
+            const device = devices?.getByIp?.(entry.address) || null;
+            return {
+              ...entry,
+              device: device ? {
+                mac: device.mac || null,
+                vendor: device.vendor || null,
+                dnsName: device.dnsName || null,
+                mdnsName: device.mdnsName || null,
+                netbiosName: device.netbiosName || null,
+                firstSeen: device.firstSeen ?? null,
+                lastSeen: device.lastSeen ?? null,
+              } : null,
+            };
+          });
+          return { agentId: agent.agentId, collectors: found.collectors, addresses };
+        });
+      res.json({ agents });
+    } catch (error) {
+      logger.error('[agents] Listing Agent details failed:', error.message);
+      res.status(500).json({ error: 'Agent detail listing failed' });
     }
   });
 

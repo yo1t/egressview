@@ -1795,6 +1795,159 @@
         }
       }
     },
+    "/api/agents/details": {
+      "get": {
+        "summary": "GET /api/agents/details",
+        "description": "Requires `auth.admin`. The request body is not described here.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Declared by the server, and checked in CI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "collectors": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "addresses": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "address": {
+                                  "type": "string"
+                                },
+                                "lastUsedAt": {
+                                  "type": "number"
+                                },
+                                "flows": {
+                                  "type": "number"
+                                },
+                                "device": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "mac": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "vendor": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "dnsName": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "mdnsName": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "netbiosName": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "firstSeen": {
+                                          "type": [
+                                            "number",
+                                            "null"
+                                          ]
+                                        },
+                                        "lastSeen": {
+                                          "type": [
+                                            "number",
+                                            "null"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "mac",
+                                        "vendor",
+                                        "dnsName",
+                                        "mdnsName",
+                                        "netbiosName",
+                                        "firstSeen",
+                                        "lastSeen"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "address",
+                                "lastUsedAt",
+                                "flows",
+                                "device"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "collectors",
+                          "addresses"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "agents"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
     "/api/agents/enrollment-requests": {
       "get": {
         "summary": "GET /api/agents/enrollment-requests",
@@ -11328,6 +11481,7 @@
       "GET /api/agent/threat-intel",
       "GET /api/agents",
       "GET /api/agents/app-bytes",
+      "GET /api/agents/details",
       "GET /api/agents/inbound-probes",
       "GET /api/agents/outbound-candidates",
       "GET /api/ai/conversations",

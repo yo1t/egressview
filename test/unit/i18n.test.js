@@ -71,8 +71,9 @@ describe('shared i18n catalog', () => {
     // Grew by 11 on 2026-11-15: LAN scans aimed at each Agent's computer (P3-191).
     // Grew by 1 on 2026-11-15: the Agent tab's explanation folds away on a phone.
     // Grew by 13 on 2026-11-15: apps by sent bytes per Agent (P3-194).
-    assert.equal(jaKeys.size, 1037);
-    assert.equal(enKeys.size, 1037);
+    // Grew by 18 on 2026-11-15: what the Hub knows of each Agent's computer.
+    assert.equal(jaKeys.size, 1055);
+    assert.equal(enKeys.size, 1055);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
