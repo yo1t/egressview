@@ -499,6 +499,9 @@
   .agent-view-body { overflow-y: auto; flex: 1; padding: 4px 16px 20px; font-size: 12px; }
   .agent-view-wrap { max-width: 1440px; display: grid; gap: 16px; }
   .agent-view-hint { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 0; max-width: 110ch; }
+  .agent-view-about summary { cursor: pointer; color: var(--muted); font-size: 11px; width: fit-content; padding: 4px 0; }
+  .agent-view-about summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  .agent-view-about[open] summary { margin-bottom: 4px; }
   .agent-view-error { color: var(--red); }
   .agent-view-heading { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); margin: 0; }
   .agent-view-overview { display: grid; gap: 8px; }
@@ -589,6 +592,11 @@
     .agent-view-body { padding: 4px 8px 16px; }
     .agent-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .agent-kpi-value { font-size: 22px; }
+    .agent-kpi-label { white-space: normal; overflow: visible; line-height: 1.35; }
+    /* iOS zooms into a field whose text is under 16px, and a finger needs a
+       taller target than a pointer. */
+    .agent-view-pick select { font-size: 16px; min-height: 40px; }
+    .agent-view-about summary { padding: 8px 0; }
     /* A phone has no room for six columns: each Agent becomes a block, with
        the counts labelled under its name. */
     .agent-table thead { display: none; }

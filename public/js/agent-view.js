@@ -504,6 +504,10 @@ async function loadAgentView() {
 function initAgentView({ onHidden } = {}) {
   onTabHidden = typeof onHidden === 'function' ? onHidden : null;
   document.getElementById('agent-view-refresh-btn')?.addEventListener('click', () => loadAgentView());
+  // The explanation stays open on a wide screen; on a phone it would push the
+  // numbers below the fold, so it starts folded there.
+  const about = document.getElementById('agent-view-about');
+  if (about && window.matchMedia?.('(max-width: 720px)').matches) about.open = false;
   document.getElementById('agent-view-select')?.addEventListener('change', event => {
     selectAgent(event.target.value);
   });

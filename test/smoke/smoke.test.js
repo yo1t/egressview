@@ -771,6 +771,69 @@ test('mobile viewer keeps navigation, logs, and device details inside the viewpo
   expect(fatalErrors(errors), `Mobile viewer errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
+test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await page.setViewportSize({ width: 320, height: 640 });
+  const now = Date.now();
+  const agents = [
+    { agentId: '00000000-0000-4000-8000-000000000001', platform: 'macos', hostName: 'a-long-mac-host-name-for-a-phone',
+      osVersion: '27.2', agentVersion: '0.5.141', lastSeenAt: now - 60_000, revokedAt: null },
+    { agentId: '00000000-0000-4000-8000-000000000002', platform: 'windows', hostName: 'office-pc',
+      osVersion: 'Microsoft Windows NT 10.0.26300.0', agentVersion: '0.1.165', lastSeenAt: now - 3_600_000, revokedAt: null },
+  ];
+  await page.route(/\/api\/agents$/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ agents }),
+  }));
+  await page.route(/\/api\/agents\/outbound-candidates$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ agents: [{
+      agentId: agents[0].agentId, hostName: agents[0].hostName, state: 'ready', total: 1,
+      generatedAt: now, receivedAt: now,
+      entries: [{ candidateId: 'c1', kind: 'aboveUsual', day: Date.UTC(2026, 10, 13),
+        application: 'a.very.long.application.identifier.example', destination: 'a-long-destination-name.example.net',
+        bytesOut: 900_000_000, usualBytesOut: 2_000_000, answer: 'investigate', note: 'a note that has to wrap on a phone' }],
+    }] }),
+  }));
+  await page.route(/\/api\/agents\/inbound-probes$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ days: 14, minPorts: 10, agents: [{ agentId: agents[0].agentId, total: 1, senders: [{
+      sourceAddress: '192.0.2.77', networkProtocol: 'tcp', windows: 3, maxPorts: 254, packets: 900,
+      firstAt: now - 86_400_000, lastAt: now - 1_800_000, localAddress: '192.0.2.53', samplePorts: [21, 22, 23, 80, 443],
+    }] }] }),
+  }));
+  await authPage(page);
+
+  await page.click('#btn-agents');
+  await expect(page.locator('#agents-container')).toBeVisible();
+  await expect(page.locator('.agent-card-host')).toHaveText(agents[0].hostName);
+  // Folded on a phone so the numbers are on the first screen.
+  expect(await page.locator('#agent-view-about').evaluate(el => el.open)).toBe(false);
+
+  const select = page.locator('#agent-view-select');
+  const picker = await select.evaluate(el => ({
+    fontSize: parseFloat(getComputedStyle(el).fontSize), height: el.getBoundingClientRect().height,
+  }));
+  expect(picker.fontSize, 'under 16px makes iOS zoom in on tap').toBeGreaterThanOrEqual(16);
+  expect(picker.height, 'the picker should be touchable').toBeGreaterThanOrEqual(38);
+
+  await select.selectOption(agents[1].agentId);
+  await expect(page.locator('.agent-card-host')).toHaveText('office-pc');
+  await page.locator('.agent-table tbody tr').first().click();
+  await expect(page.locator('.agent-card-host')).toHaveText(agents[0].hostName);
+
+  const overflow = await page.evaluate(() => {
+    const body = document.querySelector('.agent-view-body');
+    const right = body.getBoundingClientRect().right;
+    return {
+      page: document.documentElement.scrollWidth - window.innerWidth,
+      body: body.scrollWidth - body.clientWidth,
+      past: [...body.querySelectorAll('*')].filter(el => el.getBoundingClientRect().right > right + 1).length,
+    };
+  });
+  expect(overflow).toEqual({ page: 0, body: 0, past: 0 });
+});
+
 test('graph canvas renders after auth from the summary API', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
