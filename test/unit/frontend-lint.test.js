@@ -535,6 +535,13 @@ describe('Frontend TDZ lint', () => {
     assert.match(view, /try \{ localStorage\.setItem/);
   });
 
+  it('調べる候補を作れないAgent（Windows）に「共有していない」と書かない', () => {
+    const view = moduleSources['agent-view.js'];
+    assert.match(view, /agent\.platform === 'macos'/);
+    assert.match(view, /agents\.candidates\.unsupported/);
+    assert.match(view, /agents\.short\.unsupported/);
+  });
+
   it('調べる候補は設定ではなくAgentタブに出す', () => {
     assert.doesNotMatch(html, /id="agent-candidates-block"/);
     assert.doesNotMatch(moduleSources['settings-agents.js'], /outbound-candidates/);

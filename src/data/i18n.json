@@ -992,7 +992,7 @@
     "agents.overview.title": "全体",
     "agents.overview.agents": "登録中のAgent",
     "agents.overview.delivery": "届いている {delivering}・止まっている {stopped}",
-    "agents.overview.sharing": "共有しているAgent {sharing}/{total}",
+    "agents.overview.sharing": "候補を作れるAgent {total}台のうち{sharing}台が共有",
     "agents.overview.noneShared": "共有しているAgentはありません",
     "agents.overview.answersOf": "答えの件数は、Hubに届いた{shown}件の内訳です。残りは各Macの画面で確認できます。",
     "agents.table.agent": "Agent",
@@ -1004,6 +1004,13 @@
     "agents.short.notShared": "共有なし",
     "agents.short.learning": "学習中",
     "agents.pick": "詳しく見るAgent",
+    "agents.table.title": "Agentごと",
+    "agents.ago.now": "たった今",
+    "agents.ago.minutes": "{count}分前",
+    "agents.ago.hours": "{count}時間前",
+    "agents.ago.days": "{count}日前",
+    "agents.short.unsupported": "機能なし",
+    "agents.candidates.unsupported": "{platform}のAgentには、調べる候補を作る機能がまだありません（macOSのAgentだけの機能です）。",
     "settings.agents.viewHint": "各Agentが届いているかと、Agentが共有した調べる候補は、画面上部の「Agent」タブで見られます。"
   },
   "en": {
@@ -1999,7 +2006,7 @@
     "agents.overview.title": "Overview",
     "agents.overview.agents": "Enrolled Agents",
     "agents.overview.delivery": "{delivering} delivering · {stopped} not",
-    "agents.overview.sharing": "Shared by {sharing} of {total} Agents",
+    "agents.overview.sharing": "Shared by {sharing} of {total} Agents that build it",
     "agents.overview.noneShared": "No Agent shares it",
     "agents.overview.answersOf": "Answer counts cover the {shown} that reached the Hub. The rest are on each Mac.",
     "agents.table.agent": "Agent",
@@ -2011,6 +2018,13 @@
     "agents.short.notShared": "Not shared",
     "agents.short.learning": "Learning",
     "agents.pick": "Agent to look at",
+    "agents.table.title": "By Agent",
+    "agents.ago.now": "just now",
+    "agents.ago.minutes": "{count} min ago",
+    "agents.ago.hours": "{count} h ago",
+    "agents.ago.days": "{count} d ago",
+    "agents.short.unsupported": "Not available",
+    "agents.candidates.unsupported": "The {platform} Agent does not build this list yet; only the macOS Agent does.",
     "settings.agents.viewHint": "Whether each Agent is delivering, and the \"worth a look\" lists Agents share, are on the Agent tab at the top of the screen."
   }
 }

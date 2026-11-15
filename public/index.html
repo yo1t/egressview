@@ -1329,16 +1329,28 @@
       <button id="agent-view-refresh-btn" class="activity-refresh" data-i18n="agents.refresh">更新</button>
     </div>
     <div class="agent-view-body">
-      <p class="agent-view-hint" data-i18n="agents.hint">Hubに登録したAgentの全体と、選んだAgentの届き具合・Agentの利用者が共有した調べる候補を表示します。調べる候補は各Agentが自分の普段の通信と比べて見つけたもので、判定ではありません。答えはそのMacの利用者が付けたものです。期間の選択には関係しません。登録・承認・取り消しは設定の「L3/L4」で行います。</p>
-      <section class="agent-view-overview" aria-labelledby="agent-view-overview-title">
-        <h3 id="agent-view-overview-title" class="agent-view-heading" data-i18n="agents.overview.title">全体</h3>
-        <div id="agent-view-overview" class="agent-view-overview-body"></div>
-      </section>
-      <div class="agent-view-pick">
-        <label for="agent-view-select" data-i18n="agents.pick">詳しく見るAgent</label>
-        <select id="agent-view-select" class="form-input"></select>
+      <div class="agent-view-wrap">
+        <p class="agent-view-hint" data-i18n="agents.hint">Hubに登録したAgentの全体と、選んだAgentの届き具合・Agentの利用者が共有した調べる候補を表示します。調べる候補は各Agentが自分の普段の通信と比べて見つけたもので、判定ではありません。答えはそのMacの利用者が付けたものです。期間の選択には関係しません。登録・承認・取り消しは設定の「L3/L4」で行います。</p>
+        <section class="agent-view-overview" aria-labelledby="agent-view-overview-title">
+          <h3 id="agent-view-overview-title" class="agent-view-heading" data-i18n="agents.overview.title">全体</h3>
+          <div id="agent-view-kpis" class="agent-kpis"></div>
+        </section>
+        <div class="agent-view-columns">
+          <section class="agent-panel" aria-labelledby="agent-view-table-title">
+            <div class="agent-panel-head">
+              <h3 id="agent-view-table-title" class="agent-view-heading" data-i18n="agents.table.title">Agentごと</h3>
+            </div>
+            <div id="agent-view-overview" class="agent-view-overview-body"></div>
+          </section>
+          <section class="agent-panel agent-panel-detail">
+            <div class="agent-panel-head agent-view-pick">
+              <label for="agent-view-select" class="agent-view-heading" data-i18n="agents.pick">詳しく見るAgent</label>
+              <select id="agent-view-select" class="form-input"></select>
+            </div>
+            <div id="agent-view-list" class="agent-view-list"></div>
+          </section>
+        </div>
       </div>
-      <div id="agent-view-list" class="agent-view-list"></div>
     </div>
   </div>
 
