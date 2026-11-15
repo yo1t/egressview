@@ -56,6 +56,8 @@ const requestIdSchema = z.object({ requestId: z.string().uuid() }).strict();
 const agentIdSchema = z.object({ agentId: z.string().uuid() }).strict();
 // The Agent tab offers the last day or the last week of sent bytes.
 const appBytesQuerySchema = z.object({ days: z.enum(['1', '7']).default('1') }).strict();
+// The same two periods for how much of the time an Agent's reports arrived.
+const uptimeQuerySchema = z.object({ days: z.enum(['1', '7']).default('7') }).strict();
 const MAX_FAILURE_BUCKETS = 2048;
 const MAX_FAILURES = 5;
 const FAILURE_WINDOW_MS = 5 * 60 * 1000;
@@ -542,6 +544,26 @@ module.exports = function agentRoutes({
     } catch (error) {
       logger.error('[agents] Listing Agent details failed:', error.message);
       res.status(500).json({ error: 'Agent detail listing failed' });
+    }
+  });
+
+  // How much of the last day or week each enrolled Agent's reports reached
+  // the Hub, in five-minute slots, and the longest gaps.
+  router.get('/agents/uptime', requireAdmin, (req, res) => {
+    const parsed = parseRequest(uptimeQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    if (!agentIngest) return res.status(503).json({ error: 'Agent storage is unavailable' });
+    try {
+      const days = Number(parsed.data.days);
+      const now = Date.now();
+      const agents = agentIdentities.listAgents().filter(agent => !agent.revokedAt);
+      res.json({
+        days,
+        agents: agentIngest.listUptime({ agents, since: now - days * 24 * 60 * 60 * 1000, now }),
+      });
+    } catch (error) {
+      logger.error('[agents] Listing uptime failed:', error.message);
+      res.status(500).json({ error: 'Uptime listing failed' });
     }
   });
 

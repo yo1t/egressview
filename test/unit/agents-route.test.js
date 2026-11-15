@@ -1194,3 +1194,23 @@ describe('Agent details', () => {
     assert.deepEqual(listed.body.agents, [{ agentId: enrolled.body.agentId, collectors: [], addresses: [] }]);
   });
 });
+
+// P3-194: how much of the time each Agent's reports reached the Hub.
+describe('Agent uptime', () => {
+  it('登録中のAgentごとに届いた区切りと途切れを返す。期間は1日か7日だけ', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    assert.equal((await request(app, 'POST', '/api/agent/ingest', { body: ingestEnvelope(), headers: authorization })).status, 200);
+
+    const listed = await request(app, 'GET', '/api/agents/uptime?days=1');
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.days, 1);
+    const [agent] = listed.body.agents;
+    assert.equal(agent.agentId, enrolled.body.agentId);
+    assert.equal(agent.deliveredSlots, 1);
+    assert.ok(agent.totalSlots >= 1);
+    assert.equal((await request(app, 'GET', '/api/agents/uptime')).body.days, 7);
+    assert.equal((await request(app, 'GET', '/api/agents/uptime?days=30')).status, 400);
+  });
+});

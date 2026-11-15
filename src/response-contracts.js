@@ -123,6 +123,27 @@ function createRegistry() {
     sharing: z.boolean(),
   }).strict());
 
+  // GET /api/agents/uptime -- per enrolled Agent, five-minute slots with a
+  // delivery and the longest gaps (`GAP_LIST_MAX`).
+  registry.declare('GET /api/agents/uptime', 200, z.object({
+    days: z.number(),
+    agents: z.array(z.object({
+      agentId: z.string(),
+      from: z.number(),
+      totalSlots: z.number(),
+      deliveredSlots: z.number(),
+      gapCount: z.number(),
+      gapMinutes: z.number(),
+      gaps: z.array(z.object({
+        startAt: z.number(),
+        endAt: z.number(),
+        minutes: z.number(),
+        ongoing: z.boolean(),
+        agentStopped: z.boolean(),
+      }).strict()),
+    }).strict()),
+  }).strict());
+
   // GET /api/agents/details -- per enrolled Agent, the addresses its flows left
   // from in its last reported hour, with what the routers know of each.
   registry.declare('GET /api/agents/details', 200, z.object({
