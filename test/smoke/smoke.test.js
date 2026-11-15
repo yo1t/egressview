@@ -819,11 +819,25 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
       }] }),
     });
   });
+  await page.route(/\/api\/agents\/details$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ agents: [{
+      agentId: agents[0].agentId, collectors: ['network-extension'],
+      addresses: [
+        { address: '2001:db8:1234:5678:9abc:def0:1234:5678', lastUsedAt: now, flows: 3, device: null },
+        { address: '192.0.2.53', lastUsedAt: now, flows: 90, device: {
+          mac: '00:11:22:aa:bb:cc', vendor: 'Example Inc.', dnsName: 'a-very-long-host-name.example.internal',
+          mdnsName: null, netbiosName: null, firstSeen: now, lastSeen: now,
+        } },
+      ],
+    }] }),
+  }));
   await authPage(page);
 
   await page.click('#btn-agents');
   await expect(page.locator('#agents-container')).toBeVisible();
   await expect(page.locator('.agent-card-host')).toHaveText(agents[0].hostName);
+  await expect(page.locator('.agent-facts')).toContainText('00:11:22:aa:bb:cc');
   // Folded on a phone so the numbers are on the first screen.
   expect(await page.locator('#agent-view-about').evaluate(el => el.open)).toBe(false);
 

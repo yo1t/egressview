@@ -149,6 +149,7 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('GET', '/api/agents/inbound-probes', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   // Names the applications on each Agent's computer, like the Agent list.
   httpRoute('GET', '/api/agents/app-bytes', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('GET', '/api/agents/details', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/agents/enrollment-tokens', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   // Approving a request mints a long-lived credential, so it sits at the same
   // level as the other authentication administration routes.

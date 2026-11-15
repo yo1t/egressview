@@ -2324,6 +2324,67 @@
         ]
       }
     },
+    "GET /api/agents/details": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "agentId": {
+                  "type": "string"
+                },
+                "collectors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "addresses": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "address": {
+                        "type": "string"
+                      },
+                      "lastUsedAt": {
+                        "type": "integer"
+                      },
+                      "flows": {
+                        "type": "integer"
+                      },
+                      "device": {
+                        "type": [
+                          "null",
+                          "object"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "address",
+                      "device",
+                      "flows",
+                      "lastUsedAt"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "addresses",
+                "agentId",
+                "collectors"
+              ]
+            }
+          }
+        },
+        "required": [
+          "agents"
+        ]
+      }
+    },
     "GET /api/agents/enrollment-requests": {
       "200": {
         "type": "object",
