@@ -231,7 +231,7 @@ function storeAppDays(days) {
   try { localStorage.setItem(APP_DAYS_KEY, String(days)); } catch { /* per-viewer convenience only */ }
 }
 
-function periodSwitch(days) {
+function periodSwitch(days, onPick = setAppDays) {
   const group = textElement('div', '', 'agent-segmented');
   group.setAttribute('role', 'group');
   group.setAttribute('aria-label', t('agents.apps.periodLabel'));
@@ -239,10 +239,91 @@ function periodSwitch(days) {
     const button = textElement('button', t(`agents.apps.period${value}`), 'agent-segmented-option');
     button.type = 'button';
     button.setAttribute('aria-pressed', String(value === days));
-    button.addEventListener('click', () => { if (value !== days) setAppDays(value); });
+    button.addEventListener('click', () => { if (value !== days) onPick(value); });
     group.appendChild(button);
   }
   return group;
+}
+
+// "2時間5分", "3日4時間": how long a gap lasted, to the minute.
+function duration(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  if (total < 60) return tVars('agents.duration.minutes', { count: total });
+  const hours = Math.floor(total / 60);
+  if (hours < 48) return tVars('agents.duration.hours', { hours, minutes: total % 60 });
+  return tVars('agents.duration.days', { days: Math.floor(hours / 24), hours: hours % 24 });
+}
+
+function uptimePercent(report) {
+  const total = Number(report?.totalSlots) || 0;
+  if (!total) return null;
+  return Math.floor((Math.min(Number(report.deliveredSlots) || 0, total) / total) * 1000) / 10;
+}
+
+const UPTIME_DAYS_KEY = 'egressview_agent_view_uptime_days';
+
+function readUptimeDays() {
+  try { return localStorage.getItem(UPTIME_DAYS_KEY) === '1' ? 1 : 7; } catch { return 7; }
+}
+
+function storeUptimeDays(days) {
+  try { localStorage.setItem(UPTIME_DAYS_KEY, String(days)); } catch { /* per-viewer convenience only */ }
+}
+
+// How much of the period the Agent's reports reached the Hub, and when they
+// did not. An Agent sends only when it has flows, so a gap is a closed laptop
+// as often as a stopped Agent; a router seeing the computer tells them apart.
+function renderUptime(report, uptimeState) {
+  const section = textElement('div', '', 'agent-card-section');
+  const head = textElement('div', '', 'agent-card-section-head');
+  head.append(textElement('div', t('agents.uptime.title'), 'agent-card-section-title'),
+    periodSwitch(uptimeState.days, setUptimeDays));
+  section.appendChild(head);
+  if (!uptimeState.ok || !report) {
+    section.appendChild(textElement('div', t('agents.uptime.unavailable'), 'agent-card-empty'));
+    return section;
+  }
+  const percent = uptimePercent(report);
+  const ratio = textElement('div', '', 'agent-uptime-ratio');
+  ratio.appendChild(textElement('span', percent == null ? '—' : `${percent.toFixed(1)}%`, 'agent-uptime-value'));
+  ratio.appendChild(textElement('span', tVars('agents.uptime.slots', {
+    delivered: Number(report.deliveredSlots).toLocaleString(), total: Number(report.totalSlots).toLocaleString(),
+  }), 'agent-card-meta'));
+  section.appendChild(ratio);
+  const bar = document.createElement('meter');
+  bar.className = 'agent-app-bar agent-uptime-bar';
+  bar.min = 0;
+  bar.max = 100;
+  bar.value = percent ?? 0;
+  bar.setAttribute('aria-label', t('agents.uptime.title'));
+  section.appendChild(bar);
+  if (Date.now() - Number(report.from) < uptimeState.days * 24 * 60 * 60 * 1000 - 5 * 60 * 1000) {
+    section.appendChild(textElement('div', tVars('agents.uptime.since', { time: fmtTs(report.from) }), 'agent-card-meta'));
+  }
+  const gaps = Array.isArray(report.gaps) ? report.gaps : [];
+  if (!gaps.length) {
+    section.appendChild(textElement('div', t('agents.uptime.noGaps'), 'agent-card-meta'));
+  } else {
+    section.appendChild(textElement('div', tVars('agents.uptime.gapSummary', {
+      count: report.gapCount, duration: duration(report.gapMinutes),
+    }), 'agent-card-meta'));
+    const list = textElement('ul', '', 'agent-uptime-gaps');
+    for (const gap of gaps) {
+      const item = textElement('li', '', `agent-uptime-gap${gap.agentStopped ? ' agent-uptime-gap-stopped' : ''}`);
+      item.appendChild(textElement('div', tVars(gap.ongoing ? 'agents.uptime.gapOngoing' : 'agents.uptime.gap', {
+        start: fmtTs(gap.startAt), end: fmtTs(gap.endAt), duration: duration(gap.minutes),
+      }), 'agent-uptime-gap-time'));
+      item.appendChild(textElement('div',
+        t(gap.agentStopped ? 'agents.uptime.stopped' : 'agents.uptime.unknown'), 'agent-card-meta'));
+      list.appendChild(item);
+    }
+    section.appendChild(list);
+    if (report.gapCount > gaps.length) {
+      section.appendChild(textElement('div', tVars('agents.uptime.more', { count: report.gapCount - gaps.length }), 'agent-card-meta'));
+    }
+  }
+  section.appendChild(textElement('div', t('agents.uptime.note'), 'agent-card-meta'));
+  return section;
 }
 
 function renderApps(appBytes, appState) {
@@ -372,7 +453,7 @@ function renderFacts(agent, details, detailsOk, now) {
   return section;
 }
 
-function renderCard(agent, report, now, probes, minPorts, appBytes, appState, details, detailsOk) {
+function renderCard(agent, report, now, probes, minPorts, appBytes, appState, details, detailsOk, uptime, uptimeState) {
   const card = textElement('article', '', 'agent-card');
   const head = textElement('div', '', 'agent-card-head');
   const title = textElement('div', '', 'agent-card-title');
@@ -386,7 +467,8 @@ function renderCard(agent, report, now, probes, minPorts, appBytes, appState, de
   // first two share a row when the card is wide enough.
   const pair = textElement('div', '', 'agent-card-pair');
   pair.append(renderCandidates(agent, report), renderApps(appBytes, appState));
-  card.append(head, pair, renderProbes(agent, probes, minPorts), renderFacts(agent, details, detailsOk, now));
+  card.append(head, pair, renderUptime(uptime, uptimeState), renderProbes(agent, probes, minPorts),
+    renderFacts(agent, details, detailsOk, now));
   return card;
 }
 
@@ -495,15 +577,22 @@ function cell(child, className = '') {
   return td;
 }
 
+function uptimeCell(report) {
+  const percent = uptimePercent(report);
+  if (percent == null) return textElement('span', '—', 'agent-cell-muted');
+  return textElement('span', `${percent.toFixed(1)}%`, percent < 90 ? 'agent-count agent-count-warn' : '');
+}
+
 // One row per Agent, so a stopped one or one with open questions stands out
 // without opening each in turn. A row picks that Agent for the detail.
-function renderTable(agents, reports, now, selectedId, probes, appBytes) {
+function renderTable(agents, reports, now, selectedId, probes, appBytes, uptimeWeek) {
   const table = textElement('table', '', 'agent-table');
   const headRow = document.createElement('tr');
   for (const [key, className] of [
     ['agents.table.agent', ''], ['agents.table.delivery', ''], ['agents.table.candidates', 'agent-table-num'],
     ['agents.candidates.investigate', 'agent-table-num'], ['agents.candidates.unanswered', 'agent-table-num'],
     ['agents.table.probes', 'agent-table-num'], ['agents.table.beyond', 'agent-table-num'],
+    ['agents.table.uptime', 'agent-table-num'],
   ]) {
     const th = textElement('th', t(key), className);
     th.scope = 'col';
@@ -538,6 +627,7 @@ function renderTable(agents, reports, now, selectedId, probes, appBytes) {
       ['agents.table.beyond', textElement('span',
         appBytes.has(agent.agentId) ? formatBytes(appBytes.get(agent.agentId).beyond?.bytesOut) : '—',
         appBytes.has(agent.agentId) ? '' : 'agent-cell-muted')],
+      ['agents.table.uptime', uptimeCell(uptimeWeek.get(agent.agentId))],
     ];
     // The same counts, labelled, for a phone where the columns are hidden.
     const stats = textElement('td', '', 'agent-table-stats');
@@ -574,7 +664,9 @@ function drawView() {
   const overview = document.getElementById('agent-view-overview');
   const select = document.getElementById('agent-view-select');
   if (!list || !lastView) return;
-  const { agents, reports, now, probes, minPorts, appBytes, appState, details, detailsOk } = lastView;
+  const {
+    agents, reports, now, probes, minPorts, appBytes, appState, details, detailsOk, uptime, uptimeState, uptimeWeek,
+  } = lastView;
   const pickRow = select?.closest('.agent-view-pick');
   if (!agents.length) {
     kpis?.replaceChildren();
@@ -588,7 +680,7 @@ function drawView() {
   lastView.selectedId = selected.agentId;
   const summary = summarize(agents, reports, now, probes);
   kpis?.replaceChildren(...renderKpis(summary));
-  const tableParts = [renderTable(agents, reports, now, selected.agentId, probes, appBytes)];
+  const tableParts = [renderTable(agents, reports, now, selected.agentId, probes, appBytes, uptimeWeek)];
   if (summary.shown < summary.candidates) {
     tableParts.push(textElement('div',
       tVars('agents.overview.answersOf', { shown: summary.shown }), 'agent-card-meta agent-view-note'));
@@ -606,7 +698,7 @@ function drawView() {
   if (pickRow) pickRow.hidden = false;
   list.replaceChildren(renderCard(selected, reports.get(selected.agentId), now,
     probes.get(selected.agentId), minPorts, appBytes.get(selected.agentId), appState,
-    details.get(selected.agentId), detailsOk));
+    details.get(selected.agentId), detailsOk, uptime.get(selected.agentId), uptimeState));
 }
 
 function selectAgent(agentId) {
@@ -634,6 +726,26 @@ async function readAppBytes(days) {
 }
 
 // Switching the period reloads only the app list; the rest stays as it was.
+async function readUptime(days) {
+  const result = await readJson(`/api/agents/uptime?days=${days}`).catch(() => ({ ok: false, body: {} }));
+  return {
+    uptime: new Map((result.ok ? result.body.agents || [] : []).map(report => [report.agentId, report])),
+    uptimeState: { days, ok: result.ok },
+  };
+}
+
+// The table always shows the week; the card follows its own switch.
+async function setUptimeDays(days) {
+  storeUptimeDays(days);
+  if (!lastView) return;
+  const read = days === 7 && lastView.uptimeWeekOk
+    ? { uptime: lastView.uptimeWeek, uptimeState: { days, ok: true } }
+    : await readUptime(days);
+  if (!lastView) return;
+  Object.assign(lastView, read);
+  drawView();
+}
+
 async function setAppDays(days) {
   storeAppDays(days);
   if (!lastView) return;
@@ -649,13 +761,16 @@ async function loadAgentView() {
   if (!list) return null;
   loading = (async () => {
     try {
-      const [agentsResult, candidatesResult, probesResult, apps, detailsResult] = await Promise.all([
+      const uptimeDays = readUptimeDays();
+      const [agentsResult, candidatesResult, probesResult, apps, detailsResult, week, picked] = await Promise.all([
         readJson('/api/agents'),
         // A Hub older than P3-194 answers 404 here; the cards still show.
         readJson('/api/agents/outbound-candidates').catch(() => ({ ok: false, body: {} })),
         readJson('/api/agents/inbound-probes').catch(() => ({ ok: false, body: {} })),
         readAppBytes(readAppDays()),
         readJson('/api/agents/details').catch(() => ({ ok: false, body: {} })),
+        readUptime(7),
+        uptimeDays === 7 ? null : readUptime(uptimeDays),
       ]);
       if (!agentsResult.ok) throw new Error(agentsResult.body.error || t('agents.loadFailed'));
       // By name, so the picker and the table keep their order between visits.
@@ -671,6 +786,7 @@ async function loadAgentView() {
         .map(report => [report.agentId, report]));
       lastView = {
         agents, reports, probes, minPorts, ...apps, details, detailsOk: detailsResult.ok,
+        uptimeWeek: week.uptime, uptimeWeekOk: week.uptimeState.ok, ...(picked || week),
         now: Date.now(), selectedId: lastView?.selectedId || '',
       };
       drawView();

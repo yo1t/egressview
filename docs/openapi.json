@@ -2678,6 +2678,138 @@
         }
       }
     },
+    "/api/agents/uptime": {
+      "get": {
+        "summary": "GET /api/agents/uptime",
+        "description": "Requires `auth.admin`. The request body is not described here.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Declared by the server, and checked in CI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "type": "number"
+                    },
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "from": {
+                            "type": "number"
+                          },
+                          "totalSlots": {
+                            "type": "number"
+                          },
+                          "deliveredSlots": {
+                            "type": "number"
+                          },
+                          "gapCount": {
+                            "type": "number"
+                          },
+                          "gapMinutes": {
+                            "type": "number"
+                          },
+                          "gaps": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "startAt": {
+                                  "type": "number"
+                                },
+                                "endAt": {
+                                  "type": "number"
+                                },
+                                "minutes": {
+                                  "type": "number"
+                                },
+                                "ongoing": {
+                                  "type": "boolean"
+                                },
+                                "agentStopped": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "startAt",
+                                "endAt",
+                                "minutes",
+                                "ongoing",
+                                "agentStopped"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "from",
+                          "totalSlots",
+                          "deliveredSlots",
+                          "gapCount",
+                          "gapMinutes",
+                          "gaps"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "days",
+                    "agents"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
     "/api/ai/analyze": {
       "post": {
         "summary": "POST /api/ai/analyze",
@@ -11484,6 +11616,7 @@
       "GET /api/agents/details",
       "GET /api/agents/inbound-probes",
       "GET /api/agents/outbound-candidates",
+      "GET /api/agents/uptime",
       "GET /api/ai/conversations",
       "GET /api/ai/conversations/:id",
       "GET /api/ai/facts",
