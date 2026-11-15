@@ -798,6 +798,68 @@ describe('agent geo-cache is built once and kept', () => {
   });
 });
 
+// P3-194: sent bytes per application, counted as observations arrive, split
+// into private addresses and everything else.
+describe('sent bytes by application', () => {
+  function observation(overrides = {}) {
+    const now = Date.now();
+    return {
+      ...structuredClone(golden.observations[0]),
+      firstObservedAt: new Date(now - 1000).toISOString(),
+      lastObservedAt: new Date(now).toISOString(),
+      bytesIn: '10',
+      ...overrides,
+    };
+  }
+
+  it('外へ送った量をアプリごとに、プライベートアドレス宛ては合計で返す。閉じたときに届いた量も一度だけ数える', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const opening = observation({
+      observationId: '00000000-0000-4000-8000-0000000000b2', remoteAddress: '198.51.100.21', bytesIn: null, bytesOut: null,
+    });
+    const envelope = ingestEnvelope();
+    envelope.observations = [
+      observation({ observationId: '00000000-0000-4000-8000-0000000000b1', bytesOut: '5000' }),
+      opening,
+      observation({
+        observationId: '00000000-0000-4000-8000-0000000000b3', remoteAddress: '192.168.1.5', remotePort: 445,
+        processName: 'unknown', bundleID: null, bytesOut: '900000',
+      }),
+    ];
+    assert.equal((await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers: authorization })).status, 200);
+    // A retry of the same upload is a duplicate and adds nothing.
+    assert.equal((await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers: authorization })).status, 200);
+
+    const closing = ingestEnvelope();
+    closing.batchId = '00000000-0000-4000-8000-0000000000c1';
+    closing.observations = [{ ...opening, bytesIn: '20', bytesOut: '3000', lastObservedAt: new Date().toISOString() }];
+    assert.equal((await request(app, 'POST', '/api/agent/ingest', { body: closing, headers: authorization })).status, 200);
+
+    const listed = await request(app, 'GET', '/api/agents/app-bytes');
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.days, 1);
+    assert.equal(typeof listed.body.startedAt, 'number');
+    const [agent] = listed.body.agents;
+    assert.equal(agent.agentId, enrolled.body.agentId);
+    assert.equal(agent.flows, 3);
+    assert.equal(agent.flowsWithBytes, 3);
+    assert.deepEqual(agent.beyond, {
+      bytesOut: 8000, totalApps: 1,
+      apps: [{ appIdentity: 'com.example.app', processName: 'Example', bytesOut: 8000, flows: 2 }],
+    });
+    assert.deepEqual(agent.private, { bytesOut: 900000, unnamedBytesOut: 900000 });
+    assert.equal((await request(app, 'GET', '/api/agents/app-bytes?days=7')).body.days, 7);
+  });
+
+  it('期間は1日か7日だけ受け付ける', async () => {
+    const { app } = makeApp();
+    assert.equal((await request(app, 'GET', '/api/agents/app-bytes?days=30')).status, 400);
+    assert.equal((await request(app, 'GET', '/api/agents/app-bytes?agent=x')).status, 400);
+  });
+});
+
 // P3-191: a device on the LAN probing a computer with an Agent. The summaries
 // ride along with an upload, are stored, and the new ones go to the callback.
 describe('inbound probe summaries', () => {

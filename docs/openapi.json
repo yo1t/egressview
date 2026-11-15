@@ -1638,6 +1638,163 @@
         }
       }
     },
+    "/api/agents/app-bytes": {
+      "get": {
+        "summary": "GET /api/agents/app-bytes",
+        "description": "Requires `auth.admin`. The request body is not described here.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Declared by the server, and checked in CI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "type": "number"
+                    },
+                    "startedAt": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "flows": {
+                            "type": "number"
+                          },
+                          "flowsWithBytes": {
+                            "type": "number"
+                          },
+                          "beyond": {
+                            "type": "object",
+                            "properties": {
+                              "bytesOut": {
+                                "type": "number"
+                              },
+                              "totalApps": {
+                                "type": "number"
+                              },
+                              "apps": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "appIdentity": {
+                                      "type": "string"
+                                    },
+                                    "processName": {
+                                      "type": "string"
+                                    },
+                                    "bytesOut": {
+                                      "type": "number"
+                                    },
+                                    "flows": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": [
+                                    "appIdentity",
+                                    "processName",
+                                    "bytesOut",
+                                    "flows"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "bytesOut",
+                              "totalApps",
+                              "apps"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "private": {
+                            "type": "object",
+                            "properties": {
+                              "bytesOut": {
+                                "type": "number"
+                              },
+                              "unnamedBytesOut": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "bytesOut",
+                              "unnamedBytesOut"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "flows",
+                          "flowsWithBytes",
+                          "beyond",
+                          "private"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "days",
+                    "startedAt",
+                    "agents"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
     "/api/agents/enrollment-requests": {
       "get": {
         "summary": "GET /api/agents/enrollment-requests",
@@ -11170,6 +11327,7 @@
       "GET /api/agent/capabilities",
       "GET /api/agent/threat-intel",
       "GET /api/agents",
+      "GET /api/agents/app-bytes",
       "GET /api/agents/inbound-probes",
       "GET /api/agents/outbound-candidates",
       "GET /api/ai/conversations",

@@ -4,6 +4,7 @@ const {
   ensureInboundProbesTable, storeInboundProbes, listInboundProbes: listInboundProbesIn, pruneInboundProbes,
 } = require('./agent-inbound-probes');
 const outboundCandidates = require('./agent-outbound-candidates');
+const appBytes = require('./agent-app-bytes');
 
 const runtimeProfiler = require('./runtime-profiler');
 
@@ -42,6 +43,7 @@ function initDb(dbPath) {
   db.pragma('busy_timeout = 5000');
   ensureInboundProbesTable(db);
   outboundCandidates.ensureOutboundCandidatesTables(db);
+  appBytes.ensureAppBytesTables(db);
 }
 
 function closeDb() {
@@ -284,6 +286,8 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
       lastObservedAt = MAX(agent_app_hourly.lastObservedAt, excluded.lastObservedAt)
   `);
 
+  const recordAppBytes = appBytes.createAppBytesRecorder(database);
+
   let acceptedCount = 0;
   let duplicateCount = 0;
   let completedCount = 0;
@@ -336,6 +340,15 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
             firstObservedAt: stored.firstObservedAt,
             lastObservedAt,
           });
+          recordAppBytes({
+            agentId,
+            appIdentity: stored.bundleId || stored.processName,
+            processName: stored.processName,
+            remoteAddress: stored.remoteAddress,
+            at: lastObservedAt,
+            newFlow: false,
+            bytesOut: observation.bytesOut ?? null,
+          });
           completedCount += 1;
         }
         continue;
@@ -377,6 +390,15 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
         ...row,
         hourStart: Math.floor(row.lastObservedAt / 3_600_000) * 3_600_000,
         appIdentity: row.bundleId || row.processName,
+      });
+      recordAppBytes({
+        agentId,
+        appIdentity: row.bundleId || row.processName,
+        processName: row.processName,
+        remoteAddress: row.remoteAddress,
+        at: row.lastObservedAt,
+        newFlow: true,
+        bytesOut: row.bytesOut ?? null,
       });
       acceptedCount += 1;
       acceptedObservationIds.push(observation.observationId);
@@ -616,6 +638,8 @@ function pruneObservations({
   // Candidates an Agent shared (P3-194): replaced whole on every send, so
   // only an Agent that stopped sending leaves rows to age out.
   result.outboundCandidates = timed('receiptsMs', () => outboundCandidates.pruneOutboundCandidates(database));
+  // Sent bytes by app and hour (P3-194), kept as long as the observations.
+  result.appBytes = timed('receiptsMs', () => appBytes.pruneAppBytes(database, before));
   return result;
 }
 
@@ -739,6 +763,7 @@ function _initForTest(dbPath = ':memory:') {
   `);
   ensureInboundProbesTable(db);
   outboundCandidates.ensureOutboundCandidatesTables(db);
+  appBytes.ensureAppBytesTables(db);
 }
 
 /// Locations for destinations, as stored by enrichment (agent-geo-cache.js).
@@ -753,6 +778,10 @@ function storeOutboundCandidates(agentId, payload, options) {
 
 function listOutboundCandidates() {
   return outboundCandidates.listOutboundCandidates(requireDb());
+}
+
+function listAppBytes(options) {
+  return appBytes.listAppBytes(requireDb(), options);
 }
 
 function listInboundProbes(options) {
@@ -785,6 +814,7 @@ module.exports = {
   storeOutboundCandidates,
   listOutboundCandidates,
   listInboundProbes,
+  listAppBytes,
   _dbForTest,
   _initForTest,
 };

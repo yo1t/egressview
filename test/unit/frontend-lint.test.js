@@ -549,6 +549,14 @@ describe('Frontend TDZ lint', () => {
     assert.match(view, /agents\.probes\.unsupported/);
   });
 
+  it('Agentタブは外への送信量の多いアプリを期間を選んで出し、プライベートアドレス宛ては合計で添える', () => {
+    const view = moduleSources['agent-view.js'];
+    assert.match(view, /\/api\/agents\/app-bytes\?days=/);
+    assert.match(view, /agents\.apps\.private/);
+    assert.match(view, /agents\.apps\.coverage/);
+    assert.match(view, /try \{ return localStorage\.getItem\(APP_DAYS_KEY\)/);
+  });
+
   it('調べる候補は設定ではなくAgentタブに出す', () => {
     assert.doesNotMatch(html, /id="agent-candidates-block"/);
     assert.doesNotMatch(moduleSources['settings-agents.js'], /outbound-candidates/);
