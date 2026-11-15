@@ -525,6 +525,16 @@ describe('Frontend TDZ lint', () => {
     assert.match(html, /id="agent-view-list"/);
   });
 
+  it('Agentタブは全体を一覧し、詳しく見るAgentをプルダウンで選ぶ', () => {
+    const view = moduleSources['agent-view.js'];
+    assert.match(html, /id="agent-view-overview"/);
+    assert.match(html, /<select id="agent-view-select"/);
+    assert.match(html, /<label for="agent-view-select"/);
+    // The choice is a per-viewer convenience; storage may refuse access.
+    assert.match(view, /try \{ return localStorage\.getItem/);
+    assert.match(view, /try \{ localStorage\.setItem/);
+  });
+
   it('調べる候補は設定ではなくAgentタブに出す', () => {
     assert.doesNotMatch(html, /id="agent-candidates-block"/);
     assert.doesNotMatch(moduleSources['settings-agents.js'], /outbound-candidates/);
