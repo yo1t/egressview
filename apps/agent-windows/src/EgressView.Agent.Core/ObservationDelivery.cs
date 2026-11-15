@@ -85,6 +85,12 @@ public sealed partial class ObservationStore
         if (removed > 0) Execute($"UPDATE delivery_state SET queue_overflow=queue_overflow+{removed} WHERE id=1");
     }
 
+    /// How old an observation may be and still be taken by the Hub, which
+    /// refuses anything last seen more than seven days before it arrives
+    /// (`AGENT_INGEST_DEFAULT_RETENTION_MS`). An hour short of that, for the
+    /// clocks on the two sides and the time a batch spends on its way.
+    public static readonly TimeSpan HubAcceptsFor = TimeSpan.FromDays(7) - TimeSpan.FromHours(1);
+
     public DeliveryBatch? PrepareDeliveryBatch(DateTimeOffset sentAt, int limit = 200)
     {
         limit = Math.Clamp(limit, 1, 200);
@@ -93,6 +99,7 @@ public sealed partial class ObservationStore
             Execute("BEGIN IMMEDIATE");
             try
             {
+                DropObservationsTheHubWillRefuseLocked(sentAt);
                 var existing = ScalarTextOrNull("SELECT batch_id FROM delivery_queue WHERE batch_id IS NOT NULL ORDER BY queued_at LIMIT 1");
                 var batchId = existing is null ? Guid.NewGuid() : Guid.Parse(existing);
                 if (existing is null)
@@ -103,6 +110,28 @@ public sealed partial class ObservationStore
             }
             catch { TryRollback(); throw; }
         }
+    }
+
+    /// Takes out what the Hub would refuse for its age, before it is sent.
+    ///
+    /// A PC shut down for nine days came back with 290 of 9,509 queued
+    /// observations past the Hub's seven days (2026-11-15). The Hub refuses a
+    /// batch with any of them in it, and narrowing a refusal down to one
+    /// observation and giving that one five tries takes about half an hour
+    /// each: about six days before the rest of the queue moved again. Their
+    /// age is known here, so they go now, and how many is counted.
+    private void DropObservationsTheHubWillRefuseLocked(DateTimeOffset sentAt)
+    {
+        var cutoff = (sentAt - HubAcceptsFor).ToUniversalTime().ToString("O");
+        var expired = ScalarInt64($"SELECT COUNT(*) FROM delivery_queue WHERE last_observed_at<'{cutoff}'");
+        if (expired == 0) return;
+        var claimed = ScalarInt64($"SELECT COUNT(*) FROM delivery_queue WHERE last_observed_at<'{cutoff}' AND batch_id IS NOT NULL");
+        Execute($"DELETE FROM delivery_queue WHERE last_observed_at<'{cutoff}'");
+        // What is left of a refused batch is a different batch, with its
+        // tries still to come.
+        if (claimed > 0) Execute("UPDATE delivery_state SET blocked_batch_rejections=0 WHERE id=1");
+        Execute($"INSERT INTO collector_counters(name,value) VALUES('delivery-observations-expired',{expired}) " +
+                "ON CONFLICT(name) DO UPDATE SET value=value+excluded.value");
     }
 
     /// How many times a single observation may be refused before it is given
