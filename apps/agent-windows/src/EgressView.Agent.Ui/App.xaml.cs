@@ -79,6 +79,12 @@ public partial class App : System.Windows.Application
         runOpened = true;
         ReportRun("begin", previousExit: TakeExitNote());
         DispatcherUnhandledException += (_, args) => ReportRun("fault", args.Exception.GetType().FullName);
+        SessionEnding += (_, args) =>
+        {
+            if (args.Cancel) return;
+            sessionEnding = true;
+            ReportRun("session-end");
+        };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             ReportRun("fault", (args.ExceptionObject as Exception)?.GetType().FullName);
         ThemeManager.ApplySystemTheme(Resources);
@@ -505,6 +511,12 @@ public partial class App : System.Windows.Application
     /// Whether this process opened a run. Only the window that did may end it.
     private static bool runOpened;
 
+    /// Windows is signing the user out or shutting down. The window did not
+    /// choose to close, so it leaves no note saying it did: on 2026-11-06 a
+    /// shutdown with fast startup ended the window, the service only
+    /// hibernated, and the window's run was filed as a crash.
+    private static bool sessionEnding;
+
     /// When this window last closed in an orderly way, kept where the window
     /// itself can write.
     ///
@@ -580,8 +592,8 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
-        if (runOpened) WriteExitNote();
-        ReportRun("end");
+        if (runOpened && !sessionEnding) WriteExitNote();
+        if (!sessionEnding) ReportRun("end");
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged;
         trayRefresh.Stop();
         Updates.StateChanged -= UpdateStateChanged;
