@@ -323,9 +323,11 @@ function renderCard(agent, report, now, probes, minPorts, appBytes, appState) {
       .filter(Boolean).join(' · '), 'agent-card-meta')
   );
   head.append(title, deliveryLine(agent, now));
-  // Answers waiting first, then what it sends, then what reached it.
-  card.append(head, renderCandidates(agent, report), renderApps(appBytes, appState),
-    renderProbes(agent, probes, minPorts));
+  // Answers waiting first, then what it sends, then what reached it. The
+  // first two share a row when the card is wide enough.
+  const pair = textElement('div', '', 'agent-card-pair');
+  pair.append(renderCandidates(agent, report), renderApps(appBytes, appState));
+  card.append(head, pair, renderProbes(agent, probes, minPorts));
   return card;
 }
 

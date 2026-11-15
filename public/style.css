@@ -522,7 +522,9 @@
   .agent-kpi-warn .agent-kpi-value { color: var(--yellow); }
   .agent-kpi-alert .agent-kpi-value { color: var(--red); }
   .agent-kpi-sub { color: var(--muted); font-size: 10px; margin-top: 2px; line-height: 1.4; overflow-wrap: anywhere; }
-  .agent-view-columns { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  /* The table of Agents above the picked Agent at every width: beside the
+     table, the detail had too little room to show its sections side by side. */
+  .agent-view-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
   .agent-panel { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); min-width: 0; }
   .agent-panel-head { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
   .agent-view-pick[hidden] { display: none; }
@@ -599,12 +601,13 @@
   .agent-answer-investigate { color: #fecaca; background: rgba(239,68,68,0.18); }
   .agent-answer-unanswered { color: #fde68a; background: rgba(245,158,11,0.16); }
   .agent-answer-expected { color: #a7f3d0; background: rgba(16,185,129,0.14); }
-  /* The tab shares the screen with the device list, so the room it has is
-     not the window's width: the table of Agents needs about 620px before the
-     detail panel can sit beside it. */
-  .agent-view-wrap { container: agent-view / inline-size; }
-  @container agent-view (max-width: 1200px) {
-    .agent-view-columns { grid-template-columns: minmax(0, 1fr); }
+  /* Wide enough, the picked Agent's candidates and apps sit side by side.
+     Measured on the card, not the window: the tab shares the screen with the
+     device list. */
+  .agent-card { container: agent-card / inline-size; }
+  .agent-card-pair { display: grid; gap: 14px; align-items: start; }
+  @container agent-card (min-width: 900px) {
+    .agent-card-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 28px; }
   }
   @media (max-width: 1100px) {
     .agent-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
