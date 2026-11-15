@@ -584,6 +584,9 @@
   .agent-segmented-option + .agent-segmented-option { border-left: 1px solid var(--border); }
   .agent-segmented-option[aria-pressed="true"] { background: rgba(59,130,246,0.18); color: var(--text); }
   .agent-segmented-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .agent-period { color: var(--text); font-size: 12px; }
+  .agent-card-section { transition: opacity 0.15s; }
+  .agent-card-section-loading { opacity: 0.45; pointer-events: none; }
   .agent-uptime-ratio { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .agent-uptime-value { font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
   .agent-uptime-gaps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
