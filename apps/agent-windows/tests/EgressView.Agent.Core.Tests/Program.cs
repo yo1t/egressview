@@ -298,6 +298,15 @@ try
         shutdownWindows.SettleWindowExit(DateTimeOffset.UtcNow.AddSeconds(-1));
         Assert(Window(window).Ending == "clean", "the window's own note of an orderly exit still wins");
 
+        // 2026-11-06: shut down with fast startup. The service hibernated and
+        // kept its run; only the window heard that the session was ending.
+        var signedOutAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var signedOut = shutdownWindows.BeginRun(RunComponent.Ui, "test", signedOutAt);
+        shutdownWindows.EndSystemShutdownRun(signedOut);
+        shutdownWindows.BeginRun(RunComponent.Ui, "test");
+        Assert(shutdownWindows.ReadRunHistory().Single(run => run.Component == RunComponent.Ui && run.StartedAt == signedOutAt).Ending == "system-shutdown",
+            "a window told that the session is ending is filed with the shutdown, though the service kept running");
+
     }
     using (var earlierShutdown = new ObservationStore(Path.Combine(directory, "window-runs-earlier-shutdown.db")))
     {
@@ -1235,6 +1244,11 @@ try
     Assert(IpcProtocol.Handle("""{"v":1,"op":"ui-run","stage":"start"}""", () => "{}", _ => [],
         recordUiRun: (_, _) => { }).Contains("invalid-run-stage", StringComparison.Ordinal),
         "an unknown run stage is rejected rather than silently ignored");
+    var sessionStages = new List<string>();
+    Assert(IpcProtocol.Handle("""{"v":1,"op":"ui-run","stage":"session-end"}""", () => "{}", _ => [],
+        recordUiRun: (stage, _) => sessionStages.Add(stage)).Contains("\"status\":\"ok\"", StringComparison.Ordinal)
+        && sessionStages.SequenceEqual(["session-end"]),
+        "the window can say that Windows is ending its session");
     var deliveryStatusResponse = IpcProtocol.Handle("""{"v":1,"op":"delivery-status"}""", () => "{}", _ => [],
         deliveryStatus: () => """{"enrolled":true,"pending":4,"state":"rate-limited"}""");
     Assert(deliveryStatusResponse.Contains("\"pending\":4", StringComparison.Ordinal) && deliveryStatusResponse.Contains("rate-limited", StringComparison.Ordinal),
@@ -2494,6 +2508,26 @@ try
         Assert(batch.Observations.Count == 1 && batch.Observations[0].BytesOut == 150 && batch.Observations[0].BytesIn == 100, "delivery batch preserves exact aggregate bytes");
         Assert(deliveryStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(3))!.BatchId == activeBatchId, "unacknowledged retry preserves the batch ID");
     }
+    // A PC off for longer than the Hub keeps anything: what the Hub would
+    // refuse for its age is taken out before sending, and counted.
+    using (var staleDelivery = new ObservationStore(Path.Combine(directory, "delivery-stale.db")))
+    {
+        var back = DateTimeOffset.UtcNow;
+        var old = new NetworkObservation(back.AddDays(-9), 77, "TCP", "10.0.0.1", 50001, "203.0.113.8", 443,
+            120, 80, ObservationLayer.Logical, "if", "etw", "Browser");
+        staleDelivery.QueueForDelivery([old, old with { LocalPort = 50002, ObservedAt = back.AddDays(-8) }], back.AddDays(-8));
+        var claimed = staleDelivery.PrepareDeliveryBatch(back.AddDays(-8).AddMinutes(1))!;
+        staleDelivery.RecordDeliveryBatchRejection(claimed.BatchId);
+        staleDelivery.QueueForDelivery([
+            old with { LocalPort = 50003, ObservedAt = back.AddHours(-1) },
+            old with { LocalPort = 50004, ObservedAt = back.AddDays(-6) },
+        ], back);
+        var fresh = staleDelivery.PrepareDeliveryBatch(back)!;
+        Assert(fresh.Observations.Count == 2 && staleDelivery.ReadDeliveryStatus().Pending == 2,
+            "observations past the Hub's seven days are not sent, claimed in a refused batch or not, and six days old still is");
+        Assert(staleDelivery.ReadCounters()["delivery-observations-expired"] == 2, "how many were past it is counted");
+    }
+
     using (var reopenedDelivery = new ObservationStore(deliveryDatabase))
     {
         Assert(reopenedDelivery.PrepareDeliveryBatch(deliveryStarted.AddSeconds(4))!.BatchId == activeBatchId, "active batch survives service restart");

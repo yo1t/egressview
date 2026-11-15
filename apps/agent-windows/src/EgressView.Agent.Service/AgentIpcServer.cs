@@ -173,6 +173,10 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
                 case "begin": unclaimedUiRunId = 0; uiRunId = store.BeginRun(RunComponent.Ui, DiagnosticsReport.CurrentVersion); uiHeartbeatAt = DateTimeOffset.UtcNow; break;
                 case "end" when uiRunId != 0: store.EndRun(uiRunId); uiRunId = 0; break;
                 case "fault" when uiRunId != 0: store.FaultRun(uiRunId, fault ?? "Unknown"); uiRunId = 0; break;
+                // Signed out or shut down. With fast startup the service is
+                // not stopped, only hibernated with the kernel, so it never
+                // records a shutdown of its own for the window to be settled by.
+                case "session-end" when uiRunId != 0: store.EndSystemShutdownRun(uiRunId); uiRunId = 0; break;
                 case "previous-exit" when DateTimeOffset.TryParse(fault, System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.RoundtripKind, out var exitedAt):
                     store.SettleWindowExit(exitedAt);

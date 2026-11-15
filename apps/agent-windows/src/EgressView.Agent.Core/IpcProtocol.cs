@@ -399,7 +399,7 @@ public static class IpcProtocol
     {
         if (record is null) return Reject("operation-unavailable");
         var stage = root.TryGetProperty("stage", out var value) ? value.GetString() : null;
-        if (stage is not ("begin" or "end" or "fault")) return Reject("invalid-run-stage");
+        if (stage is not ("begin" or "end" or "fault" or "session-end")) return Reject("invalid-run-stage");
         var fault = root.TryGetProperty("fault", out var name) && name.ValueKind == JsonValueKind.String
             ? name.GetString() : null;
         // A window that closed cleanly while the service was down -- an
