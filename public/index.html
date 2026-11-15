@@ -158,11 +158,7 @@
           <div id="agents-list" class="settings-agent-list"></div>
           <div class="settings-status" id="agents-status"></div>
 
-          <div id="agent-candidates-block" hidden>
-            <div class="settings-field-label" data-i18n="settings.agents.candidates.title">Agentが共有した調べる候補</div>
-            <p class="settings-field-hint" data-i18n="settings.agents.candidates.hint">Agentの利用者が設定で「Hubへ送る」をオンにした端末だけが出ます。各Agentが自分の直近14日の通信と比べて見つけたもので、判定ではありません。答えは端末の利用者が付けたものです。</p>
-            <div id="agent-candidates-list" class="settings-agent-list"></div>
-          </div>
+          <p class="settings-field-hint" data-i18n="settings.agents.viewHint">各Agentが届いているかと、Agentが共有した調べる候補は、画面上部の「Agent」タブで見られます。</p>
           </section>
 
           <!-- Legacy controls remain hidden while old endpoints are supported. -->
@@ -926,6 +922,7 @@
     <button class="view-tab" id="btn-log" data-i18n="tab.log">📋 通信ログ</button>
     <button class="view-tab" id="btn-devices" data-i18n="tab.devices">🖥 端末一覧</button>
     <button class="view-tab" id="btn-notif-log" data-i18n="tab.notif-log">🔔 検出ログ</button>
+    <button class="view-tab" id="btn-agents" data-i18n="tab.agents" hidden>💻 Agent</button>
   </div>
   <div class="time-filter">
     <span class="time-filter-label" data-i18n="period">期間</span>
@@ -1322,6 +1319,18 @@
           <button id="dv-detail-save" class="btn-save" data-i18n="note.save">保存</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Agent View ──────────────────────────────────────────────────────── -->
+  <div id="agents-container" class="activity-view">
+    <div class="log-header">
+      <span class="log-title" data-i18n="tab.agents">💻 Agent</span>
+      <button id="agent-view-refresh-btn" class="activity-refresh" data-i18n="agents.refresh">更新</button>
+    </div>
+    <div class="agent-view-body">
+      <p class="agent-view-hint" data-i18n="agents.hint">Hubに登録したAgentごとに、届いているかと、Agentの利用者が共有した調べる候補を表示します。調べる候補は各Agentが自分の普段の通信と比べて見つけたもので、判定ではありません。答えはそのMacの利用者が付けたものです。期間の選択には関係しません。登録・承認・取り消しは設定の「L3/L4」で行います。</p>
+      <div id="agent-view-list" class="agent-view-list"></div>
     </div>
   </div>
 

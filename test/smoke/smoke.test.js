@@ -73,7 +73,7 @@ const PHASE2_JS_FILES = [
   'stats-helpers.js', 'stats-charts.js', 'stats-map.js',
   'view-tabs.js', 'log.js', 'ai-insights.js', 'beacon.js', 'threat-popup.js',
   'devices.js', 'notif-log.js', 'main.js',
-  'settings-ai.js', 'settings-security.js', 'settings-agents.js',
+  'settings-ai.js', 'settings-security.js', 'settings-agents.js', 'agent-view.js',
 ];
 for (const file of PHASE2_JS_FILES) {
   test(`js/${file} is served (200)`, async ({ request }) => {
@@ -527,10 +527,12 @@ test('tab bar renders after auth', async ({ page }) => {
   await authPage(page);
 
   // AI Insights is the leftmost tab and the authenticated start page.
-  const tabs = page.locator('.view-tab');
+  // The Agent tab appears only once an Agent is enrolled; the demo has none.
+  const tabs = page.locator('.view-tab:not([hidden])');
   await expect(tabs.first()).toBeVisible();
   const count = await tabs.count();
   expect(count).toBe(6);
+  await expect(page.locator('#btn-agents')).toBeHidden();
   await expect(tabs.first()).toHaveAttribute('id', 'btn-ai');
   await expect(page.locator('#btn-ai')).toHaveClass(/active/);
   await expect(page.locator('#ai-container')).toHaveClass(/view-active/);
@@ -726,12 +728,21 @@ test('mobile viewer keeps navigation, logs, and device details inside the viewpo
       lastSeen: Date.now(), note: 'Visible on a narrow screen',
     }] }),
   }));
+  // One enrolled Agent, so the narrow tab bar has to fit all seven tabs.
+  await page.route(/\/api\/agents$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ agents: [{
+      agentId: '00000000-0000-4000-8000-000000000001', platform: 'macos', hostName: 'mobile-fixture-mac',
+      osVersion: '26.1', agentVersion: '0.5.141', createdAt: Date.now() - 60_000,
+      updatedAt: Date.now(), lastSeenAt: Date.now(), revokedAt: null,
+    }] }),
+  }));
   await authPage(page);
 
   const errors = collectErrors(page);
-  const tabs = page.locator('.view-tab');
-  await expect(tabs).toHaveCount(6);
-  for (let index = 0; index < 6; index += 1) {
+  const tabs = page.locator('.view-tab:not([hidden])');
+  await expect(tabs).toHaveCount(7);
+  for (let index = 0; index < 7; index += 1) {
     const box = await tabs.nth(index).boundingBox();
     expect(box, `mobile tab ${index} should have a layout box`).not.toBeNull();
     expect(box.x, `mobile tab ${index} should not overflow left`).toBeGreaterThanOrEqual(0);
