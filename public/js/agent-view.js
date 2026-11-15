@@ -239,10 +239,43 @@ function periodSwitch(days, onPick = setAppDays) {
     const button = textElement('button', t(`agents.apps.period${value}`), 'agent-segmented-option');
     button.type = 'button';
     button.setAttribute('aria-pressed', String(value === days));
-    button.addEventListener('click', () => { if (value !== days) onPick(value); });
+    button.addEventListener('click', () => {
+      if (value === days) return;
+      // The section is drawn again when the answer arrives; until then it
+      // fades, so the tap visibly did something even when the numbers end up
+      // the same.
+      const section = group.closest('.agent-card-section');
+      section?.classList.add('agent-card-section-loading');
+      section?.setAttribute('aria-busy', 'true');
+      onPick(value);
+    });
     group.appendChild(button);
   }
   return group;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// What the numbers below cover, said in full: "Last 24 hours" or "All" with
+// the time it starts and why it starts there. All is at most the seven days
+// the Hub keeps, and shorter when counting began later (`countedFrom`, the
+// Hub starting to count or the Agent enrolling), in which case both choices
+// may show the same thing; that is said too, so a switch that changes nothing
+// visible is explained rather than looking broken.
+function periodLines(days, countedFrom, startReason) {
+  const now = Date.now();
+  const periodStart = now - days * DAY_MS;
+  const counted = Number(countedFrom) || 0;
+  const late = counted > periodStart + 5 * 60 * 1000;
+  const from = late ? counted : periodStart;
+  const scope = days === 1 ? 'last24' : 'all';
+  const reason = late ? (startReason === 'enrolled' ? 'SinceEnrolled' : 'SinceStart') : '';
+  const lines = [textElement('div', tVars(`agents.period.${scope}${reason}`, { time: fmtTs(from) }), 'agent-period')];
+  if (late && now - counted < DAY_MS) {
+    lines.push(textElement('div', t(startReason === 'enrolled'
+      ? 'agents.period.sameAsLast24Enrolled' : 'agents.period.sameAsLast24'), 'agent-card-meta'));
+  }
+  return lines;
 }
 
 // "2時間5分", "3日4時間": how long a gap lasted, to the minute.
@@ -283,6 +316,8 @@ function renderUptime(report, uptimeState) {
     section.appendChild(textElement('div', t('agents.uptime.unavailable'), 'agent-card-empty'));
     return section;
   }
+  // The server starts the period at the Agent's enrollment when that is later.
+  section.append(...periodLines(uptimeState.days, report.from, 'enrolled'));
   const percent = uptimePercent(report);
   const ratio = textElement('div', '', 'agent-uptime-ratio');
   ratio.appendChild(textElement('span', percent == null ? '—' : `${percent.toFixed(1)}%`, 'agent-uptime-value'));
@@ -297,9 +332,6 @@ function renderUptime(report, uptimeState) {
   bar.value = percent ?? 0;
   bar.setAttribute('aria-label', t('agents.uptime.title'));
   section.appendChild(bar);
-  if (Date.now() - Number(report.from) < uptimeState.days * 24 * 60 * 60 * 1000 - 5 * 60 * 1000) {
-    section.appendChild(textElement('div', tVars('agents.uptime.since', { time: fmtTs(report.from) }), 'agent-card-meta'));
-  }
   const gaps = Array.isArray(report.gaps) ? report.gaps : [];
   if (!gaps.length) {
     section.appendChild(textElement('div', t('agents.uptime.noGaps'), 'agent-card-meta'));
@@ -331,6 +363,8 @@ function renderApps(appBytes, appState) {
   const head = textElement('div', '', 'agent-card-section-head');
   head.append(textElement('div', t('agents.apps.title'), 'agent-card-section-title'), periodSwitch(appState.days));
   section.appendChild(head);
+  // Counting began when this Hub version first ran, so "all" may be short.
+  if (appState.ok) section.append(...periodLines(appState.days, appState.startedAt, 'started'));
   if (!appState.ok) {
     section.appendChild(textElement('div', t('agents.apps.unavailable'), 'agent-card-empty'));
     return section;
@@ -384,12 +418,6 @@ function renderApps(appBytes, appState) {
       percent: (Math.floor((counted / flows) * 1000) / 10).toFixed(1),
       counted: counted.toLocaleString(), flows: flows.toLocaleString(),
     }), 'agent-card-meta'));
-  }
-  // Counting began when this Hub version first ran; a period reaching back
-  // before that is short, and says so.
-  const startedAt = Number(appState.startedAt) || 0;
-  if (startedAt && Date.now() - startedAt < appState.days * 24 * 60 * 60 * 1000) {
-    section.appendChild(textElement('div', tVars('agents.apps.since', { time: fmtTs(startedAt) }), 'agent-card-meta'));
   }
   return section;
 }
