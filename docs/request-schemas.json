@@ -2711,6 +2711,69 @@
         ]
       }
     },
+    "GET /api/agents/uptime": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "agentId": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "integer"
+                },
+                "totalSlots": {
+                  "type": "integer"
+                },
+                "deliveredSlots": {
+                  "type": "integer"
+                },
+                "gapCount": {
+                  "type": "integer"
+                },
+                "gapMinutes": {
+                  "type": "integer"
+                },
+                "gaps": {
+                  "type": "array"
+                }
+              },
+              "required": [
+                "agentId",
+                "deliveredSlots",
+                "from",
+                "gapCount",
+                "gapMinutes",
+                "gaps",
+                "totalSlots"
+              ]
+            }
+          }
+        },
+        "required": [
+          "agents",
+          "days"
+        ]
+      },
+      "400": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    },
     "GET /api/ai/conversations": {
       "200": {
         "type": "object",
