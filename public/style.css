@@ -499,10 +499,13 @@
   .agent-view-body { overflow-y: auto; flex: 1; padding: 4px 16px 20px; font-size: 12px; }
   .agent-view-wrap { max-width: 1440px; display: grid; gap: 16px; }
   .agent-view-hint { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 0; max-width: 110ch; }
+  .agent-view-about summary { cursor: pointer; color: var(--muted); font-size: 11px; width: fit-content; padding: 4px 0; }
+  .agent-view-about summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  .agent-view-about[open] summary { margin-bottom: 4px; }
   .agent-view-error { color: var(--red); }
-  .agent-view-heading { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  .agent-view-heading { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); margin: 0; }
   .agent-view-overview { display: grid; gap: 8px; }
-  .agent-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+  .agent-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
   .agent-kpi {
     position: relative; overflow: hidden; min-width: 0;
     padding: 12px 14px 10px; border: 1px solid var(--border); border-radius: 10px;
@@ -535,6 +538,9 @@
   .agent-table tbody tr[aria-current="true"] td { background: rgba(59,130,246,0.10); }
   .agent-table tbody tr[aria-current="true"] td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   .agent-table .agent-table-num { text-align: right; font-variant-numeric: tabular-nums; width: 1%; }
+  .agent-table td.agent-table-stats { display: none; }
+  .agent-stat { color: var(--muted); font-size: 11px; }
+  .agent-stat-value { color: var(--text); font-weight: 600; margin-left: 4px; }
   .agent-table-name, .agent-table-delivery { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
   .agent-table-pick { background: none; border: 0; padding: 0; color: var(--text); font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
   .agent-table-pick:hover { color: var(--accent); }
@@ -559,7 +565,7 @@
   .agent-card-empty { color: var(--muted); font-size: 12px; line-height: 1.6; padding: 12px; border: 1px dashed var(--border); border-radius: 8px; }
   .agent-card-caution { color: var(--yellow); font-size: 11px; }
   .agent-card-section { display: grid; gap: 8px; }
-  .agent-card-section-title { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .agent-card-section-title { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); }
   .agent-candidates { display: grid; gap: 8px; }
   .agent-candidate {
     display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
@@ -569,6 +575,7 @@
   .agent-candidate-investigate { border-left-color: var(--red); }
   .agent-candidate-unanswered { border-left-color: var(--yellow); }
   .agent-candidate-expected { border-left-color: var(--green); }
+  .agent-probe { border-left-color: #a78bfa; }
   .agent-candidate-body { display: grid; gap: 3px; min-width: 0; }
   .agent-candidate-title { font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
   .agent-candidate-line { color: var(--muted); font-size: 11px; }
@@ -579,21 +586,34 @@
   .agent-answer-expected { color: #a7f3d0; background: rgba(16,185,129,0.14); }
   @media (max-width: 1100px) {
     .agent-view-columns { grid-template-columns: minmax(0, 1fr); }
+    .agent-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   }
   @media (max-width: 720px) {
     .agent-view-body { padding: 4px 8px 16px; }
     .agent-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .agent-kpi:first-child { grid-column: 1 / -1; }
     .agent-kpi-value { font-size: 22px; }
-    .agent-table th, .agent-table td { padding: 8px 6px; }
-    .agent-table th { white-space: normal; vertical-align: bottom; }
-    .agent-table th:first-child, .agent-table td:first-child { padding-left: 10px; }
-    .agent-table th:last-child, .agent-table td:last-child { padding-right: 10px; }
-    .agent-pill { font-size: 10px; padding: 1px 7px 1px 5px; gap: 4px; }
-    .agent-cell-muted { font-size: 10px; }
-    .agent-table td:first-child { white-space: normal; }
-    .agent-table-pick { overflow-wrap: anywhere; }
-    .agent-table th { word-break: keep-all; }
+    .agent-kpi-label { white-space: normal; overflow: visible; line-height: 1.35; }
+    /* iOS zooms into a field whose text is under 16px, and a finger needs a
+       taller target than a pointer. */
+    .agent-view-pick select { font-size: 16px; min-height: 40px; }
+    .agent-view-about summary { padding: 8px 0; }
+    /* A phone has no room for six columns: each Agent becomes a block, with
+       the counts labelled under its name. */
+    .agent-table thead { display: none; }
+    .agent-table, .agent-table tbody { display: block; }
+    .agent-table tbody tr {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px;
+      padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .agent-table tbody tr:last-child { border-bottom: 0; }
+    .agent-table tbody tr[aria-current="true"] { background: rgba(59,130,246,0.10); box-shadow: inset 3px 0 0 var(--accent); }
+    .agent-table tbody tr[aria-current="true"] td, .agent-table tbody tr:hover td { background: none; }
+    .agent-table tbody tr[aria-current="true"] td:first-child { box-shadow: none; }
+    .agent-table td { display: block; padding: 0; border: 0; width: auto; }
+    .agent-table td:nth-child(2) { justify-self: end; }
+    .agent-table td:nth-child(2) .agent-table-delivery { align-items: flex-end; }
+    .agent-table td.agent-table-num { grid-column: 1 / -1; display: none; }
+    .agent-table td.agent-table-stats { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 12px; text-align: left; }
     .agent-view-pick { flex-wrap: wrap; }
     .agent-view-pick select { max-width: 100%; flex: 1; }
   }

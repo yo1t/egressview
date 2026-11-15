@@ -1,6 +1,8 @@
 'use strict';
 const { readGeoLocations } = require('./agent-geo-cache');
-const { ensureInboundProbesTable, storeInboundProbes, pruneInboundProbes } = require('./agent-inbound-probes');
+const {
+  ensureInboundProbesTable, storeInboundProbes, listInboundProbes: listInboundProbesIn, pruneInboundProbes,
+} = require('./agent-inbound-probes');
 const outboundCandidates = require('./agent-outbound-candidates');
 
 const runtimeProfiler = require('./runtime-profiler');
@@ -753,6 +755,10 @@ function listOutboundCandidates() {
   return outboundCandidates.listOutboundCandidates(requireDb());
 }
 
+function listInboundProbes(options) {
+  return listInboundProbesIn(requireDb(), options);
+}
+
 function _dbForTest() {
   return requireDb();
 }
@@ -778,6 +784,7 @@ module.exports = {
   storeBatch,
   storeOutboundCandidates,
   listOutboundCandidates,
+  listInboundProbes,
   _dbForTest,
   _initForTest,
 };

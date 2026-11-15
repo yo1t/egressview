@@ -84,6 +84,64 @@ function storeInboundProbes(db, agentId, probes, { receivedAt = Date.now() } = {
   return fresh;
 }
 
+// The senders listed per Agent. A sweep of a /24 from one device is one
+// sender, so this bounds the answer without hiding a whole scan.
+const LIST_MAX_SENDERS = 20;
+
+/**
+ * Per Agent, the devices that probed it since `since`: one entry per sender
+ * and protocol, counted only from windows at the notification threshold, so
+ * the list matches what the detection log reported. Newest first.
+ *
+ * @returns {Array<{agentId, total, senders: Array<{sourceAddress, networkProtocol,
+ *   windows, maxPorts, packets, firstAt, lastAt, localAddress, samplePorts}>}>}
+ */
+function listInboundProbes(db, { since, minPorts = PROBE_NOTIFY_MIN_PORTS } = {}) {
+  const rows = db.prepare(`
+    SELECT agentId, sourceAddress, networkProtocol,
+      COUNT(*) AS windows, MAX(distinctPorts) AS maxPorts, SUM(packets) AS packets,
+      MIN(windowStart) AS firstAt, MAX(windowStart + windowSeconds * 1000) AS lastAt,
+      MAX(windowStart) AS latestWindow
+    FROM agent_inbound_probes
+    WHERE windowStart >= ? AND distinctPorts >= ?
+    GROUP BY agentId, sourceAddress, networkProtocol
+    ORDER BY agentId, lastAt DESC
+  `).all(since, minPorts);
+  // The latest window's address and ports describe the sender as it was last
+  // seen; the Agent's address can change between windows.
+  const latest = db.prepare(`
+    SELECT localAddress, samplePorts FROM agent_inbound_probes
+    WHERE agentId = ? AND sourceAddress = ? AND networkProtocol = ? AND windowStart = ?
+      AND distinctPorts >= ?
+    ORDER BY distinctPorts DESC LIMIT 1
+  `);
+  const byAgent = new Map();
+  for (const row of rows) {
+    let report = byAgent.get(row.agentId);
+    if (!report) {
+      report = { agentId: row.agentId, total: 0, senders: [] };
+      byAgent.set(row.agentId, report);
+    }
+    report.total += 1;
+    if (report.senders.length >= LIST_MAX_SENDERS) continue;
+    const last = latest.get(row.agentId, row.sourceAddress, row.networkProtocol, row.latestWindow, minPorts) || {};
+    let samplePorts;
+    try { samplePorts = JSON.parse(last.samplePorts || '[]'); } catch { samplePorts = []; }
+    report.senders.push({
+      sourceAddress: row.sourceAddress,
+      networkProtocol: row.networkProtocol,
+      windows: row.windows,
+      maxPorts: row.maxPorts,
+      packets: row.packets,
+      firstAt: row.firstAt,
+      lastAt: row.lastAt,
+      localAddress: last.localAddress || null,
+      samplePorts: Array.isArray(samplePorts) ? samplePorts : [],
+    });
+  }
+  return [...byAgent.values()];
+}
+
 function pruneInboundProbes(db, before) {
   const hasTable = db.prepare(
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_inbound_probes'"
@@ -93,5 +151,6 @@ function pruneInboundProbes(db, before) {
 }
 
 module.exports = {
-  PROBE_NOTIFY_MIN_PORTS, ensureInboundProbesTable, storeInboundProbes, pruneInboundProbes,
+  PROBE_NOTIFY_MIN_PORTS, LIST_MAX_SENDERS,
+  ensureInboundProbesTable, storeInboundProbes, listInboundProbes, pruneInboundProbes,
 };
