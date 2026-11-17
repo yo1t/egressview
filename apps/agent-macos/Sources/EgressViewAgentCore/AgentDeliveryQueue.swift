@@ -139,9 +139,25 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         self.fileURL = fileURL
         self.maximumPending = max(1, maximumPending)
         self.sentOpeningLimit = max(1, sentOpeningLimit)
-        encoder.dateEncodingStrategy = .iso8601
+        // Milliseconds, not whole seconds: `.iso8601` dropped the fraction,
+        // so after a restart a saved opening no longer matched its closing
+        // report, and a saved pending report no longer matched a later report
+        // of the same flow. Files written that way still load.
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(QueueTimestamp.string(from: date))
+        }
         encoder.outputFormatting = [.sortedKeys]
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let text = try container.decode(String.self)
+            guard let date = QueueTimestamp.date(from: text) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container, debugDescription: "Not an ISO 8601 date: \(text)"
+                )
+            }
+            return date
+        }
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             state = State()
             return
@@ -521,7 +537,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
               let index = state.sentOpenings?.lastIndex(where: {
                   $0.flowID == flowID
                       && (observation.startIsUnknown || $0.startedAt == nil
-                          || $0.startedAt == observation.firstObservedAt)
+                          || $0.startedAt.map(QueueTimestamp.milliseconds) == observation.episodeKey)
               }),
               let observationID = state.sentOpenings?[index].observationID,
               !state.pending.contains(where: { $0.observationID == observationID })
@@ -647,6 +663,54 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         !value.isEmpty
             && value.count <= maximumLength
             && value.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
+    }
+}
+
+/// How the delivery queue writes times to its file: ISO 8601 with
+/// milliseconds, e.g. `2026-11-18T01:02:03.250Z`.
+///
+/// Milliseconds are what the queue matches reports of a flow by (see
+/// `ConnectionObservation.episodeKey`), so a time read back must give the same
+/// millisecond as the time written. Writing the millisecond as an integer and
+/// reading it back the same way guarantees that, which a formatter's
+/// fractional-second rounding does not promise. Whole-second times, written by
+/// agents before this, are read as they were.
+enum QueueTimestamp {
+    private static let wholeSeconds: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    /// The time in milliseconds since 1970, rounded the way `episodeKey` is.
+    static func milliseconds(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1_000).rounded())
+    }
+
+    static func string(from date: Date) -> String {
+        let total = milliseconds(date)
+        // Floor division, so a time before 1970 still gets a 0-999 fraction.
+        let seconds = total >= 0 ? total / 1_000 : -((-total + 999) / 1_000)
+        let fraction = total - seconds * 1_000
+        let whole = wholeSeconds.string(from: Date(timeIntervalSince1970: TimeInterval(seconds)))
+        // `.withInternetDateTime` in UTC always ends in "Z".
+        return String(whole.dropLast()) + String(format: ".%03lldZ", fraction)
+    }
+
+    static func date(from text: String) -> Date? {
+        guard let dot = text.firstIndex(of: ".") else {
+            return wholeSeconds.date(from: text)
+        }
+        let afterDot = text[text.index(after: dot)...]
+        let digits = afterDot.prefix(while: { $0.isASCII && $0.isNumber })
+        guard !digits.isEmpty,
+              let base = wholeSeconds.date(from: String(text[..<dot]) + afterDot.dropFirst(digits.count))
+        else { return nil }
+        // Only milliseconds are kept, which is all this type writes.
+        let padded = String((digits + "000").prefix(3))
+        guard let fraction = Int64(padded) else { return nil }
+        let total = Int64(base.timeIntervalSince1970) * 1_000 + fraction
+        return Date(timeIntervalSince1970: TimeInterval(total) / 1_000)
     }
 }
 
