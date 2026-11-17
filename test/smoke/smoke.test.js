@@ -874,6 +874,60 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
   expect(overflow).toEqual({ page: 0, body: 0, past: 0 });
 });
 
+test('header fits the window from a 320 px phone to a 1400 px desktop, with the Agent tab shown', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  // At 1100px the one-row header needed 1352px and the page scrolled sideways.
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await authPage(page);
+  const measure = () => page.evaluate(() => {
+    // The demo has no enrolled Agent; show its tab, the widest case.
+    document.getElementById('btn-agents').hidden = false;
+    const header = document.querySelector('header');
+    const outside = [...header.querySelectorAll('*')]
+      .filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && (r.right > window.innerWidth + 0.5 || r.left < -0.5);
+      })
+      .map(el => el.id || el.className);
+    const height = sel => Math.round(document.querySelector(sel).getBoundingClientRect().height);
+    return {
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+      outside,
+      tab: height('.view-tab'),
+      settings: height('#settings-btn'),
+      period: height('#time-filter-select'),
+      source: height('#source-filter-select'),
+      fieldFont: parseFloat(getComputedStyle(document.getElementById('time-filter-select')).fontSize),
+    };
+  });
+
+  for (const lang of ['ja', 'en']) {
+    await page.evaluate(async l => {
+      const i18n = await import('/js/i18n.js?v=header-fit-smoke');
+      i18n.setCurrentLang(l);
+      i18n.applyI18n();
+    }, lang);
+    for (const width of [1400, 1100, 900, 769]) {
+      await page.setViewportSize({ width, height: 800 });
+      const m = await measure();
+      expect(m.overflow, `${lang} ${width}px`).toBeLessThanOrEqual(0);
+      expect(m.outside, `${lang} ${width}px`).toEqual([]);
+    }
+    for (const [width, height] of [[768, 1024], [740, 360], [375, 812], [320, 640]]) {
+      await page.setViewportSize({ width, height });
+      const m = await measure();
+      const at = `${lang} ${width}x${height}`;
+      expect(m.overflow, at).toBeLessThanOrEqual(0);
+      expect(m.outside, at).toEqual([]);
+      for (const key of ['tab', 'settings', 'period', 'source']) {
+        expect(m[key], `${at} ${key} height`).toBeGreaterThanOrEqual(40);
+      }
+      expect(m.fieldFont, `${at} period font`).toBeGreaterThanOrEqual(16);
+    }
+  }
+});
+
 test('graph canvas renders after auth from the summary API', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
