@@ -118,7 +118,8 @@ function requireDb() {
   return db;
 }
 
-function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0, relocated = [], freshInboundProbes = []) {
+function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0, relocated = [], freshInboundProbes = [],
+  expiredCount = 0) {
   const ack = {
     batchId: row.batchId,
     accepted: row.acceptedCount,
@@ -127,6 +128,15 @@ function batchAck(row, replayed, acceptedObservationIds = [], completedCount = 0
     receivedAt: row.receivedAt,
     replayed,
   };
+  // Observations left out for being older than the Hub keeps. Counted in
+  // `duplicate` too: every Agent released so far takes a batch as delivered
+  // only when accepted + duplicate covers it, and anything else makes it send
+  // the batch again -- a Mac forever. `duplicate` therefore means "nothing
+  // more to send for these", and this says how many of them were not stored.
+  // Not kept for a replay, which reports them as duplicates only: keeping it
+  // would need a column, and a schema migration here stops collection while
+  // the database is copied.
+  if (!replayed && expiredCount > 0) ack.expired = expiredCount;
   // Internal route wiring needs to avoid feeding rejected rows into derived
   // connection tables. Keep this out of the public JSON ACK.
   Object.defineProperty(ack, 'acceptedObservationIds', {
@@ -227,9 +237,14 @@ function hasLocalEndpoint(observation) {
  * Asynchronous because it gives the event loop a turn between chunks; the work
  * itself is synchronous SQLite, so the chunk is what bounds the pause.
  */
-async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
+/**
+ * @param {object} envelope  the batch, without the observations left out as
+ *   expired; `expiredCount` says how many there were.
+ */
+async function storeBatch(agentId, envelope, { receivedAt = Date.now(), expiredCount = 0 } = {}) {
   const database = requireDb();
   if (!Number.isFinite(receivedAt)) throw new TypeError('receivedAt must be finite');
+  if (!Number.isSafeInteger(expiredCount) || expiredCount < 0) throw new TypeError('expiredCount must be a count');
 
   const existing = database.prepare(`
     SELECT batchId, acceptedCount, duplicateCount, rejectedCount, receivedAt
@@ -432,7 +447,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
         Date.parse(envelope.sentAt),
         receivedAt,
         acceptedCount,
-        duplicateCount
+        duplicateCount + expiredCount
       );
     }
 
@@ -470,10 +485,10 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
   return batchAck({
     batchId: envelope.batchId,
     acceptedCount,
-    duplicateCount,
+    duplicateCount: duplicateCount + expiredCount,
     rejectedCount,
     receivedAt,
-  }, false, acceptedObservationIds, completedCount, relocated, freshInboundProbes);
+  }, false, acceptedObservationIds, completedCount, relocated, freshInboundProbes, expiredCount);
 }
 
 // How much one call deletes: rows per transaction, and how long it may keep

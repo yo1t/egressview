@@ -476,6 +476,88 @@ describe('Agent HTTP ingest', () => {
       .prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
   });
 
+  it('1週間以上前の観測だけを除き、残りを受け取って配布済みAgentが次へ進める応答を返す', async () => {
+    const { app, audits } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const envelope = ingestEnvelope();
+    const old = structuredClone(envelope.observations[0]);
+    old.observationId = '00000000-0000-4000-8000-0000000000aa';
+    const oldTime = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    old.firstObservedAt = new Date(oldTime - 1000).toISOString();
+    old.lastObservedAt = new Date(oldTime).toISOString();
+    envelope.observations.push(old);
+
+    const response = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers: authorization });
+    assert.equal(response.status, 200);
+    // What every released Agent checks before it lets a batch go: nothing
+    // rejected, and accepted + duplicate covering the batch.
+    assert.equal(response.body.rejected, 0);
+    assert.equal(response.body.accepted, 1);
+    assert.equal(response.body.duplicate, 1);
+    assert.equal(response.body.expired, 1);
+    assert.equal(response.body.accepted + response.body.duplicate, envelope.observations.length);
+    const ids = agentIngestStore._dbForTest()
+      .prepare('SELECT observationId FROM agent_observations').all().map(row => row.observationId);
+    assert.deepEqual(ids, [envelope.observations[0].observationId]);
+    const expiredAudit = audits.find(event => event.metadata?.reason === 'observation_expired');
+    assert.equal(expiredAudit?.outcome, 'success');
+    assert.equal(expiredAudit.metadata.expiredCount, 1);
+
+    // Sent again (the reply was lost): the stored counts still cover it.
+    const replay = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers: authorization });
+    assert.equal(replay.status, 200);
+    assert.equal(replay.body.replayed, true);
+    assert.equal(replay.body.rejected, 0);
+    assert.equal(replay.body.accepted + replay.body.duplicate, envelope.observations.length);
+  });
+
+  it('全部が古い観測でも受け取り済みとして返し、バッチを完了として記録する', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    const oldTime = Date.now() - 9 * 24 * 60 * 60 * 1000;
+    envelope.observations[0].firstObservedAt = new Date(oldTime - 1000).toISOString();
+    envelope.observations[0].lastObservedAt = new Date(oldTime).toISOString();
+
+    const response = await request(app, 'POST', '/api/agent/ingest', {
+      body: envelope,
+      headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      [response.body.accepted, response.body.duplicate, response.body.rejected, response.body.expired],
+      [0, 1, 0, 1]
+    );
+    const db = agentIngestStore._dbForTest();
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
+    // Recorded complete, so a resend is answered as a replay and the Agent's
+    // details are updated as for any delivered batch.
+    assert.deepEqual(
+      db.prepare('SELECT acceptedCount, duplicateCount, rejectedCount FROM agent_ingest_batches').get(),
+      { acceptedCount: 0, duplicateCount: 1, rejectedCount: 0 }
+    );
+  });
+
+  it('送信時刻まで1週間以上前のバッチは、時計の狂いとして今までどおり422で断る', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    const oldTime = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    envelope.sentAt = new Date(oldTime).toISOString();
+    envelope.observations[0].firstObservedAt = new Date(oldTime - 1000).toISOString();
+    envelope.observations[0].lastObservedAt = new Date(oldTime).toISOString();
+
+    const response = await request(app, 'POST', '/api/agent/ingest', {
+      body: envelope,
+      headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    assert.equal(response.status, 422);
+    assert.deepEqual(response.body.rejected, [{ index: 0, reason: 'outside_retention' }]);
+    assert.equal(agentIngestStore._dbForTest()
+      .prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
+  });
+
   it('capabilityを返し、配布済みAgentの送信を変えない', async () => {
     const { app } = makeApp();
     const { enrolled } = await enrolledAgent(app);

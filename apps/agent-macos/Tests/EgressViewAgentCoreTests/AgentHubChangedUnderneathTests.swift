@@ -21,14 +21,22 @@ private actor ChangingHub: AgentIngestTransport {
     var versionRefusals: Int
     /// A remote port this Hub refuses whatever else is in the batch.
     var poisonPort: Int?
+    /// A remote port whose observations this Hub leaves out as older than it
+    /// keeps, answering as a Hub from 2026-11 does: counted as duplicates and
+    /// in `expired`.
+    var expiredPort: Int?
     private(set) var capabilityRequests = 0
     private(set) var ingestSizes: [Int] = []
 
-    init(capabilities: String, readsHostname: Bool, versionRefusals: Int = 0, poisonPort: Int? = nil) {
+    init(
+        capabilities: String, readsHostname: Bool, versionRefusals: Int = 0, poisonPort: Int? = nil,
+        expiredPort: Int? = nil
+    ) {
         self.capabilities = capabilities
         self.readsHostname = readsHostname
         self.versionRefusals = versionRefusals
         self.poisonPort = poisonPort
+        self.expiredPort = expiredPort
     }
 
     func rollBack(capabilities: String, readsHostname: Bool) {
@@ -56,8 +64,10 @@ private actor ChangingHub: AgentIngestTransport {
         if !readsHostname, observations.contains(where: { $0["remoteHostname"] != nil }) {
             return (Data(#"{"error":"Invalid request"}"#.utf8), Self.response(url, 400))
         }
+        let expired = observations.filter { expiredPort != nil && $0["remotePort"] as? Int == expiredPort }.count
         let ack = """
-        {"batchId":"\(json["batchId"] as? String ?? "")","accepted":\(observations.count),"duplicate":0,"rejected":0,"replayed":false}
+        {"batchId":"\(json["batchId"] as? String ?? "")","accepted":\(observations.count - expired),\
+        "duplicate":\(expired),"rejected":0,"expired":\(expired),"replayed":false}
         """
         return (Data(ack.utf8), Self.response(url, 200))
     }
@@ -125,6 +135,23 @@ final class AgentHubChangedUnderneathTests: XCTestCase {
         try await waitUntil(seconds: 10) { queue.status().pendingCount == 0 }
 
         XCTAssertEqual(queue.status().abandonedCount, 1)
+    }
+
+    /// A Hub that leaves out observations older than it keeps counts them as
+    /// duplicates, so an Agent that has never heard of `expired` lets the
+    /// batch go instead of resending it.
+    func test古い記録を除いたHubの応答で送信済みにして次へ進む() async throws {
+        let hub = ChangingHub(capabilities: newHub, readsHostname: true, expiredPort: 11)
+        let (sender, queue) = try make(hub)
+        try queue.enqueue((10..<14).map { observation(port: UInt16($0)) })
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        try await waitUntil(seconds: 10) { queue.status().pendingCount == 0 }
+
+        let sizes = await hub.ingestSizes
+        XCTAssertEqual(sizes, [4], "同じバッチを送り直した: \(sizes)")
+        XCTAssertEqual(queue.status().splitCount, 0)
+        XCTAssertEqual(queue.status().abandonedCount, 0)
     }
 
     func test版の拒否は本文で見分ける() {

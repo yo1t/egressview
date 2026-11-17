@@ -9,7 +9,7 @@ const {
   AGENT_INGEST_OPTIONAL_OBSERVATION_FIELDS,
   agentIngestEnvelopeSchema,
   agentObservationSchema,
-  validateAgentObservationWindow,
+  screenAgentObservationWindow,
 } = require('../../src/agent-ingest-schema');
 
 const fixturePath = path.join(__dirname, '../../protocol/agent-ingest/v1/golden.json');
@@ -98,21 +98,37 @@ describe('agent ingest v1 schema', () => {
     assert.equal(agentIngestEnvelopeSchema.safeParse(oversized).success, false);
   });
 
-  it('reports observations outside retention or too far in the future', () => {
+  it('未来の時刻は拒否し、保持期間より古い観測は除く', () => {
     const parsed = agentIngestEnvelopeSchema.parse(copy());
-    assert.deepEqual(validateAgentObservationWindow(parsed, {
+    const week = 7 * 24 * 60 * 60 * 1000;
+    assert.deepEqual(screenAgentObservationWindow(parsed, {
       now: Date.parse('2026-08-11T12:00:00Z'),
-    }), []);
+    }), { rejected: [], expired: [] });
 
-    assert.deepEqual(validateAgentObservationWindow(parsed, {
-      now: Date.parse('2026-08-20T12:00:00Z'),
-      retentionMs: 7 * 24 * 60 * 60 * 1000,
-    }), [{ index: 0, reason: 'outside_retention' }]);
-
-    assert.deepEqual(validateAgentObservationWindow(parsed, {
+    assert.deepEqual(screenAgentObservationWindow(parsed, {
       now: Date.parse('2026-08-09T12:00:00Z'),
       maxFutureMs: 24 * 60 * 60 * 1000,
-    }), [{ index: 0, reason: 'future_timestamp' }]);
+    }), { rejected: [{ index: 0, reason: 'future_timestamp' }], expired: [] });
+
+    // Sent now, after a week away: the old observation is left out and the
+    // batch goes through.
+    const late = copy();
+    late.sentAt = '2026-08-20T12:00:00Z';
+    assert.deepEqual(screenAgentObservationWindow(agentIngestEnvelopeSchema.parse(late), {
+      now: Date.parse('2026-08-20T12:00:00Z'),
+      retentionMs: week,
+    }), { rejected: [], expired: [0] });
+  });
+
+  it('送信時刻まで保持期間より古いバッチは、時計の狂いとして拒否する', () => {
+    // The golden batch says it was sent on 08-11; the Hub thinks it is
+    // 08-20. Leaving its observations out would lose everything this Agent
+    // sends without a word, so the batch is refused as before.
+    const parsed = agentIngestEnvelopeSchema.parse(copy());
+    assert.deepEqual(screenAgentObservationWindow(parsed, {
+      now: Date.parse('2026-08-20T12:00:00Z'),
+      retentionMs: 7 * 24 * 60 * 60 * 1000,
+    }), { rejected: [{ index: 0, reason: 'outside_retention' }], expired: [] });
   });
 });
 

@@ -202,7 +202,7 @@ All 101 implemented HTTP endpoints are listed below. **Public** means no browser
 | Agent | `POST /api/agents/:agentId/revoke` | Protected; `auth.admin` |
 | Agent | `POST /api/agent/token/rotate` | Agent bearer; `agent.ingest` only |
 | Agent | `POST /api/agent/registration/revoke` | Agent bearer; revokes only the authenticated Agent |
-| Agent | `POST /api/agent/ingest` | Agent bearer; `agent.ingest`, max 200 observations and 512 KiB uncompressed JSON |
+| Agent | `POST /api/agent/ingest` | Agent bearer; `agent.ingest`, max 200 observations and 512 KiB uncompressed JSON. Observations last seen more than 7 days ago are left out and the rest stored; the reply counts them in `duplicate` (nothing more to send) and in `expired` (not stored). A batch whose `sentAt` is itself that old is refused with `422` as a clock error, as is any observation in the future |
 | Agent | `GET /api/agent/capabilities` | Agent bearer; accepted schema versions and batch limits, so an agent can pick a version both sides speak |
 | Agent | `GET /api/agent/geo-cache` | Agent bearer; the whole location cache, so an agent can place its own destinations on a map without telling the Hub which ones it cares about. `ETag`/`304` supported |
 | Agent | `GET /api/agent/threat-intel` | Agent bearer; every threat indicator, so an agent can match its own destinations locally without telling anyone which ones it is asking about. `available: false` when the Hub runs without feeds, which an agent must not read as "no threats found". `ETag`/`304` supported |

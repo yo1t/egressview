@@ -2682,6 +2682,22 @@ try
             "the same durable batch can be accepted after the Hub contract is fixed");
         Assert(handler.BatchIds.Distinct().Count() == 1, "a rejected ACK preserves the idempotent batch ID");
     }
+    // A Hub that leaves out an observation older than it keeps counts it as a
+    // duplicate. An Agent that has never heard of `expired` must take that as
+    // delivered, not resend or halve the batch.
+    using (var expiredStore = new ObservationStore(Path.Combine(directory, "sender-expired.db")))
+    {
+        expiredStore.QueueForDelivery([new NetworkObservation(deliveryStarted, 90, "TCP", "192.0.2.10", 53002,
+            "203.0.113.11", 443, 12, 8, ObservationLayer.Logical, "if", "etw", "Browser")], deliveryStarted);
+        var handler = new DeliveryHandler(200) { ExpiredAcknowledgements = 1 };
+        var sender = new DeliverySender(new HttpClient(handler));
+        var credential = new AgentCredential(new Uri("https://hub.example/"), agentId, agentToken, deliveryStarted);
+        var metadata = new DeliveryMetadata("host", "windows", "Windows", "dev");
+        Assert((await sender.SendNextAsync(expiredStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged,
+            "an observation the Hub left out for age is acknowledged as delivered");
+        Assert(expiredStore.ReadDeliveryStatus().Pending == 0 && handler.IngestRequests == 1,
+            "the batch is not resent after the Hub left an old observation out");
+    }
 
     // A refusal that halved the batch must not be answered with a longer wait.
     //
@@ -5482,6 +5498,10 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
     public HttpStatusCode CapabilitiesStatus { get; set; } = HttpStatusCode.NotFound;
     public string CapabilitiesJson { get; set; } = "{}";
     public int RejectedAcknowledgements { get; set; }
+    /// Answers the next N ingests as a Hub from 2026-11 does when it leaves an
+    /// observation out for being older than it keeps: one counted as a
+    /// duplicate and in `expired`.
+    public int ExpiredAcknowledgements { get; set; }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -5513,8 +5533,10 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
         if (status == 429) response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));
         var rejected = status == 200 && RejectedAcknowledgements > 0 ? 1 : 0;
         if (rejected > 0) RejectedAcknowledgements -= 1;
+        var expired = status == 200 && rejected == 0 && ExpiredAcknowledgements > 0 ? 1 : 0;
+        if (expired > 0) ExpiredAcknowledgements -= 1;
         response.Content = new StringContent(status == 200
-            ? $"{{\"batchId\":\"{batchId}\",\"accepted\":{observations.GetArrayLength() - rejected},\"duplicate\":0,\"rejected\":{rejected},\"replayed\":false}}"
+            ? $"{{\"batchId\":\"{batchId}\",\"accepted\":{observations.GetArrayLength() - rejected - expired},\"duplicate\":{expired},\"rejected\":{rejected},\"expired\":{expired},\"replayed\":false}}"
             : "{}", Encoding.UTF8, "application/json");
         return response;
     }

@@ -258,6 +258,8 @@ function createRegistry() {
     accepted: z.number(),
     duplicate: z.number(),
     rejected: z.number(),
+    // Left out for being older than the Hub keeps; also counted in duplicate.
+    expired: z.number().optional(),
     receivedAt: z.number(),
     replayed: z.boolean(),
     requestId: z.string().optional(),
