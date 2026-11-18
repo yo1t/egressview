@@ -962,6 +962,9 @@
                     "rejected": {
                       "type": "number"
                     },
+                    "expired": {
+                      "type": "number"
+                    },
                     "receivedAt": {
                       "type": "number"
                     },
@@ -2390,6 +2393,9 @@
                     "rejected": {
                       "type": "integer"
                     },
+                    "expired": {
+                      "type": "integer"
+                    },
                     "failures": {
                       "type": "integer"
                     },
@@ -2444,6 +2450,7 @@
                     "accepted",
                     "duplicate",
                     "eventLoopDelayMs",
+                    "expired",
                     "failures",
                     "inFlight",
                     "lastDurationMs",

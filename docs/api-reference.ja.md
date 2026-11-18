@@ -202,7 +202,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `POST /api/agents/:agentId/revoke` | `auth.admin`必須 |
 | Agent | `POST /api/agent/token/rotate` | Agent bearerの`agent.ingest`だけ |
 | Agent | `POST /api/agent/registration/revoke` | Agent bearer。認証されたAgent自身だけを失効 |
-| Agent | `POST /api/agent/ingest` | Agent bearerの`agent.ingest`。最大200観測・非圧縮JSON 512 KiB |
+| Agent | `POST /api/agent/ingest` | Agent bearerの`agent.ingest`。最大200観測・非圧縮JSON 512 KiB。最後に見えたのが7日より前の観測は除いて残りを保存し、応答では`duplicate`（もう送らなくてよい）と`expired`（保存しなかった）に数える。`sentAt`そのものが7日より前のバッチと、未来の時刻の観測は、時計の狂いとして`422`で断る |
 | Agent | `GET /api/agent/capabilities` | Agent bearerの`agent.ingest`。受理するschema versionとbatch上限を返し、Agentが双方の話せるversionを選べるようにする |
 | Agent | `GET /api/agent/geo-cache` | Agent bearerの`agent.ingest`。位置キャッシュを全件返す。**Agentは宛先を送らない** — 絞り込みは「どの宛先に関心があるか」を伝えることになるため。`ETag`/`304`に対応 |
 | Agent | `GET /api/agent/threat-intel` | Agent bearerの`agent.ingest`。脅威指標を全件返す。**Agentは宛先を送らない** — 「危ないか」を尋ねるために宛先を送ると、何を気にしているかを相手に伝えることになるため。フィード未設定のHubでは`available: false`を返し、Agentはこれを**「脅威が無い」と読んではならない**。`ETag`/`304`に対応 |

@@ -116,7 +116,26 @@ const agentIngestEnvelopeSchema = z.object({
   inboundProbes: z.array(agentInboundProbeSchema).max(AGENT_INGEST_MAX_INBOUND_PROBES).optional(),
 }).strict();
 
-function validateAgentObservationWindow(envelope, {
+/**
+ * Sorts a batch's observations by when they were seen, against the Hub's
+ * clock.
+ *
+ * `rejected` refuses the batch (422): an observation stamped in the future, or
+ * one older than the Hub keeps from a batch whose own `sentAt` is that old too
+ * -- the Agent's clock is wrong, and saying nothing would lose every
+ * observation it sends without anyone noticing.
+ *
+ * `expired` lists observations last seen before the Hub's retention in a batch
+ * sent recently: a computer that was off or offline for more than a week and
+ * is sending what it saw before. They used to refuse the whole batch, and an
+ * Agent older than Mac 0.5.142 or Windows 0.1.166 has no way out of that: it
+ * splits the batch and resends until each old observation is given up on one
+ * by one, while the new ones behind them wait. On the production Hub on
+ * 2026-11-14 one Windows Agent sent 86 batches in seven hours and none
+ * arrived. The Hub would delete them within the day anyway, so they are left
+ * out and the rest is stored.
+ */
+function screenAgentObservationWindow(envelope, {
   now = Date.now(),
   retentionMs = AGENT_INGEST_DEFAULT_RETENTION_MS,
   maxFutureMs = AGENT_INGEST_MAX_FUTURE_MS,
@@ -128,14 +147,20 @@ function validateAgentObservationWindow(envelope, {
 
   const oldestAllowed = now - retentionMs;
   const newestAllowed = now + maxFutureMs;
+  const clockBehind = Date.parse(envelope.sentAt) < oldestAllowed;
   const rejected = [];
+  const expired = [];
   envelope.observations.forEach((observation, index) => {
     const first = Date.parse(observation.firstObservedAt);
     const last = Date.parse(observation.lastObservedAt);
-    if (last < oldestAllowed) rejected.push({ index, reason: 'outside_retention' });
-    if (first > newestAllowed || last > newestAllowed) rejected.push({ index, reason: 'future_timestamp' });
+    if (first > newestAllowed || last > newestAllowed) {
+      rejected.push({ index, reason: 'future_timestamp' });
+    } else if (last < oldestAllowed) {
+      if (clockBehind) rejected.push({ index, reason: 'outside_retention' });
+      else expired.push(index);
+    }
   });
-  return rejected;
+  return { rejected, expired };
 }
 
 module.exports = {
@@ -151,5 +176,5 @@ module.exports = {
   agentIngestEnvelopeSchema,
   agentInboundProbeSchema,
   AGENT_INGEST_MAX_INBOUND_PROBES,
-  validateAgentObservationWindow,
+  screenAgentObservationWindow,
 };
