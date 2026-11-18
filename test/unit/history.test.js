@@ -1365,6 +1365,29 @@ describe('snapshotHistory', () => {
     assert.equal(await history.snapshotHistoryInSlices({ yieldToLoop: async () => {} }), 0);
   });
 
+  it('分けて書くsnapshotは、合間に別の場所へ移された行を書き戻さない', async () => {
+    // Production, 2026-11-15 15:53 UTC: an agent's closing report moved a row
+    // off 0.0.0.0 while a snapshot was between slices. The snapshot had already
+    // picked the placeholder and wrote it back, so the row stayed with nothing
+    // behind it and the next start's consistency check counted it as missing.
+    const now = Date.now();
+    for (let i = 0; i < 3; i += 1) cache(`10.5.7.${i}`, now);
+    const move = { fromSrc: '0.0.0.0', toSrc: '192.168.5.7', toSport: 64533, dst: '10.5.7.99', dport: 443, proto: 'udp', agentHost: 'mac-1' };
+    history.cacheConnection(`0.0.0.0|${move.dst}|443|udp`, {
+      src: '0.0.0.0', dst: move.dst, dport: 443, proto: 'udp', firstSeen: now, lastSeen: now, agentHost: 'mac-1',
+    });
+    let yields = 0;
+    await history.snapshotHistoryInSlices({
+      sliceRows: 3,
+      yieldToLoop: async () => {
+        yields += 1;
+        if (yields === 1) assert.ok(history.relocateAgentPlaceholder(move), '合間に移動が起きる');
+      },
+    });
+    const rows = history.queryByTimeRange(null, null).filter(row => row.dst === move.dst);
+    assert.deepEqual(rows.map(row => row.src), ['192.168.5.7'], '移した先の行だけが残る');
+  });
+
   it('分けて書くsnapshotは、遅かった小分けの後は行数を半分にし、下限で止める', async () => {
     // 2026-10-15 to 10-17: 250 rows took 400-800 ms while the nightly backup or
     // the integrity check was reading the disk.

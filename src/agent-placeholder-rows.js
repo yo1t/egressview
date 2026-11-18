@@ -40,9 +40,15 @@ function hasTable(db, name) {
 }
 
 /**
- * @param {{ getDb: () => import('better-sqlite3').Database|null, cache: Map<string, object> }} options
+ * @param {{
+ *   getDb: () => import('better-sqlite3').Database|null,
+ *   cache: Map<string, object>,
+ *   onRetire?: (entry: object) => void,
+ * }} options
+ *   onRetire is told about a cached placeholder the move removed, so a
+ *   snapshot that picked it before the move does not write it back.
  */
-function createAgentPlaceholderRows({ getDb, cache }) {
+function createAgentPlaceholderRows({ getDb, cache, onRetire = null }) {
   /**
    * Moves the row for `fromSrc` to `toSrc`. Returns what happened, or null when
    * there was nothing to do.
@@ -133,7 +139,10 @@ function createAgentPlaceholderRows({ getDb, cache }) {
         lastSeen: outcome.lastSeen,
       });
     }
-    if (outcome.placeholderRemoved) cache.delete(fromKey);
+    if (outcome.placeholderRemoved) {
+      cache.delete(fromKey);
+      if (cachedFrom && typeof onRetire === 'function') onRetire(cachedFrom);
+    }
     return outcome;
   }
 
