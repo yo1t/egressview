@@ -64,7 +64,16 @@ let routerKinds = new Map();
 const hotCache = createHistoryCache(process.env.EGRESSVIEW_HISTORY_HOT_MAX);
 const connectionHistory = hotCache.map;
 const { createAgentPlaceholderRows } = require('./agent-placeholder-rows');
-const agentPlaceholderRows = createAgentPlaceholderRows({ getDb: () => db, cache: connectionHistory });
+// Cache entries a move took off a wildcard source. The sliced snapshot picks
+// its entries before it starts and yields between slices; an agent upload in
+// that gap can delete the placeholder, and without this the next slice wrote
+// it back (production, 2026-11-15).
+const retiredEntries = new WeakSet();
+const agentPlaceholderRows = createAgentPlaceholderRows({
+  getDb: () => db,
+  cache: connectionHistory,
+  onRetire: entry => retiredEntries.add(entry),
+});
 
 // The source tag for a flow an endpoint agent reported. Kept apart from the
 // router source values because an agent observation carries a process name and
@@ -602,9 +611,10 @@ async function snapshotHistoryInSlices({
     // database is open next, which reloads the cache from its own rows.
     if (!db) break;
     const slice = pending.slice(offset, offset + rows);
-    const started = clock();
-    written += measure(() => appendHistoryLogs(slice));
     offset += slice.length;
+    const live = slice.filter(entry => !retiredEntries.has(entry));
+    const started = clock();
+    written += measure(() => appendHistoryLogs(live));
     // The disk is busy with something else: hold the thread for less at a time.
     if (clock() - started > slowSliceMs) rows = Math.max(minSliceRows, Math.floor(rows / 2));
     if (offset < pending.length) await yieldToLoop();

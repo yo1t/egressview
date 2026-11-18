@@ -10,7 +10,7 @@ const COLUMNS = `src TEXT, dst TEXT, dport INTEGER, proto TEXT, sport INTEGER, t
   org TEXT, lat REAL, lon REAL, city TEXT, firstSeen INTEGER, lastSeen INTEGER,
   agentHost TEXT, process TEXT, pid INTEGER`;
 
-function fixture() {
+function fixture({ onRetire } = {}) {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE connections (${COLUMNS}, PRIMARY KEY (src, dst, dport, proto));
@@ -26,7 +26,7 @@ function fixture() {
     INSERT INTO agents VALUES ('agent-a', 'mac-1');
   `);
   const cache = new Map();
-  const rows = createAgentPlaceholderRows({ getDb: () => db, cache });
+  const rows = createAgentPlaceholderRows({ getDb: () => db, cache, onRetire });
   const addRow = (src, dst, dport, proto, firstSeen, lastSeen, extra = {}) => {
     db.prepare(`INSERT INTO connections (src, dst, dport, proto, firstSeen, lastSeen, agentHost, process, dstHost)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(src, dst, dport, proto, firstSeen, lastSeen,
@@ -85,6 +85,24 @@ describe('agent placeholder rows (P3-185)', () => {
     assert.ok(row('0.0.0.0', '224.0.0.251', 5353, 'udp'));
     assert.ok(row('192.0.2.34', '224.0.0.251', 5353, 'udp'));
     assert.ok(cache.has('0.0.0.0|224.0.0.251|5353|udp'));
+  });
+
+  // A snapshot between slices still holds the entry it picked; the move has
+  // to say which one it removed (production, 2026-11-15).
+  it('0.0.0.0の行を消したときだけ、消したキャッシュの項目を知らせる', () => {
+    const retired = [];
+    const { db, cache, rows, addRow } = fixture({ onRetire: entry => retired.push(entry) });
+    addRow('0.0.0.0', '192.0.2.36', 5353, 'udp', 1000, 2000);
+    const picked = cache.get('0.0.0.0|192.0.2.36|5353|udp');
+    rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.34', dst: '192.0.2.36', dport: 5353, proto: 'udp', agentHost: 'mac-1' });
+    assert.equal(retired.length, 1);
+    assert.equal(retired[0], picked, 'snapshotが選んだのと同じ項目');
+
+    addRow('0.0.0.0', '224.0.0.251', 5353, 'udp', 1000, 2000);
+    db.prepare('INSERT INTO agent_observations VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run('agent-a', 'obs-2', '0.0.0.0', 5353, '224.0.0.251', 5353, 'udp', 2000);
+    rows.relocate({ fromSrc: '0.0.0.0', toSrc: '192.0.2.34', dst: '224.0.0.251', dport: 5353, proto: 'udp', agentHost: 'mac-1' });
+    assert.equal(retired.length, 1, '残した行は知らせない');
   });
 
   // P2-102: any enrolled agent can report any address, but only the agent
