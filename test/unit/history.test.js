@@ -1384,6 +1384,45 @@ describe('snapshotHistory', () => {
     assert.deepEqual(slices, [16, 8, 4, 4, 4, 4], '遅い間は16→8→4、下限4のまま速くなっても増やさない');
   });
 
+  // P3-185: on 2026-11-16 a Mac's closing report moved a 0.0.0.0 row while a
+  // 7.1 s snapshot was being written, and a later slice wrote the row back.
+  it('分けて書くsnapshotは、書いている間に本当のアドレスへ移った0.0.0.0の行を書き戻さない', async () => {
+    const now = Date.now();
+    cache('10.5.7.1', now);
+    const placeholder = {
+      src: '0.0.0.0', dst: '203.0.113.71', dport: 443, proto: 'udp', sport: 64533,
+      firstSeen: now, lastSeen: now, agentHost: 'mac-1', process: 'vmnet-natd',
+      // An agent flow: no router saw it, so no router observation is written.
+      source: 'agent', observedBy: [],
+    };
+    history.appendHistoryLogs([placeholder]);
+    history.cacheConnection('0.0.0.0|203.0.113.71|443|udp', { ...placeholder });
+
+    let moved = null;
+    const written = await history.snapshotHistoryInSlices({
+      sliceRows: 1,
+      yieldToLoop: async () => {
+        if (moved) return;
+        moved = history.relocateAgentPlaceholder({
+          fromSrc: '0.0.0.0', toSrc: '192.168.5.2', toSport: 64533,
+          dst: '203.0.113.71', dport: 443, proto: 'udp', agentHost: 'mac-1',
+        });
+      },
+    });
+    assert.equal(moved?.placeholderRemoved, true, '書いている途中で移った');
+    assert.equal(written, 1, '移った行は書かない');
+    const rows = history.queryByTimeRange(null, null).filter(row => row.dst === '203.0.113.71');
+    assert.deepEqual(rows.map(row => row.src), ['192.168.5.2'], '0.0.0.0の行は戻らない');
+
+    // The same flow seen again under the wildcard is an ordinary row again.
+    const later = now + 1000;
+    history.cacheConnection('0.0.0.0|203.0.113.71|443|udp', { ...placeholder, lastSeen: later });
+    assert.equal(await history.snapshotHistoryInSlices({ yieldToLoop: async () => {} }) >= 1, true);
+    assert.deepEqual(
+      history.queryByTimeRange(null, null).filter(row => row.dst === '203.0.113.71').map(row => row.src).sort(),
+      ['0.0.0.0', '192.168.5.2'], 'また見えた0.0.0.0の行は書く');
+  });
+
   it('起動直後のsnapshotは、DBから読んだ分を書き戻さない', () => {
     // loadIntoMemory marks everything as already persisted; without that the
     // first snapshot after startup rewrites the whole cache for nothing.

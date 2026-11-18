@@ -601,10 +601,12 @@ async function snapshotHistoryInSlices({
     // Closed or restored while this was waiting: the rest belongs to whatever
     // database is open next, which reloads the cache from its own rows.
     if (!db) break;
-    const slice = pending.slice(offset, offset + rows);
+    const chosen = pending.slice(offset, offset + rows);
+    offset += chosen.length;
+    const slice = chosen.filter(entry => !removedSince(entry, startedAt));
+    if (!slice.length) continue;
     const started = clock();
     written += measure(() => appendHistoryLogs(slice));
-    offset += slice.length;
     // The disk is busy with something else: hold the thread for less at a time.
     if (clock() - started > slowSliceMs) rows = Math.max(minSliceRows, Math.floor(rows / 2));
     if (offset < pending.length) await yieldToLoop();
@@ -650,8 +652,32 @@ function pruneHistory() {
 
 function getConnectionHistory() { return connectionHistory; }
 
+// Rows a move off a wildcard source deleted, by cache key, with when. The
+// sliced snapshot chooses its rows before it writes them, so a row moved while
+// it was writing would otherwise be written back: on 2026-11-16 one Mac's
+// VMware NAT flow was moved during a 7.1 s snapshot and its 0.0.0.0 row came
+// back, which the startup consistency check then reported as missing an
+// observation (P3-185).
+const removedPlaceholderKeys = new Map();
+const REMOVED_PLACEHOLDER_KEEP_MS = 60 * 60 * 1000;
+
 function relocateAgentPlaceholder(move) {
-  return agentPlaceholderRows.relocate(move);
+  const outcome = agentPlaceholderRows.relocate(move);
+  if (outcome?.placeholderRemoved) {
+    const now = Date.now();
+    for (const [key, at] of removedPlaceholderKeys) {
+      if (now - at > REMOVED_PLACEHOLDER_KEEP_MS) removedPlaceholderKeys.delete(key);
+    }
+    removedPlaceholderKeys.set(`${move.fromSrc}|${move.dst}|${move.dport}|${move.proto}`, now);
+  }
+  return outcome;
+}
+
+// Whether a row chosen for a snapshot that began at `startedAt` was deleted by
+// a move since, and has not been seen again.
+function removedSince(entry, startedAt) {
+  const key = `${entry.src}|${entry.dst}|${entry.dport}|${entry.proto}`;
+  return removedPlaceholderKeys.get(key) >= startedAt && !connectionHistory.has(key);
 }
 
 function cacheConnection(key, entry) {
