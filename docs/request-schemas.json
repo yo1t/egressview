@@ -2539,6 +2539,9 @@
           "rejected": {
             "type": "integer"
           },
+          "expired": {
+            "type": "integer"
+          },
           "failures": {
             "type": "integer"
           },
@@ -2593,6 +2596,7 @@
           "accepted",
           "duplicate",
           "eventLoopDelayMs",
+          "expired",
           "failures",
           "inFlight",
           "lastDurationMs",
@@ -5173,7 +5177,10 @@
           "replayed": {
             "type": "boolean"
           },
-          "requestId": {}
+          "requestId": {},
+          "expired": {
+            "type": "integer"
+          }
         },
         "required": [
           "accepted",

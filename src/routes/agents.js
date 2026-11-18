@@ -22,7 +22,7 @@ eventLoopDelay.unref?.();
 const {
   agentMetadataSchema,
   agentIngestEnvelopeSchema,
-  validateAgentObservationWindow,
+  screenAgentObservationWindow,
   AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS,
   AGENT_INGEST_MAX_OBSERVATIONS,
   AGENT_INGEST_OPTIONAL_OBSERVATION_FIELDS,
@@ -137,6 +137,7 @@ module.exports = function agentRoutes({
     accepted: 0,
     duplicate: 0,
     rejected: 0,
+    expired: 0,
     failures: 0,
     rateLimited: 0,
     maxInFlight: 0,
@@ -861,7 +862,7 @@ module.exports = function agentRoutes({
       audit(req, 'agent_ingest', 'failure', { reason: 'invalid_request' });
       return;
     }
-    const rejected = validateAgentObservationWindow(parsed.data, { now: startedAt });
+    const { rejected, expired } = screenAgentObservationWindow(parsed.data, { now: startedAt });
     if (rejected.length > 0) {
       ingestMetrics.rejected += rejected.length;
       audit(req, 'agent_ingest', 'failure', {
@@ -874,6 +875,12 @@ module.exports = function agentRoutes({
         requestId: req.id,
       });
     }
+    // What is stored: the batch without the observations too old to keep.
+    const left = new Set(expired);
+    const envelope = left.size === 0 ? parsed.data : {
+      ...parsed.data,
+      observations: parsed.data.observations.filter((_observation, index) => !left.has(index)),
+    };
     if (!agentIngest) {
       ingestMetrics.failures += 1;
       audit(req, 'agent_ingest', 'failure', { reason: 'storage_unavailable' });
@@ -894,15 +901,16 @@ module.exports = function agentRoutes({
       const storeStartedAt = Date.now();
       const ack = await agentIngest.storeBatch(
         req.agentIdentity.agentId,
-        parsed.data,
-        { receivedAt: startedAt }
+        envelope,
+        { receivedAt: startedAt, expiredCount: expired.length }
       );
       runtimeProfiler.recordWall('agentIngest.store', Date.now() - storeStartedAt);
       if (ack.replayed) {
         ingestMetrics.duplicate += parsed.data.observations.length;
       } else {
         ingestMetrics.accepted += ack.accepted;
-        ingestMetrics.duplicate += ack.duplicate;
+        ingestMetrics.duplicate += ack.duplicate - (ack.expired || 0);
+        ingestMetrics.expired += ack.expired || 0;
         ingestMetrics.rejected += ack.rejected;
         if (ack.rejected > 0) ingestMetrics.failures += 1;
         // Storing the observation is not enough. Threat matching, destination
@@ -912,14 +920,14 @@ module.exports = function agentRoutes({
         // screen, from a flow that was checked and found safe.
         const acceptedIds = new Set(ack.acceptedObservationIds || (
           ack.rejected === 0 && ack.duplicate === 0
-            && ack.accepted === parsed.data.observations.length
-            ? parsed.data.observations.map(item => item.observationId)
+            && ack.accepted === envelope.observations.length
+            ? envelope.observations.map(item => item.observationId)
             : []
         ));
         if (acceptedIds.size > 0) {
           runtimeProfiler.measureSync('agentIngest.recordFlows', () => recordAgentFlows({
-            ...parsed.data,
-            observations: parsed.data.observations.filter(observation => (
+            ...envelope,
+            observations: envelope.observations.filter(observation => (
               acceptedIds.has(observation.observationId)
             )),
           }));
@@ -948,7 +956,10 @@ module.exports = function agentRoutes({
           }
         }
       }
-      if (ack.rejected === 0 && ingestAuditSummary) {
+      // Observations left out for age are written on their own, unlike a
+      // routine upload: they are what an operator looks for when a computer
+      // that was away for a week seems to have sent nothing.
+      if (ack.rejected === 0 && !ack.expired && ingestAuditSummary) {
         // A routine upload that went through. Counted into the agent's hour
         // rather than written on its own: at 24,000-34,000 a day these were
         // over 90% of the audit trail and said nothing a count does not.
@@ -968,11 +979,12 @@ module.exports = function agentRoutes({
         return res.json({ ...ack, requestId: req.id });
       }
       audit(req, 'agent_ingest', ack.rejected > 0 ? 'failure' : 'success', {
-        reason: ack.rejected > 0 ? 'observation_rejected' : undefined,
+        reason: ack.rejected > 0 ? 'observation_rejected' : (ack.expired ? 'observation_expired' : undefined),
         batchRef: agentIdentities.auditRef(parsed.data.batchId),
         observationCount: parsed.data.observations.length,
         acceptedCount: ack.accepted,
         duplicateCount: ack.duplicate,
+        expiredCount: ack.expired || 0,
         rejectedCount: ack.rejected,
         replayed: ack.replayed,
         durationMs: Date.now() - startedAt,
