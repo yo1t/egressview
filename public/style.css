@@ -1112,6 +1112,15 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr); gap: 8px;
   }
   .stats-charts.is-hidden { display: none; }
+  /* Wider than a phone, the view fits the window. On a short window (a phone
+     held sideways, a tablet) the maps keep their 300px and the charts used to
+     shrink to whatever was left -- a title and nothing else, with no way to
+     scroll to them. Give the charts a floor and let the view scroll instead.
+     A tall window still fills the charts to the bottom, with no scrollbar. */
+  @media (min-width: 769px) {
+    #stats-container { overflow-y: auto; }
+    .stats-charts { min-height: 260px; }
+  }
   .stats-charts .stats-chart { flex: none; height: 100%; min-height: 0; }
 
   .graph-tooltip {
