@@ -3,7 +3,7 @@
 // destination bar chart. Owns the stack/line chart-mode toggle state.
 import { t } from './i18n.js?v=__ASSET_VERSION__';
 import { _buildAppSlices } from './utils.js?v=__ASSET_VERSION__';
-import { truncateLabel, chartInnerWidth } from './stats-helpers.js?v=__ASSET_VERSION__';
+import { truncateLabel, chartInnerWidth, barLabelLayout } from './stats-helpers.js?v=__ASSET_VERSION__';
 
 const STATS_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#a78bfa'];
 
@@ -401,9 +401,8 @@ export function drawBarChart(orgs /* [[name, count], ...] */, selectableTargets 
   svg.attr('viewBox', `0 0 ${w} ${h}`)
      .attr('width', w).attr('height', h);
   svg.selectAll('*').remove();
-  // Make the label area narrower on mobile
-  const leftMargin = isMobile ? 110 : 180;
-  const labelMax   = isMobile ? 14  : 32;
+  // The label column follows the chart's own width, not the window's.
+  const { left: leftMargin, labelMax } = barLabelLayout(w, isMobile);
   const margin = { top: 4, right: 40, bottom: 6, left: leftMargin };
   const iw = chartInnerWidth(w, margin);
   const ih = h - margin.top - margin.bottom;
