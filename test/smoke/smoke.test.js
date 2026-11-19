@@ -1686,6 +1686,50 @@ test('stats tab renders map canvas', async ({ page }) => {
   await expect(page.locator('#st-flat-controls .fmc-btn')).toHaveCount(7);
 });
 
+test('stats tab scrolls to its charts on a short wide window and fills a tall one', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  // A phone held sideways or a tablet is wider than 768px, so it gets the
+  // desktop layout; the charts under the maps used to shrink to a title with
+  // no way to scroll to them.
+  await page.setViewportSize({ width: 915, height: 580 });
+  await authPage(page);
+  await page.click('#btn-stats');
+  await expect(page.locator('#stats-container')).toBeVisible();
+  const measure = () => page.evaluate(() => {
+    const view = document.getElementById('stats-container');
+    const charts = document.querySelector('.stats-charts');
+    return {
+      chartsHeight: Math.round(charts.getBoundingClientRect().height),
+      scrollable: view.scrollHeight - view.clientHeight,
+      sideways: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+
+  for (const [width, height] of [[915, 580], [780, 400]]) {
+    await page.setViewportSize({ width, height });
+    const m = await measure();
+    expect(m.chartsHeight, `${width}x${height} charts`).toBeGreaterThanOrEqual(260);
+    expect(m.scrollable, `${width}x${height} scroll`).toBeGreaterThan(0);
+    expect(m.sideways, `${width}x${height} sideways`).toBeLessThanOrEqual(0);
+    await page.evaluate(() => {
+      const view = document.getElementById('stats-container');
+      view.scrollTop = view.scrollHeight;
+    });
+    const bottom = await page.evaluate(() => {
+      const charts = document.querySelector('.stats-charts').getBoundingClientRect();
+      return Math.round(charts.bottom - window.innerHeight);
+    });
+    expect(bottom, `${width}x${height} charts reachable`).toBeLessThanOrEqual(0);
+  }
+
+  // A tall window keeps the old look: the charts fill the rest, no scrollbar.
+  await page.setViewportSize({ width: 1500, height: 900 });
+  const tall = await measure();
+  expect(tall.scrollable, '1500x900 scroll').toBeLessThanOrEqual(0);
+  expect(tall.chartsHeight, '1500x900 charts').toBeGreaterThan(260);
+});
+
 test('stats tab renders map coverage label and chart svgs without console errors', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
