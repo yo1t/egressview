@@ -66,3 +66,19 @@ export function truncateLabel(s, maxLen) {
 export function chartInnerWidth(width, margin) {
   return Math.max(1, width - margin.left - margin.right);
 }
+
+// The bar chart's label column. It used to be a fixed 180px (110px on a
+// phone), chosen by the window's width; in a narrow chart cell beside the
+// device list that left no room for the bars at all. The column now takes at
+// most 40% of the chart. Names are cut to what fits in it: a monospace
+// character is about 0.6em wide, and the axis draws its text about 9px left
+// of the bars. The old 32 characters at 10px came to about 190px, so a long
+// name ran off the left edge of a 180px column.
+export function barLabelLayout(width, isMobile) {
+  const base = isMobile ? 110 : 180;
+  const baseChars = isMobile ? 14 : 32;
+  const fontPx = isMobile ? 9 : 10;
+  const left = Math.max(48, Math.min(base, Math.round(width * 0.4)));
+  const fits = Math.floor((left - 10) / (fontPx * 0.6));
+  return { left, labelMax: Math.max(4, Math.min(baseChars, fits)) };
+}

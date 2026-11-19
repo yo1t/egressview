@@ -1118,8 +1118,18 @@
      scroll to them. Give the charts a floor and let the view scroll instead.
      A tall window still fills the charts to the bottom, with no scrollbar. */
   @media (min-width: 769px) {
-    #stats-container { overflow-y: auto; }
+    #stats-container { overflow-y: auto; container: stats-view / inline-size; }
     .stats-charts { min-height: 260px; }
+    /* Beside the device list on a tablet or a phone held sideways, two charts
+       side by side were each too narrow: the bar chart had no room for bars
+       and the timeline's legend took nearly all of its height. Below 760px
+       the charts stack, each the full width, and the timeline keeps its own
+       height apart from the legend. The view scrolls to them. */
+    @container stats-view (max-width: 760px) {
+      .stats-charts { flex: none; grid-template-columns: minmax(0, 1fr); }
+      .stats-charts .stats-chart { height: auto; }
+      #chart-timeline { flex: none; height: 220px; }
+    }
   }
   .stats-charts .stats-chart { flex: none; height: 100%; min-height: 0; }
 

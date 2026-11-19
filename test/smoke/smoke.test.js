@@ -1686,7 +1686,7 @@ test('stats tab renders map canvas', async ({ page }) => {
   await expect(page.locator('#st-flat-controls .fmc-btn')).toHaveCount(7);
 });
 
-test('stats tab scrolls to its charts on a short wide window and fills a tall one', async ({ page }) => {
+test('stats tab scrolls to its charts on a short wide window, stacks them when narrow, and fills a tall one', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   // A phone held sideways or a tablet is wider than 768px, so it gets the
@@ -1722,6 +1722,31 @@ test('stats tab scrolls to its charts on a short wide window and fills a tall on
     });
     expect(bottom, `${width}x${height} charts reachable`).toBeLessThanOrEqual(0);
   }
+
+  // Beside the device list the two charts were each too narrow to draw: the
+  // bar chart had no room for bars and the timeline was a thumbnail under its
+  // legend. Narrow, they stack and each gets the full width. Charts are drawn
+  // for the width they had when the data came, so reload at this size.
+  await page.setViewportSize({ width: 915, height: 580 });
+  await page.reload();
+  await page.click('#btn-stats');
+  await expect(page.locator('#chart-bar rect.stats-bar').first()).toBeVisible();
+  const narrow = await page.evaluate(() => {
+    const svg = document.getElementById('chart-bar').getBoundingClientRect();
+    const labels = [...document.querySelectorAll('#chart-bar .stats-axis text')]
+      .map(el => el.getBoundingClientRect().left);
+    const bars = [...document.querySelectorAll('#chart-bar rect.stats-bar')].map(el => +el.getAttribute('width'));
+    return {
+      columns: getComputedStyle(document.querySelector('.stats-charts')).gridTemplateColumns.split(' ').length,
+      widestBar: Math.max(...bars),
+      labelsInside: Math.min(...labels) >= svg.left - 0.5,
+      timeline: Math.round(document.getElementById('chart-timeline').getBoundingClientRect().height),
+    };
+  });
+  expect(narrow.columns, '915x580 charts stacked').toBe(1);
+  expect(narrow.widestBar, '915x580 widest bar').toBeGreaterThanOrEqual(100);
+  expect(narrow.labelsInside, '915x580 bar labels inside the chart').toBe(true);
+  expect(narrow.timeline, '915x580 timeline height').toBeGreaterThanOrEqual(180);
 
   // A tall window keeps the old look: the charts fill the rest, no scrollbar.
   await page.setViewportSize({ width: 1500, height: 900 });
