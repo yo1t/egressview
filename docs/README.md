@@ -35,6 +35,7 @@ Agent installers are available from the [download page](https://dl.egressview.co
 | MCP access | [MCP setup](setup-mcp.md) | [MCP設定](setup-mcp.ja.md) |
 | Remote MCP OAuth provider evaluation | [Evaluation](remote-mcp-oauth-evaluation.md) | [評価](remote-mcp-oauth-evaluation.ja.md) |
 | Manual threat investigation | [Investigation](manual-threat-investigation.md) | [脅威調査](manual-threat-investigation.ja.md) |
+| What it can and cannot show, mapped to MITRE ATT&CK | [ATT&CK mapping](attack-mapping.md) | [ATT&CKとの対応](attack-mapping.ja.md) |
 | REST API | [API reference](api-reference.md) | [APIリファレンス](api-reference.ja.md) |
 
 ## Privacy and distribution

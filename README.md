@@ -78,6 +78,7 @@ Browse the [documentation index](docs/README.md) for all guides and references.
 | AI assistant access through MCP | [MCP setup](docs/setup-mcp.md) |
 | HTTPS, accounts, and public deployment | [Authentication](docs/authentication.md) · [Deployment profiles](docs/deployment-profiles.md) |
 | Alerts and manual threat investigation | [Threat investigation](docs/manual-threat-investigation.md) |
+| Which signs it can and cannot show, mapped to MITRE ATT&CK | [ATT&CK mapping](docs/attack-mapping.md) |
 | Configuration, API, and offline packages | [Configuration](docs/configuration.md) · [REST API](docs/api-reference.md) · [Signed distributions](docs/offline-distribution.md) |
 
 ## License
