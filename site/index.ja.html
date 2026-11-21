@@ -149,7 +149,7 @@
   .btn.ghost:hover{background:var(--surface);color:var(--text)}
 
   /* Premise */
-  .premise{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+  .premise{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr))}
   .fact{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px}
   .fact b{display:block;font-size:1.02rem;margin-bottom:7px;font-weight:640}
   .fact p{margin:0;color:var(--muted);font-size:.93rem}
@@ -164,6 +164,9 @@
   table.cmp th,table.cmp td{padding:11px 12px;border-top:1px solid var(--border);text-align:left;vertical-align:top}
   table.cmp th{color:var(--muted);font-weight:600;border-top:0}
   table.cmp code{font-family:var(--mono);font-size:.88em;color:var(--text)}
+  /* A host name has no break point of its own, so on a phone it held the
+     first column wide enough to push the whole table off the screen. */
+  table.cmp code{overflow-wrap:anywhere}
   .verdict-bad{color:var(--danger);font-weight:620}
   .verdict-good{color:var(--green);font-weight:620}
 
@@ -188,7 +191,7 @@
   .never-row span{color:var(--muted);font-size:.93rem;display:block;margin-top:3px}
 
   /* Fit */
-  .fit{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .fit{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}
   .fit-card{border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px}
   .fit-yes{background:rgba(63,185,80,.06);border-color:rgba(63,185,80,.3)}
   .fit-no{background:rgba(248,81,73,.05);border-color:rgba(248,81,73,.25)}
@@ -214,6 +217,10 @@
        clauses are 12 characters at their longest. */
     h1{font-size:1.85rem}
     html[lang="ja"] h1{font-size:min(1.6rem,7vw)}
+    /* Phrase-level breaking keeps a Japanese phrase whole, and in three
+       columns on a phone that leaves the table wider than the screen. */
+    table.cmp{word-break:normal}
+    table.cmp th,table.cmp td{padding:9px 8px}
   }
   @media (max-width:900px){.pieces{grid-template-columns:1fr}}
 </style>
