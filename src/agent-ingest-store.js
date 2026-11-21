@@ -5,6 +5,7 @@ const {
 } = require('./agent-inbound-probes');
 const outboundCandidates = require('./agent-outbound-candidates');
 const appBytes = require('./agent-app-bytes');
+const deliveryVolume = require('./agent-delivery-volume');
 const agentAddresses = require('./agent-addresses');
 const agentUptime = require('./agent-uptime');
 
@@ -46,6 +47,7 @@ function initDb(dbPath) {
   ensureInboundProbesTable(db);
   outboundCandidates.ensureOutboundCandidatesTables(db);
   appBytes.ensureAppBytesTables(db);
+  deliveryVolume.ensureDeliveryVolumeTables(db);
 }
 
 function closeDb() {
@@ -691,6 +693,8 @@ function pruneObservations({
   result.outboundCandidates = timed('receiptsMs', () => outboundCandidates.pruneOutboundCandidates(database));
   // Sent bytes by app and hour (P3-194), kept as long as the observations.
   result.appBytes = timed('receiptsMs', () => appBytes.pruneAppBytes(database, before));
+  // What each Agent sent to the Hub, by hour: kept as long as the observations.
+  result.deliveryVolume = timed('receiptsMs', () => deliveryVolume.pruneDeliveryVolume(database, before));
   return result;
 }
 
@@ -815,6 +819,7 @@ function _initForTest(dbPath = ':memory:') {
   ensureInboundProbesTable(db);
   outboundCandidates.ensureOutboundCandidatesTables(db);
   appBytes.ensureAppBytesTables(db);
+  deliveryVolume.ensureDeliveryVolumeTables(db);
 }
 
 /// Locations for destinations, as stored by enrichment (agent-geo-cache.js).
@@ -833,6 +838,14 @@ function listOutboundCandidates() {
 
 function listAppBytes(options) {
   return appBytes.listAppBytes(requireDb(), options);
+}
+
+function recordDelivery(options) {
+  return deliveryVolume.recordDelivery(requireDb(), options);
+}
+
+function listDeliveryVolume(options) {
+  return deliveryVolume.listDeliveryVolume(requireDb(), options);
 }
 
 function listAgentAddresses(options) {
@@ -874,6 +887,8 @@ module.exports = {
   listOutboundCandidates,
   listInboundProbes,
   listAppBytes,
+  recordDelivery,
+  listDeliveryVolume,
   listAgentAddresses,
   listUptime,
   _dbForTest,
