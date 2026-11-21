@@ -78,6 +78,7 @@ Linuxルーターのconntrack収集は[プレビュー](docs/setup-conntrack.ja.
 | MCP経由でAIアシスタントから質問 | [MCP設定](docs/setup-mcp.ja.md) |
 | HTTPS・アカウント・外部公開 | [認証](docs/authentication.ja.md) · [配備プロファイル](docs/deployment-profiles.ja.md) |
 | 脅威通知と手動調査 | [脅威の調査](docs/manual-threat-investigation.ja.md) |
+| 示せる兆候と示せない兆候（MITRE ATT&CKとの対応） | [ATT&CKとの対応](docs/attack-mapping.ja.md) |
 | 設定・API・オフライン配布 | [設定](docs/configuration.ja.md) · [REST API](docs/api-reference.ja.md) · [署名付き配布物](docs/offline-distribution.ja.md) |
 
 ## ライセンス
