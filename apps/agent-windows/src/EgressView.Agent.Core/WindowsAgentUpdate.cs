@@ -129,10 +129,10 @@ public sealed class WindowsAgentUpdateClient : IDisposable
     /// "open the download page" was shown AccessDenied. The page is served at
     /// the root and works out the platform and architecture on its own.
     ///
-    /// The fragment is the anchor of the Windows button on that page, so a
-    /// reader arriving from here lands on their own download rather than
-    /// having to find it.
-    public Uri DownloadPage => new(origin, "#download-windows");
+    /// The top of the page, not the anchor of its Windows button: the page
+    /// already offers the reader's own platform, and landing halfway down it
+    /// skipped what the page says before the button (2026-11-21).
+    public Uri DownloadPage => origin;
 
     public static string UserAgent(string version, string osVersion) => $"EgressViewAgent/{version} (Windows {osVersion})";
 

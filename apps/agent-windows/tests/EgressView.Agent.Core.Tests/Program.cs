@@ -806,8 +806,8 @@ try
             "the download page is the site root, not a directory of packages");
         Assert(!client.DownloadPage.AbsoluteUri.Contains("/windows/", StringComparison.Ordinal),
             "and never the prefix the packages are stored under, which serves no page");
-        Assert(client.DownloadPage.Fragment == "#download-windows",
-            "arriving readers land on the Windows download rather than having to find it");
+        Assert(client.DownloadPage.Fragment == "",
+            "arriving readers land at the top of the download page, not partway down it");
 
         var older = await client.CheckAsync("9.9.9", "10.0.26100");
         Assert(older.Kind == AgentUpdateDecisionKind.UpToDate,
