@@ -90,7 +90,7 @@
   .btn-meta{color:var(--muted); font-size:.9rem}
   /* Two columns of steps, one per platform, side by side where there is room
      and stacked where there is not. */
-  .platforms{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+  .platforms{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr))}
   .platform{background:var(--surface); border:1px solid var(--border);
     border-radius:var(--radius); padding:20px 22px}
   .platform h3{margin:0 0 4px; font-size:1rem; font-weight:620}
@@ -107,7 +107,7 @@
   section+section{border-top:1px solid var(--border)}
   h2{font-size:1.32rem; margin:0 0 20px; font-weight:620; letter-spacing:-.01em}
 
-  .grid{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+  .grid{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr))}
   .card{background:var(--surface); border:1px solid var(--border);
     border-radius:var(--radius); padding:20px 22px}
   .card h3{margin:0 0 8px; font-size:1rem; font-weight:620}

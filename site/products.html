@@ -22,7 +22,7 @@ layout: null
   .lang button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
   h1{font-size:clamp(2rem,5vw,3.3rem);line-height:1.16;margin:38px 0 12px}h2{font-size:1.45rem;margin:0 0 10px}
   .intro{color:var(--muted);max-width:70ch;margin:0 0 38px}
-  .products{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  .products{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr))}
   article{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;display:flex;flex-direction:column}
   article .type{color:var(--green);font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
   article p{color:var(--muted);margin:0 0 16px}article img{display:block;width:100%;height:auto;border:1px solid var(--border);border-radius:9px;margin:8px 0 18px}
