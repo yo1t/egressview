@@ -36,7 +36,7 @@ See destinations, application names, data volume, and local history without depl
 
 <img src="docs/assets/egressview-agent-windows.png" alt="Windows Agent network status with globe, per-app destinations, and timeline; interface shown in Japanese" width="760">
 
-The Windows Agent runs a local monitoring service and shows its own connection history; Hub delivery is optional. The screenshot shows the Japanese interface. **Windows downloads are not yet Authenticode-signed:** SmartScreen may warn about an unknown publisher. Verify the MSI checksum using the [download-page instructions](https://dl.egressview.com/) before installing. [Windows setup](apps/agent-windows/README.en.md) · [What the Agent sends](docs/agent-privacy-windows.md)
+The Windows Agent runs a local monitoring service and shows its own connection history; Hub delivery is optional. The screenshot shows the Japanese interface. **Windows downloads are not yet Authenticode-signed:** SmartScreen may warn about an unknown publisher, and on a PC with Smart App Control on, the Agent's window will not open ([details](apps/agent-windows/README.en.md#pcs-with-smart-app-control-on)). Verify the MSI checksum using the [download-page instructions](https://dl.egressview.com/) before installing. [Windows setup](apps/agent-windows/README.en.md) · [What the Agent sends](docs/agent-privacy-windows.md)
 
 ## Try it
 

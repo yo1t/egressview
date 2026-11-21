@@ -11,6 +11,25 @@
 
 The Agent keeps local records without a Hub. It can notify you of an update, but you download and install the newer MSI yourself. See [Windows Agent privacy](../../docs/agent-privacy-windows.md) for the destinations and data involved.
 
+## PCs with Smart App Control on
+
+**Until the builds are signed, the Agent's window (`EgressView.Agent.Ui.exe`) will not open on Windows 11 with Smart App Control on.** Windows reports that it blocked an app that may be unsafe. Unlike SmartScreen, there is no way to allow a single app.
+
+To check whether it is on, run this in an administrator PowerShell:
+
+```powershell
+Get-MpComputerStatus | Select-Object SmartAppControlState
+```
+
+`On` means you are affected. `Evaluation` or `Off` means you are not.
+
+**What we confirmed on a real PC (2026-11-21, one Windows 11 PC):** the window did not open, but the Windows service kept running and Hub delivery did not stop. The only blocked file recorded was the window's executable. We have not confirmed that the service is left running on other PCs.
+
+You have two options:
+
+- **Leave it on and skip the window:** recording and Hub delivery continue (confirmed on the PC above), and you can see the history in the Hub. Without a Hub there is no way to view the history on this PC.
+- **Turn Smart App Control off:** Windows Security → App & browser control → Smart App Control settings → Off. This stops it blocking every unsigned app without a reputation, not just EgressView. **On some Windows builds, once it is off it cannot be turned back on without reinstalling or resetting the PC.** The decision is yours.
+
 ## What Hub delivery and update checks send
 
 Enrollment sends the PC name, Windows version and Agent version to the chosen Hub. Enrollment alone does not enable observation delivery; you must explicitly switch it on in the app. When enabled, the Agent authenticates to that Hub with a Bearer token and sends the following JSON metadata. It neither collects nor sends packet contents.

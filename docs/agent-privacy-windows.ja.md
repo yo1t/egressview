@@ -105,7 +105,7 @@ Get-NetTCPConnection -State Established |
 
 ## 署名について
 
-**現時点のWindows版ビルドはコード署名されていません。** ダウンロード時にSmartScreenが「発行元不明」と警告します。
+**現時点のWindows版ビルドはコード署名されていません。** ダウンロード時にSmartScreenが「発行元不明」と警告します。スマート アプリ コントロールがオンのWindows 11では、Agentの画面が開けません（[導入ガイド](../apps/agent-windows/README.md#スマート-アプリ-コントロールがオンのpc)）。
 
 配布ページに公開されているSHA-256と照合してください。
 
