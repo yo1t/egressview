@@ -424,6 +424,7 @@ public partial class MainWindow : Window
         // cannot disagree about whether delivery is stuck.
         var deliveryNote = deliveryOldestPendingAt is { } stuckSince
             && DateTimeOffset.UtcNow - stuckSince >= DeliveryNotificationTracker.OutageGrace
+            && !DeliveryNotificationTracker.IsMakingProgress(deliveryLastAcknowledgedAt, DateTimeOffset.UtcNow)
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DeliveryBackedUp"),
                 FormatDuration((DateTimeOffset.UtcNow - stuckSince).TotalSeconds), deliveryPending)
             : string.Empty;
@@ -1039,6 +1040,11 @@ public partial class MainWindow : Window
                 && DateTimeOffset.TryParse(oldestPending.GetString(), CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.RoundtripKind, out var stuck)
                 ? stuck.ToUniversalTime() : null;
+            deliveryLastAcknowledgedAt = data.TryGetProperty("lastAcknowledgedAt", out var acknowledged)
+                && acknowledged.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(acknowledged.GetString(), CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out var acknowledgedAt)
+                ? acknowledgedAt.ToUniversalTime() : null;
             HubPending.Text = pending.ToString("N0", CultureInfo.CurrentCulture);
             HubLastAck.Text = DateText(data, "lastAcknowledgedAt");
             HubOldestPending.Text = $"{LocalizationManager.Text("OldestPending")}: {DateText(data, "oldestPendingAt")}";
@@ -2257,6 +2263,7 @@ public partial class MainWindow : Window
 
     private long deliveryPending;
     private DateTimeOffset? deliveryOldestPendingAt;
+    private DateTimeOffset? deliveryLastAcknowledgedAt;
     private bool enrichmentThirdParty;
     private bool enrichmentPublicFeeds;
     private bool enrichmentCountryTable;

@@ -33,11 +33,11 @@ public sealed class DeliveryNotificationTracker(DeliveryNotificationState? resto
             return DeliveryNotificationAction.None;
         }
 
-        if (IsFailure(sample.State) && sample.Pending > 0)
+        var immediate = sample.State is "authorization-required" or "contract-rejected" or
+            "invalid-acknowledgement" or "hub-incompatible";
+        if (IsFailure(sample.State) && sample.Pending > 0 && (immediate || !IsMakingProgress(sample.LastAcknowledgedAt, sample.ObservedAt)))
         {
             state = state with { FailureStartedAt = state.FailureStartedAt ?? sample.ObservedAt };
-            var immediate = sample.State is "authorization-required" or "contract-rejected" or
-                "invalid-acknowledgement" or "hub-incompatible";
             var oldEnough = sample.ObservedAt - state.FailureStartedAt >= OutageGrace ||
                 sample.OldestPendingAt is { } oldest && sample.ObservedAt - oldest >= OutageGrace;
             if (!immediate && !oldEnough || state.OutageWasDelivered ||
@@ -75,6 +75,18 @@ public sealed class DeliveryNotificationTracker(DeliveryNotificationState? resto
             _ => state,
         };
     }
+
+    /// Whether the Hub has taken a batch within the grace, so a backlog is
+    /// being worked through rather than stuck.
+    ///
+    /// The oldest pending observation says how far behind delivery is, not
+    /// whether it moves. On 2026-11-15 a queue of 10,000 drained in about a
+    /// minute while the Hub answered every other batch with 429; its oldest
+    /// row was hours old the whole time, so "recovered" was followed sixteen
+    /// seconds later by "not completed, 4,257 pending", and the recovery that
+    /// should have closed it was held back and shown six days later.
+    public static bool IsMakingProgress(DateTimeOffset? lastAcknowledgedAt, DateTimeOffset at) =>
+        lastAcknowledgedAt is { } acknowledged && at - acknowledged < OutageGrace;
 
     public static bool IsFailure(string value) => value is "authorization-required" or "rate-limited" or
         "retryable" or "contract-rejected" or "invalid-acknowledgement" or "hub-incompatible";
