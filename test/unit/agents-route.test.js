@@ -1295,4 +1295,33 @@ describe('Agent uptime', () => {
     assert.equal((await request(app, 'GET', '/api/agents/uptime')).body.days, 7);
     assert.equal((await request(app, 'GET', '/api/agents/uptime?days=30')).status, 400);
   });
+
+  it('Hubへ送った量と、Hubが古くて除いた件数を同じ期間で返す。再送も送った量に入る', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const first = ingestEnvelope();
+    const withOld = ingestEnvelope();
+    withOld.batchId = '00000000-0000-4000-8000-0000000000b2';
+    withOld.observations[0].observationId = '00000000-0000-4000-8000-0000000000c2';
+    const old = structuredClone(withOld.observations[0]);
+    old.observationId = '00000000-0000-4000-8000-0000000000c3';
+    const oldTime = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    old.firstObservedAt = new Date(oldTime - 1000).toISOString();
+    old.lastObservedAt = new Date(oldTime).toISOString();
+    withOld.observations.push(old);
+
+    const sent = [first, withOld, withOld];
+    for (const body of sent) {
+      assert.equal((await request(app, 'POST', '/api/agent/ingest', { body, headers: authorization })).status, 200);
+    }
+
+    const [agent] = (await request(app, 'GET', '/api/agents/uptime?days=1')).body.agents;
+    assert.equal(agent.delivery.requests, 3);
+    assert.equal(agent.delivery.requestsWithoutSize, 0);
+    assert.equal(agent.delivery.bytes, sent.reduce((sum, body) => sum + Buffer.byteLength(JSON.stringify(body)), 0));
+    // The replay of the second batch reports its old observation as a duplicate, not again as left out.
+    assert.equal(agent.delivery.expired, 1);
+    assert.equal(typeof agent.delivery.countedFrom, 'number');
+  });
 });

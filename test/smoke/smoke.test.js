@@ -832,12 +832,27 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
       ],
     }] }),
   }));
+  await page.route(/\/api\/agents\/uptime\?days=\d$/, route => {
+    const days = Number(new URL(route.request().url()).searchParams.get('days'));
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ days, agents: agents.map(agent => ({
+        agentId: agent.agentId, from: now - days * 86_400_000, totalSlots: days * 288, deliveredSlots: days * 280,
+        gapCount: 0, gapMinutes: 0, gaps: [],
+        delivery: { requests: 123_456, requestsWithoutSize: 2, bytes: 987_654_321, expired: 4_321,
+          countedFrom: now - 3_600_000 },
+      })) }),
+    });
+  });
   await authPage(page);
 
   await page.click('#btn-agents');
   await expect(page.locator('#agents-container')).toBeVisible();
   await expect(page.locator('.agent-card-host')).toHaveText(agents[0].hostName);
   await expect(page.locator('.agent-facts')).toContainText('00:11:22:aa:bb:cc');
+  // What the Agent sent to the Hub, and the records the Hub left out for age.
+  await expect(page.locator('.agent-delivery-volume')).toContainText('987.7 MB');
+  await expect(page.locator('.agent-delivery-expired')).toContainText('4,321');
   // Folded on a phone so the numbers are on the first screen.
   expect(await page.locator('#agent-view-about').evaluate(el => el.open)).toBe(false);
 

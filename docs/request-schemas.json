@@ -2747,11 +2747,39 @@
                 },
                 "gaps": {
                   "type": "array"
+                },
+                "delivery": {
+                  "type": "object",
+                  "properties": {
+                    "requests": {
+                      "type": "integer"
+                    },
+                    "requestsWithoutSize": {
+                      "type": "integer"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "expired": {
+                      "type": "integer"
+                    },
+                    "countedFrom": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "bytes",
+                    "countedFrom",
+                    "expired",
+                    "requests",
+                    "requestsWithoutSize"
+                  ]
                 }
               },
               "required": [
                 "agentId",
                 "deliveredSlots",
+                "delivery",
                 "from",
                 "gapCount",
                 "gapMinutes",

@@ -558,9 +558,26 @@ module.exports = function agentRoutes({
       const days = Number(parsed.data.days);
       const now = Date.now();
       const agents = agentIdentities.listAgents().filter(agent => !agent.revokedAt);
+      const since = now - days * 24 * 60 * 60 * 1000;
+      // What each Agent sent to the Hub in the same period, beside when it arrived.
+      const volume = typeof agentIngest.listDeliveryVolume === 'function'
+        ? agentIngest.listDeliveryVolume({ since }) : { startedAt: null, agents: [] };
+      const volumeByAgent = new Map(volume.agents.map(row => [row.agentId, row]));
       res.json({
         days,
-        agents: agentIngest.listUptime({ agents, since: now - days * 24 * 60 * 60 * 1000, now }),
+        agents: agentIngest.listUptime({ agents, since, now }).map(report => {
+          const row = volumeByAgent.get(report.agentId);
+          return {
+            ...report,
+            delivery: {
+              requests: row?.requests ?? 0,
+              requestsWithoutSize: row?.requestsWithoutSize ?? 0,
+              bytes: row?.bytes ?? 0,
+              expired: row?.expired ?? 0,
+              countedFrom: volume.startedAt,
+            },
+          };
+        }),
       });
     } catch (error) {
       logger.error('[agents] Listing uptime failed:', error.message);
@@ -824,6 +841,22 @@ module.exports = function agentRoutes({
   router.post('/agent/ingest', requireAgent, async (req, res) => {
     const startedAt = Date.now();
     ingestMetrics.requests += 1;
+    // Counted once the answer is sent, whatever it was: an upload the Hub
+    // refused or asked for again still crossed the network (Agent tab).
+    let expiredStored = 0;
+    res.once('finish', () => {
+      if (typeof agentIngest?.recordDelivery !== 'function') return;
+      try {
+        agentIngest.recordDelivery({
+          agentId: req.agentIdentity.agentId,
+          at: startedAt,
+          contentLength: req.headers['content-length'],
+          expired: expiredStored,
+        });
+      } catch (error) {
+        logger.error('[agents] Recording delivery volume failed:', error.message);
+      }
+    });
     const limited = acquireAgentWindow(req.agentIdentity.agentId, startedAt);
     if (limited) {
       ingestMetrics.rateLimited += 1;
@@ -905,6 +938,7 @@ module.exports = function agentRoutes({
         { receivedAt: startedAt, expiredCount: expired.length }
       );
       runtimeProfiler.recordWall('agentIngest.store', Date.now() - storeStartedAt);
+      if (!ack.replayed) expiredStored = ack.expired || 0;
       if (ack.replayed) {
         ingestMetrics.duplicate += parsed.data.observations.length;
       } else {
