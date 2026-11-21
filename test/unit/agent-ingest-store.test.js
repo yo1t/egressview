@@ -109,6 +109,80 @@ describe('Agent ingest store', () => {
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 1);
   });
 
+  // A batch big enough to be written in several chunks, so a second request can
+  // arrive between them.
+  function chunkedBatch(count, firstId) {
+    const envelope = copy();
+    const original = envelope.observations[0];
+    envelope.observations = Array.from({ length: count }, (_, i) => ({
+      ...structuredClone(original),
+      observationId: `00000000-0000-4000-8000-${String(i + firstId).padStart(12, '0')}`,
+      localPort: 3000 + i,
+    }));
+    return envelope;
+  }
+
+  it('同じバッチが同時に2本届いても両方成功し、観測は二重に入らない', async () => {
+    const envelope = chunkedBatch(120, 400);
+    const [first, second] = await Promise.all([
+      store.storeBatch(agentId, envelope, { receivedAt }),
+      store.storeBatch(agentId, structuredClone(envelope), { receivedAt: receivedAt + 1 }),
+    ]);
+
+    assert.equal(first.replayed, false);
+    assert.equal(first.accepted, 120);
+    assert.deepEqual(second, { ...first, replayed: true });
+    const database = store._dbForTest();
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 120);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_ingest_batches').get().n, 1);
+  });
+
+  it('書いている間に同じバッチが記録されたら、500にせずその記録を返す', async () => {
+    // Something this process cannot see in its in-flight map records the batch
+    // while the observations are being written.
+    const database = store._dbForTest();
+    const envelope = chunkedBatch(120, 600);
+    const writing = store.storeBatch(agentId, envelope, { receivedAt });
+    setImmediate(() => database.prepare(`
+      INSERT INTO agent_ingest_batches (
+        agentId, batchId, schemaVersion, sentAt, receivedAt,
+        acceptedCount, duplicateCount, rejectedCount, status
+      ) VALUES (?, ?, ?, ?, ?, 120, 0, 0, 'complete')
+    `).run(agentId, envelope.batchId, envelope.schemaVersion, Date.parse(envelope.sentAt), receivedAt - 5));
+
+    const ack = await writing;
+
+    assert.equal(ack.replayed, true);
+    assert.equal(ack.accepted, 120);
+    assert.equal(ack.receivedAt, receivedAt - 5);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_ingest_batches').get().n, 1);
+  });
+
+  it('先の1本が失敗したら、待っていた2本目が書き直して完成させる', async () => {
+    const database = store._dbForTest();
+    const envelope = chunkedBatch(60, 800);
+    envelope.observations[55].processName = 'RejectThisObservation';
+    database.exec(`
+      CREATE TRIGGER reject_test_observation
+      BEFORE INSERT ON agent_observations
+      WHEN NEW.processName = 'RejectThisObservation'
+      BEGIN SELECT RAISE(ABORT, 'test rejection'); END;
+    `);
+    const retryCopy = structuredClone(envelope);
+    retryCopy.observations[55].processName = golden.observations[0].processName;
+
+    const first = store.storeBatch(agentId, envelope, { receivedAt });
+    const second = store.storeBatch(agentId, retryCopy, { receivedAt: receivedAt + 1 });
+    await assert.rejects(first, /test rejection/);
+    database.exec('DROP TRIGGER reject_test_observation');
+    const ack = await second;
+
+    assert.equal(ack.replayed, false);
+    assert.equal(ack.accepted + ack.duplicate, 60);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 60);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_ingest_batches').get().n, 1);
+  });
+
   it('folds the same hourly app identity but preserves a second app on the same flow', async () => {
     const envelope = copy();
     const original = envelope.observations[0];
