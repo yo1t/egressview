@@ -80,9 +80,82 @@ public sealed partial class ObservationStore
         }
         var overflow = Math.Max(0, ScalarInt64("SELECT COUNT(*) FROM delivery_queue") - maximumPending);
         if (overflow <= 0) return;
-        Execute($"DELETE FROM delivery_queue WHERE delivery_id IN (SELECT delivery_id FROM delivery_queue WHERE batch_id IS NULL ORDER BY queued_at LIMIT {overflow})");
-        var removed = Math.Max(0, overflow - Math.Max(0, ScalarInt64("SELECT COUNT(*) FROM delivery_queue") - maximumPending));
-        if (removed > 0) Execute($"UPDATE delivery_state SET queue_overflow=queue_overflow+{removed} WHERE id=1");
+        // Set aside, not deleted: they have never been sent, so they can go
+        // later under the same id without the Hub counting anything twice.
+        const string oldest = "SELECT delivery_id FROM delivery_queue WHERE batch_id IS NULL ORDER BY queued_at LIMIT ";
+        Execute($"INSERT OR IGNORE INTO delivery_spill({SpillColumns}) SELECT {SpillColumns} FROM delivery_queue WHERE delivery_id IN ({oldest}{overflow})");
+        var moved = DeleteWhere("delivery_queue", $"delivery_id IN (SELECT delivery_id FROM delivery_spill) AND batch_id IS NULL");
+        if (moved > 0) Execute($"INSERT INTO collector_counters(name,value) VALUES('delivery-observations-spilled',{moved}) " +
+                               "ON CONFLICT(name) DO UPDATE SET value=value+excluded.value");
+        // Bounded too. Past this, the oldest are lost, and counted as before.
+        var excess = ScalarInt64("SELECT COUNT(*) FROM delivery_spill") - SpillCapacity;
+        if (excess <= 0) return;
+        Execute($"DELETE FROM delivery_spill WHERE delivery_id IN (SELECT delivery_id FROM delivery_spill ORDER BY queued_at LIMIT {excess})");
+        Execute($"UPDATE delivery_state SET queue_overflow=queue_overflow+{excess} WHERE id=1");
+    }
+
+    /// Where the queue's overflow waits. On 2026-11-15 a queue held at its
+    /// limit for five hours by a blocked batch deleted 66,847 observations
+    /// the Hub never received; held here, they would have gone once delivery
+    /// moved again. About 200 bytes a row, so the bound is some 40 MB, and
+    /// nothing in it outlives the Hub's seven days.
+    public const int SpillCapacity = 200_000;
+    public const int DeliveryQueueCapacity = 10_000;
+
+    private const string SpillColumns = "delivery_id,stable_key,protocol,local_address,local_port,remote_address,remote_port,process_id,process_name," +
+        "first_observed_at,last_observed_at,bytes_in,bytes_out,queued_at,remote_hostname,process_instance_id";
+
+    private const string Version34Schema = """
+        CREATE TABLE IF NOT EXISTS delivery_spill(
+          delivery_id TEXT PRIMARY KEY,
+          stable_key TEXT NOT NULL,
+          protocol TEXT NOT NULL,
+          local_address TEXT NOT NULL,
+          local_port INTEGER NOT NULL,
+          remote_address TEXT NOT NULL,
+          remote_port INTEGER NOT NULL,
+          process_id INTEGER NOT NULL,
+          process_name TEXT NOT NULL,
+          first_observed_at TEXT NOT NULL,
+          last_observed_at TEXT NOT NULL,
+          bytes_in INTEGER,
+          bytes_out INTEGER,
+          queued_at TEXT NOT NULL,
+          remote_hostname TEXT,
+          process_instance_id TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS delivery_spill_queued ON delivery_spill(queued_at);
+        """;
+
+    /// No backup: one new table, empty, in one transaction.
+    private void MigrateVersion33To34()
+    {
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version34Schema + " UPDATE schema_version SET version=34 WHERE version=33; COMMIT;");
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// Brings set-aside observations back once the queue has room for a whole
+    /// batch of them, oldest first, so they go before what came after them.
+    /// One already waiting for the same flow takes them in, as a new
+    /// observation of that flow would be.
+    private void RefillFromSpillLocked(int limit)
+    {
+        if (DeliveryQueueCapacity - ScalarInt64("SELECT COUNT(*) FROM delivery_queue") < limit) return;
+        var ids = new List<string>();
+        CheckOperation(WinSqlite.Prepare(db, $"SELECT delivery_id FROM delivery_spill ORDER BY queued_at LIMIT {limit}", -1, out var statement, 0));
+        try { while (WinSqlite.Step(statement) == WinSqlite.Row) ids.Add(Text(statement, 0)); }
+        finally { WinSqlite.Finalize(statement); }
+        if (ids.Count == 0) return;
+        var list = string.Join(',', ids.Select(id => $"'{Sql(id)}'"));
+        Execute($"""
+            INSERT INTO delivery_queue({SpillColumns},batch_id)
+            SELECT {SpillColumns},NULL FROM delivery_spill WHERE delivery_id IN ({list}) AND 1
+            ON CONFLICT(stable_key) WHERE batch_id IS NULL DO UPDATE SET first_observed_at=MIN(delivery_queue.first_observed_at,excluded.first_observed_at),last_observed_at=MAX(delivery_queue.last_observed_at,excluded.last_observed_at),remote_hostname=COALESCE(delivery_queue.remote_hostname,excluded.remote_hostname),bytes_in=CASE WHEN delivery_queue.bytes_in IS NULL OR excluded.bytes_in IS NULL THEN NULL ELSE delivery_queue.bytes_in+excluded.bytes_in END,bytes_out=CASE WHEN delivery_queue.bytes_out IS NULL OR excluded.bytes_out IS NULL THEN NULL ELSE delivery_queue.bytes_out+excluded.bytes_out END
+            """);
+        Execute($"DELETE FROM delivery_spill WHERE delivery_id IN ({list})");
     }
 
     /// How old an observation may be and still be taken by the Hub, which
@@ -100,6 +173,7 @@ public sealed partial class ObservationStore
             try
             {
                 DropObservationsTheHubWillRefuseLocked(sentAt);
+                RefillFromSpillLocked(limit);
                 var existing = ScalarTextOrNull("SELECT batch_id FROM delivery_queue WHERE batch_id IS NOT NULL ORDER BY queued_at LIMIT 1");
                 var batchId = existing is null ? Guid.NewGuid() : Guid.Parse(existing);
                 if (existing is null)
@@ -123,7 +197,8 @@ public sealed partial class ObservationStore
     private void DropObservationsTheHubWillRefuseLocked(DateTimeOffset sentAt)
     {
         var cutoff = (sentAt - HubAcceptsFor).ToUniversalTime().ToString("O");
-        var expired = ScalarInt64($"SELECT COUNT(*) FROM delivery_queue WHERE last_observed_at<'{cutoff}'");
+        var expired = ScalarInt64($"SELECT COUNT(*) FROM delivery_queue WHERE last_observed_at<'{cutoff}'")
+            + DeleteWhere("delivery_spill", $"last_observed_at<'{cutoff}'");
         if (expired == 0) return;
         var claimed = ScalarInt64($"SELECT COUNT(*) FROM delivery_queue WHERE last_observed_at<'{cutoff}' AND batch_id IS NOT NULL");
         Execute($"DELETE FROM delivery_queue WHERE last_observed_at<'{cutoff}'");
@@ -240,9 +315,10 @@ public sealed partial class ObservationStore
     {
         lock (gate)
         {
-            var oldest = ScalarTextOrNull("SELECT MIN(queued_at) FROM delivery_queue");
+            // What was set aside is still waiting to be sent.
+            var oldest = ScalarTextOrNull("SELECT MIN(queued_at) FROM (SELECT queued_at FROM delivery_queue UNION ALL SELECT queued_at FROM delivery_spill)");
             var acknowledged = ScalarTextOrNull("SELECT last_acknowledged_at FROM delivery_state WHERE id=1");
-            return new(ScalarInt64("SELECT COUNT(*) FROM delivery_queue"),
+            return new(ScalarInt64("SELECT (SELECT COUNT(*) FROM delivery_queue) + (SELECT COUNT(*) FROM delivery_spill)"),
                 ScalarInt64("SELECT contract_rejected FROM delivery_state WHERE id=1"),
                 ScalarInt64("SELECT queue_overflow FROM delivery_state WHERE id=1"),
                 oldest is null ? null : DateTimeOffset.Parse(oldest), acknowledged is null ? null : DateTimeOffset.Parse(acknowledged));
@@ -258,7 +334,7 @@ public sealed partial class ObservationStore
             try
             {
                 Execute("UPDATE delivery_state SET delivery_enabled=0 WHERE id=1");
-                var pending = DeleteWhere("delivery_queue", "1=1");
+                var pending = DeleteWhere("delivery_queue", "1=1") + DeleteWhere("delivery_spill", "1=1");
                 if (removeLocalHistory) DeleteLocalHistoryWithinTransaction(now.ToUniversalTime());
                 Execute("COMMIT");
                 return new(hubRevoked, continuedWithoutRevocation, removeLocalHistory, pending);
