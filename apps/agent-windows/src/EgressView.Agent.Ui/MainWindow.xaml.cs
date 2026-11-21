@@ -1741,7 +1741,9 @@ public partial class MainWindow : Window
                 "network-error" => ja ? "更新サーバーへ接続できませんでした。監視は継続します。" : "Could not reach the update server. Monitoring continues.",
                 _ => ja ? "更新情報を安全に検証できませんでした。" : "The release could not be validated safely.",
             },
-            _ => ja ? "まだ更新を確認していません。" : "Updates have not been checked yet.",
+            _ => state.CheckedAt is null
+                ? ja ? "まだ更新を確認していません。" : "Updates have not been checked yet."
+                : ja ? "起動してからは、まだ確認していません。前回の確認は下の時刻です。" : "Not checked since this window started. The last check is shown below.",
         };
         var checkedText = state.CheckedAt?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "—";
         UpdateVerification.Text = state.Publisher is { } publisher
