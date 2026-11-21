@@ -306,7 +306,7 @@ spctl --assess --type install --verbose=4 ~/Downloads/egressview-agent-<span id=
        checked the same way. -->
   <div class="verify" style="margin-top:20px">
     <div class="verify-head"><span class="dot" style="background:#d29922"></span>
-      <span data-ja="Windows版はまだコード署名していません。ダウンロード時にSmartScreenが「発行元不明」と警告します。照合はSHA-256で行ってください。">Windows: these builds are not yet code-signed. SmartScreen will warn that the publisher is unknown. Check the SHA-256 instead.</span></div>
+      <span data-ja="Windows版はまだコード署名していません。ダウンロード時にSmartScreenが「発行元不明」と警告します。照合はSHA-256で行ってください。スマート アプリ コントロールがオンのWindows 11では、Agentの画面が開けません（&lt;a href=&quot;https://github.com/yo1t/egressview/blob/main/apps/agent-windows/README.md#スマート-アプリ-コントロールがオンのpc&quot;&gt;対処&lt;/a&gt;）。">Windows: these builds are not yet code-signed. SmartScreen will warn that the publisher is unknown. Check the SHA-256 instead. On Windows 11 with Smart App Control on, the Agent's window will not open (<a href="https://github.com/yo1t/egressview/blob/main/apps/agent-windows/README.en.md#pcs-with-smart-app-control-on">what to do</a>).</span></div>
 <pre><span class="c"># the checksum published in the update manifest</span>
 curl.exe -s https://dl.egressview.com/windows/manifest.json
 

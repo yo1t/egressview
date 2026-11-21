@@ -462,7 +462,7 @@
   <p class="sub" data-ja="使う環境を選んでください。AgentだけならHubもルーターも不要です。">Choose the setup that fits. An Agent needs neither a Hub nor a router.</p>
   <ol class="steps">
     <li data-ja="&lt;b&gt;Mac:&lt;/b&gt; 署名・公証済みの.pkgを入れ、macOSのネットワーク監視を承認します。"><b>Mac:</b> Install the signed, notarised .pkg and approve network monitoring in macOS.</li>
-    <li data-ja="&lt;b&gt;Windows:&lt;/b&gt; MSIのチェックサムを照合し、管理者としてインストールします。現在のMSIは未署名です。"><b>Windows:</b> Verify the MSI checksum, then install with administrator approval. The current MSI is unsigned.</li>
+    <li data-ja="&lt;b&gt;Windows:&lt;/b&gt; MSIのチェックサムを照合し、管理者としてインストールします。現在のMSIは未署名で、スマート アプリ コントロールがオンのPCでは画面が開けません（&lt;a href=&quot;https://github.com/yo1t/egressview/blob/main/apps/agent-windows/README.md#スマート-アプリ-コントロールがオンのpc&quot;&gt;対処&lt;/a&gt;）。"><b>Windows:</b> Verify the MSI checksum, then install with administrator approval. The current MSI is unsigned, so with Smart App Control on, its window will not open (<a href="https://github.com/yo1t/egressview/blob/main/apps/agent-windows/README.en.md#pcs-with-smart-app-control-on">what to do</a>).</li>
     <li data-ja="&lt;b&gt;Hub:&lt;/b&gt; Node.js 22以降で起動します。ルーターを使う場合はSSHから登録します。"><b>Hub:</b> Start with Node.js 22+. If using a router, add it through SSH.</li>
   </ol>
   <div class="cta" style="margin-top:26px">
