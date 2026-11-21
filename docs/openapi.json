@@ -2765,6 +2765,37 @@
                               ],
                               "additionalProperties": false
                             }
+                          },
+                          "delivery": {
+                            "type": "object",
+                            "properties": {
+                              "requests": {
+                                "type": "number"
+                              },
+                              "requestsWithoutSize": {
+                                "type": "number"
+                              },
+                              "bytes": {
+                                "type": "number"
+                              },
+                              "expired": {
+                                "type": "number"
+                              },
+                              "countedFrom": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "requests",
+                              "requestsWithoutSize",
+                              "bytes",
+                              "expired",
+                              "countedFrom"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -2774,7 +2805,8 @@
                           "deliveredSlots",
                           "gapCount",
                           "gapMinutes",
-                          "gaps"
+                          "gaps",
+                          "delivery"
                         ],
                         "additionalProperties": false
                       }
