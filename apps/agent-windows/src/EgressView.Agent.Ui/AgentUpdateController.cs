@@ -30,6 +30,16 @@ internal sealed class AgentUpdateController : IDisposable
     internal bool CanInstall => State.Kind == UpdateStateKind.Verified && verified is not null;
     internal event EventHandler? StateChanged;
 
+    /// The version the window should announce, or null.
+    internal string? AnnouncedVersion =>
+        AgentUpdateNotice.VersionToAnnounce(AgentSettings.AvailableUpdateVersion, CurrentVersion, AgentSettings.DismissedUpdateVersion);
+
+    internal void DismissAnnouncement()
+    {
+        AgentSettings.DismissedUpdateVersion = AgentSettings.AvailableUpdateVersion;
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     internal Task RunIfDueAsync(CancellationToken cancellationToken = default) =>
         AgentSettings.AutomaticUpdateChecks && (AgentSettings.LastUpdateCheck is not { } last || DateTimeOffset.UtcNow - last >= TimeSpan.FromHours(24))
             ? CheckNowAsync(cancellationToken) : Task.CompletedTask;
@@ -43,6 +53,7 @@ internal sealed class AgentUpdateController : IDisposable
             var checkedAt = DateTimeOffset.UtcNow;
             AgentSettings.LastUpdateCheck = checkedAt;
             var decision = await client.CheckAsync(CurrentVersion, Environment.OSVersion.Version.ToString(), cancellationToken);
+            AgentSettings.AvailableUpdateVersion = decision.Kind == AgentUpdateDecisionKind.UpToDate ? null : decision.PublishedVersion;
             if (decision.Kind == AgentUpdateDecisionKind.UpToDate)
             {
                 verified = null;

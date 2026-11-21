@@ -118,4 +118,6 @@
   <system:String x:Key="WorthALookNewPairFormat">{0}: 初めての組み合わせで、1週間以内に {1} 送信</system:String>
   <system:String x:Key="WorthALookAboveUsualFormat">{0}: 1日に {1} 送信（普段は多くて {2}）</system:String>
   <system:String x:Key="WorthALookMachineFormat">{0}: 24時間に {1} 送信（普段は多くて {2}）</system:String>
+  <system:String x:Key="UpdateBannerFormat">EgressView Agent の新しい版 {0} があります。このPCの版は {1} です。</system:String>
+  <system:String x:Key="UpdateBannerDismiss">閉じる</system:String>
 </ResourceDictionary>

@@ -91,7 +91,7 @@ public partial class MainWindow : Window
         Height = Math.Min(AgentSettings.WindowHeight, SystemParameters.WorkArea.Height);
         ApplyAccessibilityLabels();
         DataContext = this;
-        Loaded += async (_, _) => { LoadSettings(); await RefreshAllAsync(); refreshTimer.Start(); };
+        Loaded += async (_, _) => { LoadSettings(); RefreshUpdateBanner(); await RefreshAllAsync(); refreshTimer.Start(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) refreshTimer.Start(); else refreshTimer.Stop(); };
         refreshTimer.Tick += async (_, _) =>
         {
@@ -1761,6 +1761,22 @@ public partial class MainWindow : Window
     ///
     /// The origin is pinned to HTTPS in the update client, so this cannot be
     /// pointed somewhere else by anything the manifest says.
+    /// Across the top of every tab, so a newer version is seen without
+    /// opening Settings, and gone once it is installed or closed.
+    internal void RefreshUpdateBanner()
+    {
+        if (System.Windows.Application.Current is not App app) return;
+        var version = app.Updates.AnnouncedVersion;
+        UpdateBanner.Visibility = version is null ? Visibility.Collapsed : Visibility.Visible;
+        if (version is not null)
+            UpdateBannerText.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("UpdateBannerFormat"), version, app.Updates.CurrentVersion);
+    }
+
+    private void DismissUpdateBanner_Click(object sender, RoutedEventArgs e)
+    {
+        if (System.Windows.Application.Current is App app) app.Updates.DismissAnnouncement();
+    }
+
     private void OpenDownloadPage_Click(object sender, RoutedEventArgs e)
     {
         if (System.Windows.Application.Current is not App app) return;
@@ -1842,7 +1858,7 @@ public partial class MainWindow : Window
             }
             ApplyPortableSettings(value);
             LoadSettings();
-            LocalizationManager.Apply(System.Windows.Application.Current.Resources);
+            LocalizationManager.Apply(System.Windows.Application.Current.Resources); RefreshUpdateBanner();
             ApplyAccessibilityLabels();
             PortableSettingsStatus.Text = ignored.Count == 0
                 ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsImportedFormat"), fields.Count)
@@ -1996,7 +2012,7 @@ public partial class MainWindow : Window
     {
         if (loadingSettings || LanguageChoice.SelectedItem is not ComboBoxItem item || !Enum.TryParse<AgentLanguage>(item.Tag?.ToString(), out var language)) return;
         AgentSettings.Language = language;
-        LocalizationManager.Apply(System.Windows.Application.Current.Resources);
+        LocalizationManager.Apply(System.Windows.Application.Current.Resources); RefreshUpdateBanner();
         if (System.Windows.Application.Current is App app) app.RefreshTrayText();
         ApplyAccessibilityLabels();
         // The log's status line is composed in code, so it does not follow the

@@ -561,6 +561,24 @@ internal static class Entry
         threatPage.SetResourceReference(Control.BackgroundProperty, "AppBackgroundBrush");
         Save(threatPage, 1400, 900, Path.Combine(output, "threats-1400x900.png"));
 
+        // The notice of a newer version, as it sits across the top of every tab,
+        // at a full window's width and at a narrow one where its text wraps.
+        foreach (var (dark, suffix) in new[] { (false, "light"), (true, "dark") })
+        {
+            ThemeManager.ApplyTheme(application.Resources, dark, Color.FromRgb(0x4D, 0x94, 0xFF));
+            foreach (var (width, height) in new[] { (1300, 60), (620, 96) })
+            {
+                var bannerWindow = new MainWindow();
+                var banner = (Border)bannerWindow.FindName("UpdateBanner")!;
+                ((TextBlock)bannerWindow.FindName("UpdateBannerText")!).Text = string.Format(
+                    System.Globalization.CultureInfo.CurrentCulture, LocalizationManager.Text("UpdateBannerFormat"), "0.1.173", "0.1.172");
+                banner.Visibility = Visibility.Visible;
+                ((Grid)banner.Parent).Children.Remove(banner);
+                banner.Margin = new Thickness(0);
+                Save(banner, width, height, Path.Combine(output, $"update-banner-{width}-{suffix}.png"));
+            }
+        }
+
         var notificationWindow = new MainWindow();
         var notificationTab = (TabItem)notificationWindow.MainTabs.Items[4];
         var notificationPage = (ScrollViewer)notificationTab.Content;
