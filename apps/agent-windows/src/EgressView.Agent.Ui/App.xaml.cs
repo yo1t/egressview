@@ -81,7 +81,11 @@ public partial class App : System.Windows.Application
         DispatcherUnhandledException += (_, args) => ReportRun("fault", args.Exception.GetType().FullName);
         SessionEnding += (_, args) =>
         {
-            if (args.Cancel) return;
+            // The installer's Restart Manager closes the window with the same
+            // message Windows sends at sign-out. Only Windows itself going
+            // down is a session ending; an update closing the window is an
+            // orderly exit, and keeps its note.
+            if (args.Cancel || GetSystemMetrics(ShuttingDownMetric) == 0) return;
             sessionEnding = true;
             ReportRun("session-end");
         };
@@ -510,6 +514,18 @@ public partial class App : System.Windows.Application
     /// pool and is left to finish on its own.
     /// Whether this process opened a run. Only the window that did may end it.
     private static bool runOpened;
+
+    /// Nonzero while the current session is shutting down or signing out.
+    ///
+    /// Needed because the message alone does not say: on 2026-11-21 the
+    /// update to 0.1.167 closed the window through Restart Manager two
+    /// seconds after stopping the service. The window took it for a sign-out,
+    /// left no exit note, sent its report to a service that was gone, and its
+    /// run was filed as unexpected.
+    private const int ShuttingDownMetric = 0x2000;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
 
     /// Windows is signing the user out or shutting down. The window did not
     /// choose to close, so it leaves no note saying it did: on 2026-11-06 a
