@@ -1031,6 +1031,19 @@ try
     Assert(rateNotice.Evaluate(rateLimited) == DeliveryNotificationAction.None &&
         rateNotice.Evaluate(rateLimited with { ObservedAt = notificationNow.AddMinutes(5) }) == DeliveryNotificationAction.Outage,
         "a 429 is tolerated briefly and reported only when the queue remains stale");
+    // 2026-11-15: a backlog of hours draining against 429s while the Hub
+    // acknowledged batches. Behind, not stuck.
+    var draining = new DeliveryNotificationTracker();
+    var drainingSample = new DeliveryNotificationSample(notificationNow, true, "rate-limited", 4_257,
+        notificationNow.AddHours(-6), notificationNow.AddSeconds(-11));
+    Assert(draining.Evaluate(drainingSample) == DeliveryNotificationAction.None
+           && draining.Evaluate(drainingSample with { ObservedAt = notificationNow.AddMinutes(4), LastAcknowledgedAt = notificationNow.AddMinutes(3) }) == DeliveryNotificationAction.None,
+        "a backlog the Hub is acknowledging batch by batch is not reported as stuck, however old its oldest row");
+    Assert(draining.Evaluate(drainingSample with { ObservedAt = notificationNow.AddMinutes(7), LastAcknowledgedAt = notificationNow.AddMinutes(3) }) == DeliveryNotificationAction.None
+           && draining.Evaluate(drainingSample with { ObservedAt = notificationNow.AddMinutes(8), LastAcknowledgedAt = notificationNow.AddMinutes(3) }) == DeliveryNotificationAction.Outage,
+        "once the Hub has taken nothing for the grace, the same backlog is reported");
+    Assert(new DeliveryNotificationTracker().Evaluate(drainingSample with { State = "contract-rejected" }) == DeliveryNotificationAction.Outage,
+        "a refusal of the content is reported at once even while other batches were taken");
     var unnotified = new DeliveryNotificationTracker();
     var unnotifiedFailure = new DeliveryNotificationSample(notificationNow, true, "retryable", 1, notificationNow.AddMinutes(-6), deliveryAck);
     Assert(unnotified.Evaluate(unnotifiedFailure) == DeliveryNotificationAction.Outage, "a long outage is eligible for delivery");
