@@ -319,6 +319,7 @@ public struct ThreatFeedDownloader: Sendable {
     /// Hub about the same destination is the defect P3-19 exists to prevent.
     public static let lowConfidenceDomains: Set<String> = [
         "github.com", "raw.githubusercontent.com", "gist.githubusercontent.com",
+        "release-assets.githubusercontent.com", "objects.githubusercontent.com",
         "gitlab.com", "bitbucket.org",
         "drive.google.com", "docs.google.com", "storage.googleapis.com",
         "dropbox.com", "dl.dropboxusercontent.com",

@@ -349,8 +349,12 @@ function parseThreatFox(text) {
 
 // Domains that host user-generated content — domain-level match has low confidence
 // (malware can be hosted there, but the domain itself is legitimate)
+// GitHub release downloads are served from release-assets. and objects.: on
+// 2026-11-15 a 1.87 GB Ollama update from release-assets. was the one "high"
+// threat match on a Windows PC, and notified three times.
 const LOW_CONFIDENCE_DOMAINS = new Set([
   'github.com', 'raw.githubusercontent.com', 'gist.githubusercontent.com',
+  'release-assets.githubusercontent.com', 'objects.githubusercontent.com',
   'gitlab.com', 'bitbucket.org',
   'drive.google.com', 'docs.google.com', 'storage.googleapis.com',
   'dropbox.com', 'dl.dropboxusercontent.com',

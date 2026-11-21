@@ -228,6 +228,19 @@ describe('parseUrlhaus', () => {
     assert.deepEqual(parseUrlhaus(''), []);
   });
 
+  it('treats GitHub release downloads as a shared service', () => {
+    const csv = [
+      '"id","dateadded","url","url_status","last_online","threat","tags","urlhaus_link","reporter"',
+      '"1","2026-11-15","https://release-assets.githubusercontent.com/github-production-release-asset/1/x","online","2026-11-15","malware_download","","","r"',
+      '"2","2026-11-15","https://objects.githubusercontent.com/github-production-release-asset-2e65be/1/y","online","2026-11-15","malware_download","","","r"',
+    ].join('\n');
+    const entries = parseUrlhaus(csv);
+    assert.deepEqual(entries.map(e => [e.value, e.confidence]), [
+      ['release-assets.githubusercontent.com', 'low'],
+      ['objects.githubusercontent.com', 'low'],
+    ]);
+  });
+
   it('parses URLs containing commas in the query string', () => {
     const csv = [
       '"id","dateadded","url","url_status","last_online","threat","tags","urlhaus_link","reporter"',
