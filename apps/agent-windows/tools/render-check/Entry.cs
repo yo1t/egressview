@@ -1086,6 +1086,10 @@ internal static class Entry
         host.Measure(new Size(host.Width, host.Height));
         host.Arrange(new Rect(0, 0, host.Width, host.Height));
         host.UpdateLayout();
+        // A second pass after the queued work has run: a DataGrid sizes its
+        // star columns only once it has been laid out at a finite width.
+        host.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        host.UpdateLayout();
         var bitmap = new RenderTargetBitmap((int)host.Width, (int)host.Height, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(host);
         var encoder = new PngBitmapEncoder();
