@@ -19,11 +19,15 @@ const agentSource = fs.readFileSync(
   path.join(root, 'apps/agent-macos/Sources/EgressViewAgentCore/ThreatFeedDownloader.swift'),
   'utf8'
 );
+const windowsSource = fs.readFileSync(
+  path.join(root, 'apps/agent-windows/src/EgressView.Agent.Core/ThreatFeedDownloader.cs'),
+  'utf8'
+);
 
-function domainsFrom(source, startMarker) {
+function domainsFrom(source, startMarker, endMarker = ']') {
   const start = source.indexOf(startMarker);
   assert.notEqual(start, -1, `could not find ${startMarker}`);
-  const end = source.indexOf(']', start);
+  const end = source.indexOf(endMarker, start);
   return new Set(
     [...source.slice(start, end).matchAll(/'([^']+)'|"([^"]+)"/g)]
       .map(m => m[1] || m[2])
@@ -38,6 +42,13 @@ describe('脅威の確信度をHubとAgentで揃える (P3-19)', () => {
     assert.ok(hub.size >= 20, `expected a populated Hub list, got ${hub.size}`);
     assert.deepEqual([...agent].sort(), [...hub].sort(),
       'the Hub and the Agent would judge the same destination differently');
+  });
+
+  it('Windows Agentの一覧も同じ', () => {
+    const hub = domainsFrom(hubSource, 'const LOW_CONFIDENCE_DOMAINS');
+    const windows = domainsFrom(windowsSource, 'LowConfidenceDomains =', '};');
+    assert.deepEqual([...windows].sort(), [...hub].sort(),
+      'the Hub and the Windows Agent would judge the same destination differently');
   });
 
   it('両側とも、ホスト自身と親ドメインの両方で判定する', () => {
