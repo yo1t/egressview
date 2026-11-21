@@ -303,6 +303,31 @@ function storeUptimeDays(days) {
   try { localStorage.setItem(UPTIME_DAYS_KEY, String(days)); } catch { /* per-viewer convenience only */ }
 }
 
+// How much the Agent sent to the Hub in the period: what monitoring itself
+// costs the network. Observations the Hub left out for age are shown only when
+// there were some, since they mean a record from this computer is missing.
+function deliveryLines(delivery, days) {
+  if (!delivery) return [];
+  const lines = [textElement('div', tVars('agents.delivery.volume', {
+    bytes: formatBytes(delivery.bytes), requests: Number(delivery.requests || 0).toLocaleString(),
+  }), 'agent-delivery-volume')];
+  const counted = Number(delivery.countedFrom) || 0;
+  if (counted > Date.now() - days * DAY_MS + 5 * 60 * 1000) {
+    lines.push(textElement('div', tVars('agents.delivery.countedFrom', { time: fmtTs(counted) }), 'agent-card-meta'));
+  }
+  if (Number(delivery.requestsWithoutSize) > 0) {
+    lines.push(textElement('div', tVars('agents.delivery.withoutSize', {
+      count: Number(delivery.requestsWithoutSize).toLocaleString(),
+    }), 'agent-card-meta'));
+  }
+  if (Number(delivery.expired) > 0) {
+    lines.push(textElement('div', tVars('agents.delivery.expired', {
+      count: Number(delivery.expired).toLocaleString(),
+    }), 'agent-delivery-expired'));
+  }
+  return lines;
+}
+
 // How much of the period the Agent's reports reached the Hub, and when they
 // did not. An Agent sends only when it has flows, so a gap is a closed laptop
 // as often as a stopped Agent; a router seeing the computer tells them apart.
@@ -332,6 +357,7 @@ function renderUptime(report, uptimeState) {
   bar.value = percent ?? 0;
   bar.setAttribute('aria-label', t('agents.uptime.title'));
   section.appendChild(bar);
+  section.append(...deliveryLines(report.delivery, uptimeState.days));
   const gaps = Array.isArray(report.gaps) ? report.gaps : [];
   if (!gaps.length) {
     section.appendChild(textElement('div', t('agents.uptime.noGaps'), 'agent-card-meta'));

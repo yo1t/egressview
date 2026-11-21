@@ -141,6 +141,15 @@ function createRegistry() {
         ongoing: z.boolean(),
         agentStopped: z.boolean(),
       }).strict()),
+      // What the Agent sent to the Hub in the same period, and the observations
+      // the Hub left out as older than it keeps (agent-delivery-volume.js).
+      delivery: z.object({
+        requests: z.number(),
+        requestsWithoutSize: z.number(),
+        bytes: z.number(),
+        expired: z.number(),
+        countedFrom: z.number().nullable(),
+      }).strict(),
     }).strict()),
   }).strict());
 
