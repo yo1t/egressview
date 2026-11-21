@@ -1696,6 +1696,8 @@ test('stats tab scrolls to its charts on a short wide window, stacks them when n
   await authPage(page);
   await page.click('#btn-stats');
   await expect(page.locator('#stats-container')).toBeVisible();
+  // Measure only once the data has arrived: the charts grow when it does.
+  await expect(page.locator('#chart-bar rect.stats-bar').first()).toBeVisible();
   const measure = () => page.evaluate(() => {
     const view = document.getElementById('stats-container');
     const charts = document.querySelector('.stats-charts');
@@ -1712,15 +1714,14 @@ test('stats tab scrolls to its charts on a short wide window, stacks them when n
     expect(m.chartsHeight, `${width}x${height} charts`).toBeGreaterThanOrEqual(260);
     expect(m.scrollable, `${width}x${height} scroll`).toBeGreaterThan(0);
     expect(m.sideways, `${width}x${height} sideways`).toBeLessThanOrEqual(0);
-    await page.evaluate(() => {
+    // Scroll and measure in one step, and retry: the map redraw that a resize
+    // schedules can still change the height after the first scroll.
+    await expect.poll(() => page.evaluate(() => {
       const view = document.getElementById('stats-container');
       view.scrollTop = view.scrollHeight;
-    });
-    const bottom = await page.evaluate(() => {
       const charts = document.querySelector('.stats-charts').getBoundingClientRect();
       return Math.round(charts.bottom - window.innerHeight);
-    });
-    expect(bottom, `${width}x${height} charts reachable`).toBeLessThanOrEqual(0);
+    }), { message: `${width}x${height} charts reachable` }).toBeLessThanOrEqual(0);
   }
 
   // Beside the device list the two charts were each too narrow to draw: the
