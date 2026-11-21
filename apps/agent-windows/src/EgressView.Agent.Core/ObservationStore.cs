@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 33;
+    private const int CurrentSchemaVersion = 34;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -565,7 +565,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); {Version29Schema} {Version30Schema} {Version31Schema} {Version32Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} {Version25Schema} {Version27Schema} {Version28Schema} DROP TABLE observations; ALTER TABLE observations_v27 RENAME TO observations; DROP TABLE chart_hourly; ALTER TABLE chart_hourly_v28 RENAME TO chart_hourly; CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start); CREATE INDEX IF NOT EXISTS observations_observed_at ON observations(observed_at); {Version29Schema} {Version30Schema} {Version31Schema} {Version32Schema} {Version34Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -609,7 +609,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 29) { MigrateVersion29To30(); version = 30; }
         if (version == 30) { MigrateVersion30To31(); version = 31; }
         if (version == 31) { MigrateVersion31To32(); version = 32; }
-        if (version == 32) MigrateVersion32To33();
+        if (version == 32) { MigrateVersion32To33(); version = 33; }
+        if (version == 33) MigrateVersion33To34();
         ValidateSchema();
         }
         catch { ReportMigrationFailed(startedAt); throw; }
@@ -1591,8 +1592,8 @@ public sealed partial class ObservationStore : IDisposable
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_destination','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows','local_country_cache','geo_lookup_misses')");
-        if (tables != 21)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_destination','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows','local_country_cache','geo_lookup_misses','delivery_spill')");
+        if (tables != 22)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
