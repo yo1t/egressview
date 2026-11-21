@@ -2549,6 +2549,19 @@ try
             "what was set aside past the Hub's seven days is dropped and counted like the rest of the queue");
     }
 
+    // The notice of a newer version across the top of the window.
+    Assert(AgentUpdateNotice.VersionToAnnounce("0.1.173", "0.1.172", null) == "0.1.173"
+           && AgentUpdateNotice.VersionToAnnounce("0.1.10", "0.1.9", null) == "0.1.10",
+        "a newer version is announced, compared as a version rather than as text");
+    Assert(AgentUpdateNotice.VersionToAnnounce("0.1.172", "0.1.172", null) is null
+           && AgentUpdateNotice.VersionToAnnounce("0.1.171", "0.1.172", null) is null
+           && AgentUpdateNotice.VersionToAnnounce(null, "0.1.172", null) is null
+           && AgentUpdateNotice.VersionToAnnounce("not-a-version", "0.1.172", null) is null,
+        "the running version, an older one or nothing announces nothing");
+    Assert(AgentUpdateNotice.VersionToAnnounce("0.1.173", "0.1.172", "0.1.173") is null
+           && AgentUpdateNotice.VersionToAnnounce("0.1.174", "0.1.172", "0.1.173") == "0.1.174",
+        "a closed notice stays closed for that version and comes back for the next");
+
     // A PC off for longer than the Hub keeps anything: what the Hub would
     // refuse for its age is taken out before sending, and counted.
     using (var staleDelivery = new ObservationStore(Path.Combine(directory, "delivery-stale.db")))

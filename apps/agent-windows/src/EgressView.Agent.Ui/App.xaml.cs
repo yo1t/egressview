@@ -293,7 +293,11 @@ public partial class App : System.Windows.Application
     private void UpdateStateChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() =>
     {
         RefreshTrayText();
-        if (MainWindow is MainWindow window) window.RefreshUpdateStatus();
+        if (MainWindow is MainWindow window)
+        {
+            window.RefreshUpdateStatus();
+            window.RefreshUpdateBanner();
+        }
     });
 
     private async Task CheckForUpdatesAsync()

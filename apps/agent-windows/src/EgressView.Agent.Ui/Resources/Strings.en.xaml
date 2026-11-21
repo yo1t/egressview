@@ -118,4 +118,6 @@
   <system:String x:Key="WorthALookNewPairFormat">{0}: first time together, {1} sent within a week</system:String>
   <system:String x:Key="WorthALookAboveUsualFormat">{0}: {1} sent in a day, usually up to {2}</system:String>
   <system:String x:Key="WorthALookMachineFormat">{0}: {1} sent in 24 hours, usually up to {2}</system:String>
+  <system:String x:Key="UpdateBannerFormat">Version {0} of EgressView Agent is available. This PC has {1}.</system:String>
+  <system:String x:Key="UpdateBannerDismiss">Dismiss</system:String>
 </ResourceDictionary>

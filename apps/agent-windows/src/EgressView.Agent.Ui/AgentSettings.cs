@@ -132,6 +132,21 @@ internal static class AgentSettings
         set => Write("LastUpdateCheck", value?.ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? "");
     }
 
+    /// The newest version the daily check has seen, kept so the window can
+    /// say so after a restart without waiting up to a day for the next check.
+    internal static string? AvailableUpdateVersion
+    {
+        get => Read("AvailableUpdateVersion") is { Length: > 0 } value ? value : null;
+        set => Write("AvailableUpdateVersion", value ?? "");
+    }
+
+    /// The version whose notice the person closed.
+    internal static string? DismissedUpdateVersion
+    {
+        get => Read("DismissedUpdateVersion") is { Length: > 0 } value ? value : null;
+        set => Write("DismissedUpdateVersion", value ?? "");
+    }
+
     internal static double WindowWidth
     {
         get => ReadDimension("WindowWidth", 1440, 1020, 7680);
