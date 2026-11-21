@@ -452,6 +452,16 @@
     It records what left, so that afterwards you can say what happened — which is
     the question that matters on the day prevention fails.</p>
 
+  <h3 data-ja="情報の持ち出しやマルウェアを検知できますか">
+    Will it tell me if something is stealing data?</h3>
+  <p data-ja="確定はしません。示すのは、調べる価値があるものです。たとえば、このPCが普段よりずっと多くの量を15分間に送ったとき。PCのプログラムが2分間にLAN内の30個のアドレスへ接続したとき。大きなバックアップや、自分で動かしたネットワークの調査ツールでも同じことが起きるので、見て判断するのはあなたです。閾値より少ない送信や、EgressViewから見えない通信は見逃します。&lt;a href=&quot;docs/attack-mapping.ja.html&quot;&gt;兆候ごとの条件と、関係するMITRE ATT&amp;CKの技法、見逃すもの&lt;/a&gt;">
+    It points at what is worth a look; it does not give verdicts. Two examples:
+    this computer sends far more in 15 minutes than it usually does, or a program
+    on a PC connects to 30 LAN addresses in two minutes. A large backup or a
+    network tool you ran yourself can do the same, so you look and decide. It misses sending that stays
+    under its thresholds and traffic it cannot see.
+    <a href="docs/attack-mapping.html">Each sign, the MITRE ATT&amp;CK technique it relates to, and what it misses</a>.</p>
+
   <h3 data-ja="無料ですか、ソースは読めますか">Is it free, and can I read the source?</h3>
   <p data-ja="どちらもはいです。ソースはGitHubで公開しています。Mac AgentはDeveloper ID署名・公証済みです。Windows AgentのMSIは現在未署名なので、チェックサムを確認してください。">
     Both yes. The source is on GitHub. The Mac Agent is Developer ID signed and notarised; the Windows MSI is currently unsigned, so verify its checksum.</p>
