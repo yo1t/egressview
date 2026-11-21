@@ -36,7 +36,7 @@ Hubを設置しなくても、宛先・アプリ名・データ量・ローカ�
 
 <img src="docs/assets/egressview-agent-windows.png" alt="地球儀、アプリ別の通信先、時間推移を表示するWindows Agent" width="760">
 
-Windowsサービスが通信を観測し、そのPC内に履歴を残します。Hubへの送信は任意です。**現在のWindows配布物はAuthenticode未署名**のため、SmartScreenが発行元不明と警告する場合があります。インストール前に[ダウンロードページの手順](https://dl.egressview.com/)でMSIのチェックサムを照合してください。[Windows導入ガイド](apps/agent-windows/README.md) · [Agentが送る情報](docs/agent-privacy-windows.ja.md)
+Windowsサービスが通信を観測し、そのPC内に履歴を残します。Hubへの送信は任意です。**現在のWindows配布物はAuthenticode未署名**のため、SmartScreenが発行元不明と警告する場合があります。スマート アプリ コントロールがオンのPCではAgentの画面が開けません（[詳細](apps/agent-windows/README.md#スマート-アプリ-コントロールがオンのpc)）。インストール前に[ダウンロードページの手順](https://dl.egressview.com/)でMSIのチェックサムを照合してください。[Windows導入ガイド](apps/agent-windows/README.md) · [Agentが送る情報](docs/agent-privacy-windows.ja.md)
 
 ## 試してみる
 

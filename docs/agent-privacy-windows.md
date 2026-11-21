@@ -183,7 +183,9 @@ Get-NetTCPConnection -State Established |
 ## About signing
 
 **The Windows builds are not currently code-signed.** SmartScreen will warn
-that the publisher is unknown when you download one.
+that the publisher is unknown when you download one. On Windows 11 with Smart
+App Control on, the Agent's window will not open
+([setup guide](../apps/agent-windows/README.en.md#pcs-with-smart-app-control-on)).
 
 Check it against the SHA-256 published on the download page.
 
