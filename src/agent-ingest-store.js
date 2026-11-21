@@ -241,15 +241,41 @@ function hasLocalEndpoint(observation) {
  * @param {object} envelope  the batch, without the observations left out as
  *   expired; `expiredCount` says how many there were.
  */
-async function storeBatch(agentId, envelope, { receivedAt = Date.now(), expiredCount = 0 } = {}) {
+// Batches being written right now, by agent and batch id. Writing yields to
+// the event loop between chunks, so an agent that gives up waiting and sends
+// the same batch again can arrive while the first copy is still being written.
+// Both used to pass the "already stored?" check, and the second then failed on
+// the batch row's primary key with a 500 (seen once in production, 2026-11-14).
+const batchesInFlight = new Map();
+
+async function storeBatch(agentId, envelope, options = {}) {
+  const key = `${agentId}\n${envelope.batchId}`;
+  const pending = batchesInFlight.get(key);
+  if (pending) {
+    // Wait for the first copy, then answer as a replay of it. If it failed,
+    // this request is simply the agent's retry and writes the batch itself.
+    try { await pending; } catch { /* handled by the retry below */ }
+    return storeBatch(agentId, envelope, options);
+  }
+  const write = storeBatchOnce(agentId, envelope, options);
+  batchesInFlight.set(key, write);
+  try {
+    return await write;
+  } finally {
+    if (batchesInFlight.get(key) === write) batchesInFlight.delete(key);
+  }
+}
+
+async function storeBatchOnce(agentId, envelope, { receivedAt = Date.now(), expiredCount = 0 } = {}) {
   const database = requireDb();
   if (!Number.isFinite(receivedAt)) throw new TypeError('receivedAt must be finite');
   if (!Number.isSafeInteger(expiredCount) || expiredCount < 0) throw new TypeError('expiredCount must be a count');
 
-  const existing = database.prepare(`
+  const selectBatch = database.prepare(`
     SELECT batchId, acceptedCount, duplicateCount, rejectedCount, receivedAt
     FROM agent_ingest_batches WHERE agentId = ? AND batchId = ?
-  `).get(agentId, envelope.batchId);
+  `);
+  const existing = selectBatch.get(agentId, envelope.batchId);
   if (existing) return batchAck(existing, true);
 
   const storedObservation = database.prepare(`
@@ -429,7 +455,14 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now(), expiredC
     runtimeProfiler.measureSync('agentIngest.chunk', () => writeTimed('chunk', writeChunk, chunk));
   }
 
+  let recordedMeanwhile = null;
   const finish = database.transaction(() => {
+    // Recorded by another request while this one was writing (the in-flight
+    // map above covers one process; this covers anything it cannot see). The
+    // observations it wrote were counted as duplicates here, so its ACK is the
+    // true one, and inserting the batch row again would only fail.
+    recordedMeanwhile = selectBatch.get(agentId, envelope.batchId) ?? null;
+    if (recordedMeanwhile) return;
     // A rejected row must remain retryable. Recording this batch as complete
     // would make every retry replay the rejection forever, even after a Hub
     // migration adds support for the observation. Accepted rows remain
@@ -465,6 +498,7 @@ async function storeBatch(agentId, envelope, { receivedAt = Date.now(), expiredC
   });
   if (observations.length > OBSERVATIONS_PER_CHUNK) await yieldToLoop();
   runtimeProfiler.measureSync('agentIngest.finish', () => writeTimed('finish', finish));
+  if (recordedMeanwhile) return batchAck(recordedMeanwhile, true);
 
   // Correlation deliberately does not run here. It used to, once per ingest,
   // and because it passed no `since` it re-examined the newest 5,000
