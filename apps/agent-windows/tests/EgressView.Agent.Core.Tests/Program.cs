@@ -1515,7 +1515,7 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 33, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 34, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
@@ -1941,7 +1941,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 33, "v1 database migrates through v2-v33");
+        Assert(migrated.SchemaVersion == 34, "v1 database migrates through v2-v34");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -1993,7 +1993,7 @@ try
     Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v29.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 33, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 34, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -2521,6 +2521,34 @@ try
         Assert(batch.Observations.Count == 1 && batch.Observations[0].BytesOut == 150 && batch.Observations[0].BytesIn == 100, "delivery batch preserves exact aggregate bytes");
         Assert(deliveryStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(3))!.BatchId == activeBatchId, "unacknowledged retry preserves the batch ID");
     }
+    // Over the queue's limit, observations are set aside rather than deleted,
+    // and go later under their own ids (2026-11-15: 66,847 deleted).
+    using (var spillDelivery = new ObservationStore(Path.Combine(directory, "delivery-spill.db")))
+    {
+        var at = DateTimeOffset.UtcNow.AddHours(-1);
+        NetworkObservation Flow(int port, long sent) => new(at.AddSeconds(port - 50000), 77, "TCP", "10.0.0.1", port, "203.0.113.8", 443,
+            sent, 0, ObservationLayer.Logical, "if", "etw", "Browser");
+        spillDelivery.QueueForDelivery([Flow(50001, 1), Flow(50002, 2), Flow(50003, 3), Flow(50004, 4), Flow(50005, 5)], at, maximumPending: 3);
+        var status = spillDelivery.ReadDeliveryStatus();
+        Assert(status.Pending == 5 && status.QueueOverflow == 0 && spillDelivery.ReadCounters()["delivery-observations-spilled"] == 2,
+            "over the limit, the oldest are set aside and still counted as waiting, not lost");
+        // A new observation of a set-aside flow, while it waits.
+        spillDelivery.QueueForDelivery([Flow(50001, 10) with { ObservedAt = at.AddMinutes(5) }], at.AddMinutes(5), maximumPending: 10);
+        var batch = spillDelivery.PrepareDeliveryBatch(at.AddMinutes(6))!;
+        var bytes = batch.Observations.OrderBy(item => item.LocalPort).Select(item => item.BytesOut).ToArray();
+        Assert(batch.Observations.Count == 5 && bytes.SequenceEqual([11L, 2L, 3L, 4L, 5L]),
+            "what was set aside comes back into the next batch, merged with a later observation of the same flow");
+        Assert(spillDelivery.ReadDeliveryStatus().Pending == 5, "nothing is counted twice while it moves back");
+        spillDelivery.AcknowledgeDelivery(batch.BatchId, at.AddMinutes(7));
+        Assert(spillDelivery.ReadDeliveryStatus().Pending == 0, "and an acknowledgement clears it");
+
+        var old = at.AddDays(-8);
+        spillDelivery.QueueForDelivery([Flow(50006, 6) with { ObservedAt = old }, Flow(50007, 7), Flow(50008, 8)], old, maximumPending: 2);
+        var fresh = spillDelivery.PrepareDeliveryBatch(at.AddMinutes(8))!;
+        Assert(fresh.Observations.Count == 2 && spillDelivery.ReadCounters()["delivery-observations-expired"] == 1,
+            "what was set aside past the Hub's seven days is dropped and counted like the rest of the queue");
+    }
+
     // A PC off for longer than the Hub keeps anything: what the Hub would
     // refuse for its age is taken out before sending, and counted.
     using (var staleDelivery = new ObservationStore(Path.Combine(directory, "delivery-stale.db")))
@@ -3554,7 +3582,7 @@ try
             var baselineDatabase = Path.Combine(directory, "baseline.db");
             using (var store = new ObservationStore(baselineDatabase))
             {
-                Assert(store.SchemaVersion == 33 && store.ReadOutboundBaselineSummary().HoursRecorded == 0,
+                Assert(store.SchemaVersion == 34 && store.ReadOutboundBaselineSummary().HoursRecorded == 0,
                     "a new database starts with an empty baseline");
                 var now = DateTimeOffset.UtcNow;
                 var start = Hour(now).AddHours(-5);
@@ -3644,7 +3672,7 @@ try
             Assert(PairDayBytes("two.example") == 2300, "the fixture holds the merged sum");
             using (var store = new ObservationStore(rebuildDatabase))
             {
-                Assert(store.SchemaVersion == 33, "the baseline moves to v33");
+                Assert(store.SchemaVersion == 34, "the baseline moves to v33");
                 var known = store.ReadOutboundBaselineSummary();
                 store.CaptureBaselineHours(rebuildNow, maxHours: 1000);
                 Assert(store.ReadOutboundBaselineSummary() is { } after && after.PairsKnown == known.PairsKnown
@@ -5134,7 +5162,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 33 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 34 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
