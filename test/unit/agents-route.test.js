@@ -1284,7 +1284,7 @@ describe('Hubで答え、Agentへ戻す（P3-194 段階2）', () => {
     for (const answer of response.body.answers) {
       assert.match(answer.answeredAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     }
-    const shape = answers => answers.map(({ answeredAt, ...rest }) => rest)
+    const shape = answers => answers.map(({ answeredAt: _answeredAt, ...rest }) => rest)
       .sort((a, b) => a.candidateId.localeCompare(b.candidateId));
     assert.deepEqual(shape(response.body.answers), shape(expected.answers));
   });
