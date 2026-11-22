@@ -663,13 +663,25 @@
   .agent-answer-investigate { color: #fecaca; background: rgba(239,68,68,0.18); }
   .agent-answer-unanswered { color: #fde68a; background: rgba(245,158,11,0.16); }
   .agent-answer-expected { color: #a7f3d0; background: rgba(16,185,129,0.14); }
-  /* Wide enough, the picked Agent's candidates and apps sit side by side.
-     Measured on the card, not the window: the tab shares the screen with the
-     device list. */
+  /* Wide enough, the picked Agent's candidates take the left column and the
+     shorter sections stack on the right, so a long list no longer pushes them
+     below it. The last right-hand row takes up whatever height the list has
+     left over. Measured on the card, not the window: the tab shares the screen
+     with the device list. */
   .agent-card { container: agent-card / inline-size; }
-  .agent-card-pair { display: grid; gap: 14px; align-items: start; }
+  .agent-card-body { display: grid; gap: 14px; align-items: start; }
   @container agent-card (min-width: 900px) {
-    .agent-card-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 28px; }
+    .agent-card-body {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-rows: auto auto 1fr auto;
+      gap: 14px 28px;
+    }
+    .agent-card-slot-candidates { grid-column: 1; grid-row: 1 / 4; }
+    .agent-card-slot-apps { grid-column: 2; grid-row: 1; }
+    .agent-card-slot-uptime { grid-column: 2; grid-row: 2; }
+    .agent-card-slot-facts { grid-column: 2; grid-row: 3; }
+    .agent-card-slot-probes { grid-column: 1 / -1; grid-row: 4; }
+    .agent-card-slot-facts .agent-facts-list { grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); }
   }
   @media (max-width: 1100px) {
     .agent-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
