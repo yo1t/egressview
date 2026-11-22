@@ -99,7 +99,10 @@ actually sent. **The macOS and Windows agents send the same ones.**
 
 `schemaVersion`, `batchId`, `sentAt`, `agent` (`hostName`, `platform`, `osVersion`, `agentVersion`), `observations` (`observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`)
 
-`remoteHostname` is added only when the Hub advertises support for it. The
+`remoteHostname` is added only when the Hub advertises support for it. `agent` also carries `manufacturer` and `model`
+(the maker and model of this computer, such as Apple and Mac14,2) only when the
+Hub lists them in its capabilities; the Hub's device list shows them when the
+router cannot tell who made the device. The
 credential is sent as a Bearer token to that Hub.
 
 This is the same list the agent shows before enrolling. Enrolment cannot start

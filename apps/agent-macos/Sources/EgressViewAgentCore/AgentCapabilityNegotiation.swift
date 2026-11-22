@@ -30,6 +30,9 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
     /// Whether this Hub stores summaries of LAN senders probing this Mac
     /// (P3-191). Absent, they are not sent.
     public let inboundProbes: Bool?
+    /// Optional fields about this computer the Hub reads in `agent`
+    /// (P3-199). Absent on older Hubs, and absence means send none.
+    public let agentFields: [String]?
 
     public init(
         schemaVersions: [Int],
@@ -40,7 +43,8 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
         observationFields: [String]? = nil,
         observationUpdates: Bool? = nil,
         unmeasuredClosings: Bool? = nil,
-        inboundProbes: Bool? = nil
+        inboundProbes: Bool? = nil,
+        agentFields: [String]? = nil
     ) {
         self.schemaVersions = schemaVersions
         self.maxObservationsPerBatch = maxObservationsPerBatch
@@ -51,6 +55,7 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
         self.observationUpdates = observationUpdates
         self.unmeasuredClosings = unmeasuredClosings
         self.inboundProbes = inboundProbes
+        self.agentFields = agentFields
     }
 }
 
@@ -91,6 +96,13 @@ public enum AgentCapabilityNegotiation {
 
     public static func acceptsInboundProbes(capabilities: AgentHubCapabilities?) -> Bool {
         capabilities?.inboundProbes == true
+    }
+
+    /// Whether this Hub reads the maker and model of this computer. Both
+    /// must be listed: they travel together.
+    public static func acceptsHardware(capabilities: AgentHubCapabilities?) -> Bool {
+        guard let fields = capabilities?.agentFields else { return false }
+        return fields.contains("manufacturer") && fields.contains("model")
     }
 
     public static func acceptsRemoteHostname(capabilities: AgentHubCapabilities?) -> Bool {

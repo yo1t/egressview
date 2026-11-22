@@ -7,12 +7,13 @@ public sealed record AgentHubCapabilities(
     int? RequestsPerMinute = null,
     IReadOnlyList<string>? Compression = null,
     IReadOnlyList<string>? ObservationFields = null,
-    bool? InboundProbes = null);
+    bool? InboundProbes = null,
+    IReadOnlyList<string>? AgentFields = null);
 
 public enum AgentCapabilityOutcomeKind { Agreed, Unknown, Incompatible }
 
 public sealed record AgentCapabilityOutcome(AgentCapabilityOutcomeKind Kind, int SchemaVersion,
-    int BatchSize, bool IncludeRemoteHostname, bool IncludeInboundProbes = false);
+    int BatchSize, bool IncludeRemoteHostname, bool IncludeInboundProbes = false, bool IncludeHardware = false);
 
 public sealed record DeliveryCapabilityStatus(string State, DateTimeOffset? CheckedAt = null,
     int? StatusCode = null, int? SchemaVersion = null, int? BatchSize = null,
@@ -36,6 +37,11 @@ public static class AgentCapabilityNegotiation
         var hostname = capabilities.ObservationFields?.Contains("remoteHostname", StringComparer.Ordinal) == true;
         // Only on the Hub's say-so: an older Hub rejects an envelope with a
         // field it does not know (P3-191).
-        return new(AgentCapabilityOutcomeKind.Agreed, CurrentSchemaVersion, batchSize, hostname, capabilities.InboundProbes == true);
+        // The maker and model travel together, and only to a Hub that lists
+        // both (P3-199).
+        var hardware = capabilities.AgentFields is { } fields
+            && fields.Contains("manufacturer", StringComparer.Ordinal) && fields.Contains("model", StringComparer.Ordinal);
+        return new(AgentCapabilityOutcomeKind.Agreed, CurrentSchemaVersion, batchSize, hostname, capabilities.InboundProbes == true,
+            hardware);
     }
 }

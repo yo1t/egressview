@@ -26,7 +26,7 @@ describe('Windows Agent reports its own version', () => {
   it('enrolment, delivery and the User-Agent use the built version', () => {
     const read = (...parts) => fs.readFileSync(path.join(srcRoot, ...parts), 'utf8');
     assert.match(read('EgressView.Agent.Core', 'AgentEnrollment.cs'), /ProductInfoHeaderValue\("EgressView-Agent-Windows", DiagnosticsReport\.CurrentVersion\)/);
-    assert.match(read('EgressView.Agent.Service', 'DeliveryController.cs'), /Environment\.OSVersion\.VersionString, DiagnosticsReport\.CurrentVersion\)/);
+    assert.match(read('EgressView.Agent.Service', 'DeliveryController.cs'), /Environment\.OSVersion\.VersionString, DiagnosticsReport\.CurrentVersion[,)]/);
     assert.match(read('EgressView.Agent.Ui', 'MainWindow.xaml.cs'), /new AgentEnrollmentMetadata\(Environment\.MachineName, "windows", Environment\.OSVersion\.VersionString, DiagnosticsReport\.CurrentVersion\)/);
   });
 });

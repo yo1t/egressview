@@ -84,7 +84,10 @@ how many of this PC's closed ports it tried (`windowStart`, `windowSeconds`,
 `localAddress`, `sourceAddress`, `networkProtocol`, `distinctPorts`, `packets`,
 `samplePorts`). No contents.
 
-`remoteHostname` is added only when the Hub advertises support for it. The
+`remoteHostname` is added only when the Hub advertises support for it. `agent` also carries `manufacturer` and `model`
+(the maker and model of this computer, such as Apple and Mac14,2) only when the
+Hub lists them in its capabilities; the Hub's device list shows them when the
+router cannot tell who made the device. The
 credential is sent as a Bearer token to that Hub.
 
 This is the same list the agent shows before enrolling. **Enrolment cannot

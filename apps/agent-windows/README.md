@@ -39,7 +39,7 @@ Get-MpComputerStatus | Select-Object SmartAppControlState
 Hub登録ではPC名、Windowsのバージョン、Agentのバージョンを送ります。観測データのHub送信は登録だけでは始まらず、アプリ内で明示的に有効にする必要があります。有効化後は認証用Bearer tokenをそのHubへ送り、次のJSONメタデータを送ります。通信内容・パケット本体は収集も送信もしません。
 
 - バッチ: `schemaVersion`, `batchId`, `sentAt`, `agent`, `observations`。
-- Agent: `hostName`, `platform`, `osVersion`, `agentVersion`。
+- Agent: `hostName`, `platform`, `osVersion`, `agentVersion`。PCのメーカーと機種 `manufacturer`, `model` は、Hubのcapabilities応答が対応を通知した場合だけ追加します（Hubの端末一覧に出します）。
 - 各観測: `observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`。取得できない値はnullです。
 - `remoteHostname`（宛先ホスト名）はHubのcapabilities応答が対応を通知した場合だけ追加します。旧Hubへは送りません。
 - 接続できなかった試み（宛先が応答しない・拒否した）も、送受信量0の観測として送ります。LAN内の探索の検知に使います。
