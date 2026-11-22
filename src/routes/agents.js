@@ -29,6 +29,7 @@ const {
   AGENT_INGEST_MAX_BODY_BYTES,
 } = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
+const { HARDWARE_FIELDS } = require('../agent-hardware');
 const {
   outboundCandidatesSchema, hubAnswerBodySchema, MAX_ENTRIES: OUTBOUND_CANDIDATES_MAX_ENTRIES,
 } = require('../agent-outbound-candidates');
@@ -765,6 +766,9 @@ module.exports = function agentRoutes({
       // How many outbound candidates one PUT may list. A Hub without this
       // takes 20, the most an Agent sent before it.
       maxOutboundCandidates: OUTBOUND_CANDIDATES_MAX_ENTRIES,
+      // The optional `agent` fields this Hub reads (P3-199). Like
+      // `observationFields`, an Agent sends one only if it is named here.
+      agentFields: [...HARDWARE_FIELDS],
     });
   });
 

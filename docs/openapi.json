@@ -421,6 +421,16 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 64
+                      },
+                      "manufacturer": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "model": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
                       }
                     },
                     "required": [
@@ -713,6 +723,16 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 64
+                      },
+                      "manufacturer": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "model": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
                       }
                     },
                     "required": [
@@ -1159,7 +1179,7 @@
                     "type": "boolean"
                   },
                   "entries": {
-                    "maxItems": 20,
+                    "maxItems": 150,
                     "type": "array",
                     "items": {
                       "type": "object",

@@ -224,6 +224,19 @@ function initDb(dbPath) {
       ON device_merge_candidates(status, createdAt DESC);
   `);
 
+  // The address each Agent's computer was on, as the device list matched it
+  // (P3-199). Kept past the Agent's own 7-day records, so a move found later
+  // can still name the row the computer left behind.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_device_addresses (
+      agentId TEXT NOT NULL,
+      ip      TEXT NOT NULL,
+      firstAt INTEGER NOT NULL,
+      lastAt  INTEGER NOT NULL,
+      PRIMARY KEY (agentId, ip)
+    );
+  `);
+
   // ── Prepared statements ──────────────────────────────────────────────────────
 
   stmtUpsert = db.prepare(`
@@ -489,6 +502,84 @@ function isDeviceAddress(ip) {
 }
 
 /**
+ * The host side of a virtual network (.1) or a subnet broadcast (.255): what
+ * an Agent's computer sends from or to besides its LAN address.
+ */
+function isAgentSideAddress(ip) {
+  return /\.(1|255)$/.test(String(ip || ''));
+}
+
+/**
+ * Hides rows that were never devices: addresses isDeviceAddress refuses, and
+ * rows an Agent alone started for its virtual adapters or a broadcast. They
+ * are archived, not deleted, so any can be brought back from the list.
+ * Rows these rules no longer make are made again only by a mistake, so this
+ * runs at every start and normally finds nothing.
+ *
+ * @returns {number} rows archived
+ */
+function archiveNonDevices(now = Date.now()) {
+  if (!db) return 0;
+  const rows = db.prepare(
+    'SELECT deviceId, ip, mac, sources FROM devices WHERE archivedAt IS NULL'
+  ).all();
+  const archive = db.prepare('UPDATE devices SET archivedAt = ? WHERE deviceId = ? AND archivedAt IS NULL');
+  let archived = 0;
+  db.transaction(() => {
+    for (const row of rows) {
+      const agentOnly = !row.mac && String(row.sources || '') === 'agent' && isAgentSideAddress(row.ip);
+      if (isDeviceAddress(row.ip) && !agentOnly) continue;
+      archived += archive.run(now, row.deviceId).changes;
+    }
+  })();
+  return archived;
+}
+
+// How long after an Agent last used an address its row may still have been
+// seen, and still be the Agent's: a router polls every two minutes and keeps
+// a session a little after it ends.
+const AGENT_MOVE_GRACE_MS = 15 * 60 * 1000;
+// A move older than this is not offered.
+const AGENT_MOVE_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+const AGENT_MOVE_SCORE = 0.6;
+
+/**
+ * Records that an Agent's computer is on `ip` now, and offers to merge the
+ * row of an address it was on before (P3-199). Offered, not merged: the old
+ * address may belong to another device by now, and merging would send that
+ * device's sightings to this one. The old row is offered only when nothing
+ * was seen at that address after the Agent left it.
+ *
+ * @returns {number} merge candidates saved
+ */
+function noteAgentAddress({ agentId, hostName = null, ip, at = Date.now() } = {}) {
+  if (!db || !agentId || !isDeviceAddress(ip)) return 0;
+  db.prepare(`
+    INSERT INTO agent_device_addresses (agentId, ip, firstAt, lastAt) VALUES (?, ?, ?, ?)
+    ON CONFLICT(agentId, ip) DO UPDATE SET lastAt = MAX(lastAt, excluded.lastAt)
+  `).run(agentId, ip, at, at);
+  const current = getByIp(ip);
+  if (!current) return 0;
+  const earlier = db.prepare(`
+    SELECT ip, lastAt FROM agent_device_addresses
+    WHERE agentId = ? AND ip <> ? AND lastAt >= ?
+  `).all(agentId, ip, at - AGENT_MOVE_LOOKBACK_MS);
+  let saved = 0;
+  for (const before of earlier) {
+    const old = getByIp(before.ip);
+    if (!old || old.deviceId === current.deviceId) continue;
+    if ((old.lastSeen || 0) > before.lastAt + AGENT_MOVE_GRACE_MS) continue;
+    if (_isConflictingHardware(old.mac, current.mac)) continue;
+    const [idA, idB] = current.deviceId < old.deviceId
+      ? [current.deviceId, old.deviceId] : [old.deviceId, current.deviceId];
+    const reason = hostName ? `sameAgent="${hostName}"` : 'sameAgent';
+    stmtUpsertCandidate.run(idA, idB, AGENT_MOVE_SCORE, JSON.stringify([reason]), at);
+    saved += 1;
+  }
+  return saved;
+}
+
+/**
  * Correct what a device *is*, without claiming to have seen it.
  *
  * A DHCP lease is not a sighting. It says an address was assigned, and it
@@ -565,6 +656,15 @@ function observeDevice(d) {
       return null; // no merge target (manual archive) — silently drop
     }
   }
+
+  // ── 1b. An Agent's other addresses ───────────────────────────────────────
+  // A flow an Agent reports names the address it left from, and a computer
+  // also sends from its virtual adapters (Hyper-V, WSL, VMware, VirtualBox,
+  // Docker: the host side is the .1 of its network) and to its subnet's
+  // broadcast. Neither is a device, and a router sees neither, so an Agent
+  // alone does not start a row for them (P3-199). An existing row is still
+  // kept current.
+  if (!existingDevice && d.source === 'agent' && isAgentSideAddress(d.ip)) return null;
 
   // ── 2. Stable-MAC auto-link ───────────────────────────────────────────────
   if (!existingDevice && d.mac && isStableMac(d.mac)) {
@@ -981,7 +1081,11 @@ function seedFromConnectionHistory(connectionHistory) {
   if (!db) return;
   const seed = db.transaction(() => {
     for (const entry of connectionHistory.values()) {
-      if (!entry.src) continue;
+      // The same rule as observeDevice. Without it every restart put back
+      // the rows that rule keeps out: on the production Hub 2026-11-22,
+      // about 3,950 of 4,100 visible rows were IPv6 addresses (P3-200).
+      if (!isDeviceAddress(entry.src)) continue;
+      if (entry.agentHost && isAgentSideAddress(entry.src)) continue;
       upsert({
         ip:        entry.src,
         mac:       entry.srcMac      || null,
@@ -1060,6 +1164,9 @@ module.exports = {
   getDiscardedRedirects,
   chooseForIp,
   isDeviceAddress,
+  isAgentSideAddress,
+  archiveNonDevices,
+  noteAgentAddress,
   updateIdentity,
   getHeldMacSwitches,
   MAC_SWITCH_CONFIRMATIONS,
