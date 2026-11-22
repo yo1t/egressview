@@ -7,6 +7,7 @@ const { parseRequest } = require('../http-validation');
 const { createHistoryReader } = require('../history-reader');
 const { t } = require('../i18n-server');
 const logger = require('../logger');
+const { createAgentDeviceIdentityReader } = require('../device-agent-identity');
 const {
   sourceScopeShape, validateSourceScopePair, requireKnownSourceScope,
 } = require('../source-scope');
@@ -36,7 +37,8 @@ const archiveSchema = z.object({ deviceId }).strict();
  * }} ctx
  */
 module.exports = function devicesRoutes(ctx) {
-  const { requireAdmin, devices, notes, yamaha, history, routerManager, agentIdentities } = ctx;
+  const { requireAdmin, devices, notes, yamaha, history, routerManager, agentIdentities, agentIngest } = ctx;
+  const readAgentIdentities = createAgentDeviceIdentityReader({ agentIdentities, agentIngest, devices });
   // A scoped device list reads the source's devices from history; on the read
   // thread when the server has one (P3-184).
   const reader = ctx.historyReader || (history ? createHistoryReader({ history }) : null);
@@ -57,8 +59,25 @@ module.exports = function devicesRoutes(ctx) {
       const macs = new Set(keys.map(row => row.srcMac?.toLowerCase()).filter(Boolean));
       all = all.filter(device => ips.has(device.ip) || macs.has(device.mac?.toLowerCase()));
     }
+    // What the Agent on a row's computer knows of it (P3-199, P3-200). A
+    // failure here costs the extra detail, never the list.
+    let agentRows = new Map();
+    try {
+      agentRows = readAgentIdentities();
+    } catch (error) {
+      logger.error('[devices] Matching Agents to devices failed:', error.message);
+    }
     for (const d of all) {
       d.ipv6Addrs = d.mac ? (yamaha.getNdpByMac(d.mac) || null) : null;
+      const agent = agentRows.get(d.ip);
+      if (agent) {
+        d.agent = {
+          hostName: agent.hostName, platform: agent.platform,
+          manufacturer: agent.manufacturer, model: agent.model, ipv6: agent.ipv6,
+        };
+        // The router passes IPv6 through and knows none; the Agent knows its own.
+        if (!d.ipv6Addrs?.length && agent.ipv6.length) d.ipv6Addrs = agent.ipv6;
+      }
       d.note = notes
         ? notes.getForDevice(d.deviceId, d.ip, d.mac) || null
         : null;

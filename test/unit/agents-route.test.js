@@ -558,6 +558,24 @@ describe('Agent HTTP ingest', () => {
       .prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
   });
 
+  it('PCのメーカーと機種を受け取って覚え、送らない版の送信では消さない', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const withHardware = ingestEnvelope();
+    withHardware.agent = { ...withHardware.agent, manufacturer: 'Apple', model: 'Mac14,2' };
+    const first = await request(app, 'POST', '/api/agent/ingest', { body: withHardware, headers: authorization });
+    assert.equal(first.status, 200);
+    assert.deepEqual(agentIngestStore.listAgentHardware().get(enrolled.body.agentId), { manufacturer: 'Apple', model: 'Mac14,2' });
+
+    const without = ingestEnvelope();
+    without.batchId = require('node:crypto').randomUUID();
+    without.observations[0].observationId = require('node:crypto').randomUUID();
+    const second = await request(app, 'POST', '/api/agent/ingest', { body: without, headers: authorization });
+    assert.equal(second.status, 200);
+    assert.deepEqual(agentIngestStore.listAgentHardware().get(enrolled.body.agentId), { manufacturer: 'Apple', model: 'Mac14,2' });
+  });
+
   it('capabilityを返し、配布済みAgentの送信を変えない', async () => {
     const { app } = makeApp();
     const { enrolled } = await enrolledAgent(app);
@@ -579,6 +597,9 @@ describe('Agent HTTP ingest', () => {
     // Declared empty rather than omitted, so an agent cannot read a missing
     // field as permission to compress.
     assert.deepEqual(capabilities.body.compression, []);
+    // The exact names an Agent looks for before sending the computer's maker
+    // and model; an older Hub refuses them as unknown fields (P3-199).
+    assert.deepEqual(capabilities.body.agentFields, ['manufacturer', 'model']);
 
     // The agents already in the field never call the endpoint above and send
     // version 1 unconditionally. That has to keep working exactly as before.

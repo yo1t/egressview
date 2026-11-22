@@ -1085,6 +1085,9 @@ startStartupListener({ port: PORT, host: HOST, tlsOptions, subpath: SUBPATH }).t
 
   runtime.setKnownMacs(history.getKnownMacs());
   devices.seedFromConnectionHistory(history.getConnectionHistory());
+  // Rows that were never devices, left by earlier versions (P3-199, P3-200).
+  const nonDevices = devices.archiveNonDevices();
+  if (nonDevices > 0) logger.info(`[devices] archived ${nonDevices} row(s) that are not devices (IPv6, loopback, an Agent's virtual adapters, broadcast)`);
   const staleChecked = devices.checkStaleMergeCandidates();
   if (staleChecked > 0) {
     logger.info(`[devices] stale merge check: ${staleChecked} device(s) scanned for duplicates`);

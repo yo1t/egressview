@@ -49,6 +49,10 @@ const agentMetadataSchema = z.object({
   platform: z.enum(['macos', 'windows', 'linux']),
   osVersion: boundedSafeText(64),
   agentVersion: boundedSafeText(64),
+  // Who made the computer and which model it is (P3-199). Optional, and sent
+  // only to a Hub whose capabilities list them in `agentFields`.
+  manufacturer: boundedSafeText(100).optional(),
+  model: boundedSafeText(100).optional(),
 }).strict();
 
 const agentObservationSchema = z.object({
