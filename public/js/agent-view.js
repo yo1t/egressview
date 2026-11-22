@@ -189,6 +189,57 @@ function answerControls(report, entry) {
   return wrap;
 }
 
+// Candidates answered "expected" that the administrator opened, kept across
+// redraws (an answer saved, the periodic refresh) so a row being edited does
+// not fold shut under the cursor.
+const openExpected = new Set();
+
+/**
+ * One candidate. An item answered "expected" is settled, so it folds to its
+ * two summary lines and the list stays short; opening it shows the note and
+ * the controls to change the answer or the note.
+ */
+function renderCandidate(report, entry) {
+  const answer = answerOf(entry);
+  const who = entry.kind === 'machine'
+    ? t('agents.candidates.machine')
+    : `${entry.application || '?'} → ${entry.destination || '?'}`;
+  const summary = textElement('div', '', 'agent-candidate-body');
+  summary.append(
+    textElement('div', who, 'agent-candidate-title'),
+    textElement('div', candidateLine(entry), 'agent-candidate-line')
+  );
+  const badge = textElement('span', t(`agents.candidates.${answer}`), `agent-answer agent-answer-${answer}`);
+  const more = [];
+  if (entry.note) {
+    more.push(textElement('div', tVars('agents.candidates.note', { note: entry.note }), 'agent-candidate-note'));
+  }
+  if (entry.answeredOn === 'hub') {
+    more.push(textElement('div', t('agents.candidates.answeredOnHub'), 'agent-card-meta'));
+  }
+  more.push(answerControls(report, entry));
+
+  if (answer !== 'expected') {
+    const row = textElement('div', '', `agent-candidate agent-candidate-${answer}`);
+    summary.append(...more);
+    row.append(summary, badge);
+    return row;
+  }
+  const key = `${report.agentId}/${entry.candidateId}`;
+  const row = textElement('details', '', 'agent-candidate agent-candidate-expected agent-candidate-fold');
+  row.open = openExpected.has(key);
+  row.addEventListener('toggle', () => {
+    if (row.open) openExpected.add(key);
+    else openExpected.delete(key);
+  });
+  const head = textElement('summary', '', 'agent-candidate-summary');
+  head.append(summary, badge);
+  const rest = textElement('div', '', 'agent-candidate-body agent-candidate-more');
+  rest.append(...more);
+  row.append(head, rest);
+  return row;
+}
+
 function renderCandidates(agent, report) {
   const section = textElement('div', '', 'agent-card-section');
   section.appendChild(textElement('div', t('agents.candidates.title'), 'agent-card-section-title'));
@@ -218,29 +269,7 @@ function renderCandidates(agent, report) {
     section.appendChild(textElement('div', t('agents.candidates.empty'), 'agent-card-empty'));
   }
   const list = textElement('div', '', 'agent-candidates');
-  for (const entry of entries) {
-    const answer = answerOf(entry);
-    const row = textElement('div', '', `agent-candidate agent-candidate-${answer}`);
-    const details = textElement('div', '', 'agent-candidate-body');
-    const who = entry.kind === 'machine'
-      ? t('agents.candidates.machine')
-      : `${entry.application || '?'} → ${entry.destination || '?'}`;
-    details.append(
-      textElement('div', who, 'agent-candidate-title'),
-      textElement('div', candidateLine(entry), 'agent-candidate-line')
-    );
-    if (entry.note) {
-      details.appendChild(textElement('div',
-        tVars('agents.candidates.note', { note: entry.note }), 'agent-candidate-note'));
-    }
-    if (entry.answeredOn === 'hub') {
-      details.appendChild(textElement('div', t('agents.candidates.answeredOnHub'), 'agent-card-meta'));
-    }
-    details.appendChild(answerControls(report, entry));
-    row.append(details, textElement('span', t(`agents.candidates.${answer}`),
-      `agent-answer agent-answer-${answer}`));
-    list.appendChild(row);
-  }
+  for (const entry of entries) list.appendChild(renderCandidate(report, entry));
   if (entries.length) section.appendChild(list);
   const more = (Number(report.total) || 0) - entries.length;
   if (more > 0) {

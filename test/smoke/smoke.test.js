@@ -788,11 +788,14 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
   await page.route(/\/api\/agents\/outbound-candidates$/, route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ agents: [{
-      agentId: agents[0].agentId, hostName: agents[0].hostName, state: 'ready', total: 1,
+      agentId: agents[0].agentId, hostName: agents[0].hostName, state: 'ready', total: 2,
       generatedAt: now, receivedAt: now, notesShared: true,
       entries: [{ candidateId: 'c1', kind: 'aboveUsual', day: Date.UTC(2026, 10, 13),
         application: 'a.very.long.application.identifier.example', destination: 'a-long-destination-name.example.net',
-        bytesOut: 900_000_000, usualBytesOut: 2_000_000, answer: 'investigate', note: 'a note that has to wrap on a phone', answeredOn: 'agent' }],
+        bytesOut: 900_000_000, usualBytesOut: 2_000_000, answer: 'investigate', note: 'a note that has to wrap on a phone', answeredOn: 'agent' },
+      { candidateId: 'c2', kind: 'aboveUsual', day: Date.UTC(2026, 10, 14),
+        application: 'vmnet-natd', destination: 'windows.net',
+        bytesOut: 48_200_000, usualBytesOut: 1_270_000, answer: 'expected', note: 'the VM syncing', answeredOn: 'agent' }],
     }] }),
   }));
   const answers = [];
@@ -884,16 +887,35 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
 
   // Answering on the Hub: the buttons are tapped with a finger, the note
   // field must not make iOS zoom in, and the answer keeps the note.
-  const answerSizes = await page.locator('.agent-candidate-button').evaluateAll(els =>
+  // An item answered "expected" is folded to its summary; the triangle opens
+  // it to change the answer or the note.
+  const folded = page.locator('details.agent-candidate-fold');
+  await expect(folded).toHaveCount(1);
+  expect(await folded.evaluate(el => el.open)).toBe(false);
+  await expect(folded.locator('.agent-candidate-title')).toBeVisible();
+  await expect(folded.locator('.agent-candidate-button')).toHaveCount(4);
+  await expect(folded.locator('.agent-candidate-button').first()).toBeHidden();
+  await expect(folded.locator('.agent-candidate-note')).toBeHidden();
+  const summary = folded.locator('summary');
+  expect((await summary.boundingBox()).height, 'the folded row should be touchable').toBeGreaterThanOrEqual(38);
+  await summary.click();
+  await expect(folded.locator('.agent-candidate-button').first()).toBeVisible();
+  await expect(folded.locator('.agent-candidate-note-input')).toBeVisible();
+  await summary.click();
+  await expect(folded.locator('.agent-candidate-button').first()).toBeHidden();
+
+  const answerSizes = await page.locator('div.agent-candidate .agent-candidate-button').evaluateAll(els =>
     els.map(el => el.getBoundingClientRect().height));
   expect(answerSizes.length).toBeGreaterThanOrEqual(4);
   for (const height of answerSizes) expect(height, 'the answer buttons should be touchable').toBeGreaterThanOrEqual(38);
-  const noteField = page.locator('.agent-candidate-note-input');
+  const noteField = page.locator('div.agent-candidate .agent-candidate-note-input');
   expect(await noteField.evaluate(el => parseFloat(getComputedStyle(el).fontSize)),
     'under 16px makes iOS zoom in on tap').toBeGreaterThanOrEqual(16);
-  await page.locator('.agent-candidate-button-expected').click();
-  await expect(page.locator('.agent-candidate-button-expected')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('.agent-answer-expected')).toHaveCount(1);
+  await page.locator('div.agent-candidate .agent-candidate-button-expected').click();
+  // Answered "expected", the item folds like the other one.
+  await expect(page.locator('details.agent-candidate-fold')).toHaveCount(2);
+  await expect(page.locator('.agent-candidate-button-expected').first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.agent-answer-expected')).toHaveCount(2);
   expect(answers).toEqual([{ method: 'PUT', body: { answer: 'expected', note: 'a note that has to wrap on a phone' } }]);
 
   const overflow = await page.evaluate(() => {
