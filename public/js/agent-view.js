@@ -596,8 +596,8 @@ function renderCard(agent, report, now, probes, minPorts, appBytes, appState, de
   head.append(title, deliveryLine(agent, now));
   // Answers waiting first, then what it sends, then what reached it. On a
   // wide card the candidates keep the left column however long they grow, and
-  // what it sends, how long it reported and the device facts stack on the
-  // right; probes run across the bottom. A narrow card reads them in this order.
+  // what it sends, how long it reported, the device facts and the probes stack
+  // on the right. A narrow card reads them in this order.
   const body = textElement('div', '', 'agent-card-body');
   const place = (section, slot) => { section.classList.add(`agent-card-slot-${slot}`); return section; };
   body.append(
