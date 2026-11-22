@@ -836,6 +836,20 @@ function listOutboundCandidates() {
   return outboundCandidates.listOutboundCandidates(requireDb());
 }
 
+/// An administrator's answer to one of an Agent's candidates (P3-194 stage 2).
+function setOutboundCandidateHubAnswer(options) {
+  return outboundCandidates.setHubAnswer(requireDb(), options);
+}
+
+function listOutboundCandidateHubAnswers(agentId) {
+  return outboundCandidates.listHubAnswers(requireDb(), agentId);
+}
+
+/// Sent with every ingest reply so the Agent knows, within seconds, to ask.
+function outboundCandidateAnswersVersion(agentId) {
+  return outboundCandidates.answersVersion(requireDb(), agentId);
+}
+
 function listAppBytes(options) {
   return appBytes.listAppBytes(requireDb(), options);
 }
@@ -885,6 +899,9 @@ module.exports = {
   storeBatch,
   storeOutboundCandidates,
   listOutboundCandidates,
+  setOutboundCandidateHubAnswer,
+  listOutboundCandidateHubAnswers,
+  outboundCandidateAnswersVersion,
   listInboundProbes,
   listAppBytes,
   recordDelivery,

@@ -3,8 +3,10 @@
 // An overview of every enrolled Agent, then one card for the Agent picked:
 // whether it is delivering, and what its user chose to share of its "worth a
 // look" list (P3-194), and the LAN devices that probed it (P3-191).
-// Enrolment, approval and revocation stay in Settings > L3/L4, so this
-// screen is for reading only.
+// Enrolment, approval and revocation stay in Settings > L3/L4. The one thing
+// this screen changes is an answer to a candidate (P3-194 stage 2): the
+// administrator can answer, or change the person's answer, and the Mac takes
+// it in the next time it delivers.
 //
 // The tab is shown only when /api/agents answers, which needs auth.admin, and
 // lists at least one enrolled Agent. A Hub fed only by routers does not grow a
@@ -116,6 +118,77 @@ function deliveryLine(agent, now) {
   return statusPill(state, tVars(`agents.status.${state}`, { time: fmtTs(lastSeenAt) }));
 }
 
+// Saves one answer on the Hub, then redraws the card from what the Hub kept.
+async function saveAnswer(report, entry, answer, note, status) {
+  status.textContent = t('agents.candidates.saving');
+  try {
+    const response = await apiFetch(
+      `${_BASE}/api/agents/outbound-candidates/${encodeURIComponent(report.agentId)}/${encodeURIComponent(entry.candidateId)}/answer`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(note === undefined ? { answer } : { answer, note }),
+      }
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      status.textContent = body.code === 'notes_not_shared'
+        ? t('agents.candidates.notesNotShared')
+        : (body.error || t('agents.candidates.saveFailed'));
+      return;
+    }
+    entry.answer = answer;
+    entry.answeredAt = body.answeredAt;
+    entry.answeredOn = 'hub';
+    if (note !== undefined || !answer) entry.note = answer && note ? note.trim() || null : null;
+    drawView();
+  } catch {
+    status.textContent = t('agents.candidates.saveFailed');
+  }
+}
+
+/**
+ * The administrator's controls for one candidate: the two answers and taking
+ * an answer back, and the note when this Mac shares notes. A note goes to the
+ * Mac too, so it is offered only where the person agreed to notes travelling.
+ */
+function answerControls(report, entry) {
+  const wrap = textElement('div', '', 'agent-candidate-controls');
+  const buttons = textElement('div', '', 'agent-candidate-buttons');
+  const status = textElement('div', '', 'agent-card-meta');
+  status.setAttribute('role', 'status');
+  const choices = [['expected', 'agents.candidates.expected'], ['investigate', 'agents.candidates.investigate']];
+  if (entry.answer) choices.push([null, 'agents.candidates.clear']);
+  for (const [value, key] of choices) {
+    const button = textElement('button', t(key), `agent-candidate-button agent-candidate-button-${value || 'clear'}`);
+    button.type = 'button';
+    if (value) button.setAttribute('aria-pressed', String(entry.answer === value));
+    button.addEventListener('click', () => {
+      const keepNote = report.notesShared && value ? (entry.note || '') : undefined;
+      saveAnswer(report, entry, value, keepNote, status);
+    });
+    buttons.appendChild(button);
+  }
+  wrap.appendChild(buttons);
+  if (entry.answer && report.notesShared) {
+    const label = textElement('label', t('agents.candidates.noteLabel'), 'agent-candidate-note-label');
+    const field = document.createElement('textarea');
+    field.className = 'agent-candidate-note-input';
+    field.maxLength = 500;
+    field.rows = 2;
+    field.value = entry.note || '';
+    label.appendChild(field);
+    const save = textElement('button', t('agents.candidates.saveNote'), 'agent-candidate-button');
+    save.type = 'button';
+    save.addEventListener('click', () => saveAnswer(report, entry, entry.answer, field.value, status));
+    wrap.append(label, save);
+  } else if (entry.answer && !report.notesShared) {
+    wrap.appendChild(textElement('div', t('agents.candidates.notesNotShared'), 'agent-card-meta'));
+  }
+  wrap.appendChild(status);
+  return wrap;
+}
+
 function renderCandidates(agent, report) {
   const section = textElement('div', '', 'agent-card-section');
   section.appendChild(textElement('div', t('agents.candidates.title'), 'agent-card-section-title'));
@@ -160,6 +233,10 @@ function renderCandidates(agent, report) {
       details.appendChild(textElement('div',
         tVars('agents.candidates.note', { note: entry.note }), 'agent-candidate-note'));
     }
+    if (entry.answeredOn === 'hub') {
+      details.appendChild(textElement('div', t('agents.candidates.answeredOnHub'), 'agent-card-meta'));
+    }
+    details.appendChild(answerControls(report, entry));
     row.append(details, textElement('span', t(`agents.candidates.${answer}`),
       `agent-answer agent-answer-${answer}`));
     list.appendChild(row);

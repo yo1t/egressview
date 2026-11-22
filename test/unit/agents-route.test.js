@@ -1222,6 +1222,163 @@ describe('outbound candidates shared by an Agent', () => {
   });
 });
 
+describe('Hubで答え、Agentへ戻す（P3-194 段階2）', () => {
+  const crypto = require('node:crypto');
+  const hashed = id => crypto.createHash('sha256').update(id).digest('hex');
+  const BACKUP = hashed('aboveUsual|2026-11-13|com.example.backup|example.net');
+  const CURL = hashed('newPair|2026-11-12|curl|example.org');
+
+  function report({ notesShared = true, backupAnsweredAt = '2026-11-14T01:00:00Z', backupAnswer = 'expected' } = {}) {
+    return {
+      schemaVersion: 1,
+      sharing: true,
+      generatedAt: new Date().toISOString(),
+      state: 'ready',
+      total: 2,
+      notesShared,
+      entries: [
+        {
+          candidateId: BACKUP, kind: 'aboveUsual', day: '2026-11-13T00:00:00Z',
+          application: 'com.example.backup', destination: 'example.net',
+          bytesOut: 9_500_000_000, usualBytesOut: 400_000_000,
+          answer: backupAnswer, answeredAt: backupAnswer ? backupAnsweredAt : null,
+          note: notesShared && backupAnswer ? '自分のバックアップ' : null,
+        },
+        {
+          candidateId: CURL, kind: 'newPair', day: '2026-11-12T00:00:00Z',
+          application: 'curl', destination: 'example.org', bytesOut: 120_000_000,
+        },
+      ],
+    };
+  }
+
+  async function sharing(options) {
+    const made = makeApp();
+    const { enrolled } = await enrolledAgent(made.app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    await request(made.app, 'PUT', '/api/agent/outbound-candidates', { body: report(options), headers: authorization });
+    return { ...made, agentId: enrolled.body.agentId, authorization };
+  }
+
+  const answerUrl = (agentId, candidateId) => `/api/agents/outbound-candidates/${agentId}/${candidateId}/answer`;
+  const listed = async app => (await request(app, 'GET', '/api/agents/outbound-candidates')).body.agents[0];
+
+  it('Hubで答えると一覧はHubの答えを出し、どこで答えたかも示す', async () => {
+    const { app, agentId } = await sharing();
+    const answered = await request(app, 'PUT', answerUrl(agentId, CURL), { body: { answer: 'investigate', note: '  見覚えがない  ' } });
+    assert.equal(answered.status, 200);
+    assert.equal(answered.body.version, 1);
+    const agent = await listed(app);
+    assert.equal(agent.notesShared, true);
+    const curl = agent.entries.find(entry => entry.candidateId === CURL);
+    assert.equal(curl.answer, 'investigate');
+    assert.equal(curl.note, '見覚えがない');
+    assert.equal(curl.answeredOn, 'hub');
+    assert.equal(agent.entries.find(entry => entry.candidateId === BACKUP).answeredOn, 'agent');
+  });
+
+  it('観測を送ったときの応答に答えの版が入り、Agentはその答えを取りに来られる', async () => {
+    const { app, agentId, authorization } = await sharing();
+    const before = await request(app, 'POST', '/api/agent/ingest', { body: ingestEnvelope(), headers: authorization });
+    assert.equal(before.body.outboundAnswersVersion, 0);
+    await request(app, 'PUT', answerUrl(agentId, BACKUP), { body: { answer: 'investigate' } });
+    const after = await request(app, 'POST', '/api/agent/ingest', { body: ingestEnvelope(), headers: authorization });
+    assert.equal(after.body.outboundAnswersVersion, 1);
+    const answers = await request(app, 'GET', '/api/agent/outbound-candidates/answers', { headers: authorization });
+    assert.equal(answers.status, 200);
+    assert.equal(answers.body.version, 1);
+    assert.equal(answers.body.answers.length, 1);
+    assert.equal(answers.body.answers[0].candidateId, BACKUP);
+    assert.equal(answers.body.answers[0].answer, 'investigate');
+    assert.equal(answers.body.answers[0].note, null);
+    assert.ok(Number.isFinite(Date.parse(answers.body.answers[0].answeredAt)));
+  });
+
+  it('Agentの次の送信がHubの答えを消さない。Agentが同じか新しい時刻で答え直したらHubの行は役目を終える', async () => {
+    const { app, agentId, authorization } = await sharing();
+    const answered = await request(app, 'PUT', answerUrl(agentId, BACKUP), { body: { answer: 'investigate' } });
+    // The Agent sends again before it has taken the Hub's answer in.
+    await request(app, 'PUT', '/api/agent/outbound-candidates', { body: report(), headers: authorization });
+    assert.equal((await listed(app)).entries.find(entry => entry.candidateId === BACKUP).answer, 'investigate');
+    // It took the Hub's answer in, keeping the Hub's time.
+    const took = new Date(answered.body.answeredAt).toISOString();
+    await request(app, 'PUT', '/api/agent/outbound-candidates', {
+      body: report({ backupAnswer: 'investigate', backupAnsweredAt: took }), headers: authorization,
+    });
+    const answers = await request(app, 'GET', '/api/agent/outbound-candidates/answers', { headers: authorization });
+    assert.deepEqual(answers.body.answers, []);
+    const backup = (await listed(app)).entries.find(entry => entry.candidateId === BACKUP);
+    assert.equal(backup.answer, 'investigate');
+    assert.equal(backup.answeredOn, 'agent');
+  });
+
+  it('Hubで答えを取り消せる', async () => {
+    const { app, agentId } = await sharing();
+    await request(app, 'PUT', answerUrl(agentId, BACKUP), { body: { answer: null } });
+    const backup = (await listed(app)).entries.find(entry => entry.candidateId === BACKUP);
+    assert.equal(backup.answer, null);
+    assert.equal(backup.note, null);
+    assert.equal(backup.answeredOn, 'hub');
+  });
+
+  it('メモを共有していないAgentには、Hubでメモを書けない。答えだけなら書ける', async () => {
+    const { app, agentId } = await sharing({ notesShared: false });
+    const withNote = await request(app, 'PUT', answerUrl(agentId, CURL), { body: { answer: 'expected', note: 'メモ' } });
+    assert.equal(withNote.status, 409);
+    assert.equal(withNote.body.code, 'notes_not_shared');
+    const plain = await request(app, 'PUT', answerUrl(agentId, CURL), { body: { answer: 'expected' } });
+    assert.equal(plain.status, 200);
+  });
+
+  it('メモを共有するか言わない古いAgentにも、Hubのメモは渡さない', async () => {
+    const made = makeApp();
+    const { enrolled } = await enrolledAgent(made.app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const body = report();
+    delete body.notesShared;
+    await request(made.app, 'PUT', '/api/agent/outbound-candidates', { body, headers: authorization });
+    assert.equal((await listed(made.app)).notesShared, null);
+    const response = await request(made.app, 'PUT', answerUrl(enrolled.body.agentId, CURL), {
+      body: { answer: 'expected', note: 'メモ' },
+    });
+    assert.equal(response.status, 409);
+  });
+
+  it('一覧に無い候補、知らないAgent、形の違うidには答えられない', async () => {
+    const { app, agentId } = await sharing();
+    assert.equal((await request(app, 'PUT', answerUrl(agentId, hashed('other')), { body: { answer: 'expected' } })).status, 404);
+    assert.equal((await request(app, 'PUT', answerUrl(crypto.randomUUID(), CURL), { body: { answer: 'expected' } })).status, 404);
+    assert.equal((await request(app, 'PUT', answerUrl(agentId, 'newPair|curl'), { body: { answer: 'expected' } })).status, 400);
+    assert.equal((await request(app, 'PUT', answerUrl(agentId, CURL), { body: { answer: 'maybe' } })).status, 400);
+  });
+
+  it('監査には答えとメモの有無だけを書き、メモの中身は書かない', async () => {
+    const { app, agentId, audits } = await sharing();
+    await request(app, 'PUT', answerUrl(agentId, CURL), { body: { answer: 'investigate', note: '見覚えがない' } });
+    const event = audits.find(item => item.eventType === 'agent_outbound_candidate_answered');
+    assert.equal(event.outcome, 'success');
+    assert.equal(event.metadata.answer, 'investigate');
+    assert.equal(event.metadata.withNote, true);
+    assert.equal(JSON.stringify(audits).includes('見覚え'), false);
+  });
+
+  it('Agentは自分のHubの答えしか読めない', async () => {
+    const { app, agentId } = await sharing();
+    await request(app, 'PUT', answerUrl(agentId, CURL), { body: { answer: 'investigate' } });
+    const other = await enrolledAgent(app);
+    const answers = await request(app, 'GET', '/api/agent/outbound-candidates/answers', {
+      headers: { Authorization: `Bearer ${other.enrolled.body.token}` },
+    });
+    assert.deepEqual(answers.body, { version: 0, answers: [] });
+  });
+
+  it('Hubは答えを返せることを伝える', async () => {
+    const { app, authorization } = await sharing();
+    const response = await request(app, 'GET', '/api/agent/capabilities', { headers: authorization });
+    assert.equal(response.body.outboundCandidateAnswers, true);
+  });
+});
+
 // P3-194: what the Hub knows of each Agent's computer: the addresses its
 // flows left from, and what the routers recorded for the LAN one.
 describe('Agent details', () => {

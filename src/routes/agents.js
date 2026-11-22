@@ -29,7 +29,7 @@ const {
   AGENT_INGEST_MAX_BODY_BYTES,
 } = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
-const { outboundCandidatesSchema } = require('../agent-outbound-candidates');
+const { outboundCandidatesSchema, hubAnswerBodySchema } = require('../agent-outbound-candidates');
 const { PROBE_NOTIFY_MIN_PORTS } = require('../agent-inbound-probes');
 
 // The same window the Agent tab uses for worth-a-look candidates.
@@ -54,6 +54,11 @@ const approveSchema = z.object({ replaceExisting: z.boolean().optional() }).stri
 const transportConsentSchema = z.object({ allowPlaintext: z.boolean() }).strict();
 const requestIdSchema = z.object({ requestId: z.string().uuid() }).strict();
 const agentIdSchema = z.object({ agentId: z.string().uuid() }).strict();
+// Candidate ids arrive from the Agent as a SHA-256 of its own id (P3-194).
+const candidateAnswerParamsSchema = z.object({
+  agentId: z.string().uuid(),
+  candidateId: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
 // The Agent tab offers the last day or the last week of sent bytes.
 const appBytesQuerySchema = z.object({ days: z.enum(['1', '7']).default('1') }).strict();
 // The same two periods for how much of the time an Agent's reports arrived.
@@ -162,6 +167,17 @@ module.exports = function agentRoutes({
       path: req.originalUrl,
       metadata,
     });
+  }
+
+  // Never lets a failure here cost the upload its reply: the Agent would
+  // send the batch again for an answer it can ask for on its next one.
+  function answersVersionFor(req) {
+    try {
+      return agentIngest.outboundCandidateAnswersVersion(req.agentIdentity.agentId);
+    } catch (error) {
+      logger.error('[agents] Reading the answers version failed:', error.message);
+      return undefined;
+    }
   }
 
   function rateKey(req) {
@@ -467,6 +483,42 @@ module.exports = function agentRoutes({
     }
   });
 
+  // An administrator answers one of an Agent's candidates on the Hub
+  // (P3-194 stage 2). The Agent takes the answer in on its next delivery.
+  router.put('/agents/outbound-candidates/:agentId/:candidateId/answer', requireAdmin, (req, res) => {
+    const params = parseRequest(candidateAnswerParamsSchema, req.params, res);
+    if (!params.ok) return;
+    const body = parseRequest(hubAnswerBodySchema, req.body ?? {}, res);
+    if (!body.ok) return;
+    if (!agentIngest) return res.status(503).json({ error: 'Agent storage is unavailable' });
+    const agent = agentIdentities.listAgents().find(item => item.agentId === params.data.agentId);
+    if (!agent || agent.revokedAt) return res.status(404).json({ error: 'No enrolled Agent with that id' });
+    try {
+      const result = agentIngest.setOutboundCandidateHubAnswer({
+        agentId: params.data.agentId,
+        candidateId: params.data.candidateId,
+        answer: body.data.answer,
+        note: body.data.note ?? null,
+        answeredBy: req.principal ?? null,
+      });
+      if (!result.ok) {
+        audit(req, 'agent_outbound_candidate_answered', 'failure', { reason: result.reason });
+        return result.reason === 'not_found'
+          ? res.status(404).json({ error: 'That Agent does not list this candidate' })
+          : res.status(409).json({ error: 'This Agent does not share notes', code: result.reason });
+      }
+      audit(req, 'agent_outbound_candidate_answered', 'success', {
+        agentRef: agentIdentities.auditRef(params.data.agentId),
+        answer: body.data.answer ?? 'none',
+        withNote: Boolean(body.data.note && body.data.note.trim()),
+      });
+      return res.json({ version: result.version, answeredAt: result.answeredAt });
+    } catch (error) {
+      logger.error('[agents] Storing a Hub answer failed:', error.message);
+      return res.status(500).json({ error: 'Storing the answer failed' });
+    }
+  });
+
   // Devices on the LAN that probed each enrolled Agent's computer in the last
   // 14 days (P3-191), at the threshold the detection log reports at. Answered
   // per Agent so the Agent tab can say which computer was the target.
@@ -704,6 +756,10 @@ module.exports = function agentRoutes({
       // the person's answers, when they chose to share them (P3-194). Sent to
       // PUT /api/agent/outbound-candidates only when this says true.
       outboundCandidates: true,
+      // Answers given on the Hub, fetched from
+      // GET /api/agent/outbound-candidates/answers when an ingest reply's
+      // `outboundAnswersVersion` changes (P3-194 stage 2).
+      outboundCandidateAnswers: true,
     });
   });
 
@@ -733,6 +789,25 @@ module.exports = function agentRoutes({
     } catch (error) {
       logger.error('[agents] Storing outbound candidates failed:', error.message);
       res.status(500).json({ error: 'Storing outbound candidates failed' });
+    }
+  });
+
+  // The answers given on the Hub to this Agent's candidates (P3-194 stage 2).
+  // Asked for when an ingest reply's `outboundAnswersVersion` differs from
+  // the one the Agent last took in.
+  router.get('/agent/outbound-candidates/answers', requireAgent, (req, res) => {
+    const agentId = req.agentIdentity.agentId;
+    const limited = acquireAgentWindow(agentId, Date.now());
+    if (limited) {
+      res.setHeader('Retry-After', Math.max(1, Math.ceil((limited.resetAt - Date.now()) / 1000)));
+      return res.status(429).json({ error: 'Agent rate limit exceeded' });
+    }
+    if (!agentIngest) return res.status(503).json({ error: 'Agent storage is unavailable' });
+    try {
+      return res.json(agentIngest.listOutboundCandidateHubAnswers(agentId));
+    } catch (error) {
+      logger.error('[agents] Listing Hub answers failed:', error.message);
+      return res.status(500).json({ error: 'Listing answers failed' });
     }
   });
 
@@ -1010,7 +1085,7 @@ module.exports = function agentRoutes({
           replayed: ack.replayed,
           durationMs: Date.now() - startedAt,
         });
-        return res.json({ ...ack, requestId: req.id });
+        return res.json({ ...ack, outboundAnswersVersion: answersVersionFor(req), requestId: req.id });
       }
       audit(req, 'agent_ingest', ack.rejected > 0 ? 'failure' : 'success', {
         reason: ack.rejected > 0 ? 'observation_rejected' : (ack.expired ? 'observation_expired' : undefined),
@@ -1023,7 +1098,7 @@ module.exports = function agentRoutes({
         replayed: ack.replayed,
         durationMs: Date.now() - startedAt,
       });
-      return res.json({ ...ack, requestId: req.id });
+      return res.json({ ...ack, outboundAnswersVersion: answersVersionFor(req), requestId: req.id });
     } catch (error) {
       ingestMetrics.failures += 1;
       logger.error('[agents] Ingest storage failed:', error.message);

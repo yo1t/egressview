@@ -789,12 +789,17 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
     contentType: 'application/json',
     body: JSON.stringify({ agents: [{
       agentId: agents[0].agentId, hostName: agents[0].hostName, state: 'ready', total: 1,
-      generatedAt: now, receivedAt: now,
+      generatedAt: now, receivedAt: now, notesShared: true,
       entries: [{ candidateId: 'c1', kind: 'aboveUsual', day: Date.UTC(2026, 10, 13),
         application: 'a.very.long.application.identifier.example', destination: 'a-long-destination-name.example.net',
-        bytesOut: 900_000_000, usualBytesOut: 2_000_000, answer: 'investigate', note: 'a note that has to wrap on a phone' }],
+        bytesOut: 900_000_000, usualBytesOut: 2_000_000, answer: 'investigate', note: 'a note that has to wrap on a phone', answeredOn: 'agent' }],
     }] }),
   }));
+  const answers = [];
+  await page.route(/\/api\/agents\/outbound-candidates\/[^/]+\/[^/]+\/answer$/, route => {
+    answers.push({ method: route.request().method(), body: route.request().postDataJSON() });
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ version: 1, answeredAt: now }) });
+  });
   await page.route(/\/api\/agents\/inbound-probes$/, route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ days: 14, minPorts: 10, agents: [{ agentId: agents[0].agentId, total: 1, senders: [{
@@ -877,11 +882,27 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
   await expect(periods.nth(1)).toHaveAttribute('aria-pressed', 'true');
   expect(appDays).toContain(7);
 
+  // Answering on the Hub: the buttons are tapped with a finger, the note
+  // field must not make iOS zoom in, and the answer keeps the note.
+  const answerSizes = await page.locator('.agent-candidate-button').evaluateAll(els =>
+    els.map(el => el.getBoundingClientRect().height));
+  expect(answerSizes.length).toBeGreaterThanOrEqual(4);
+  for (const height of answerSizes) expect(height, 'the answer buttons should be touchable').toBeGreaterThanOrEqual(38);
+  const noteField = page.locator('.agent-candidate-note-input');
+  expect(await noteField.evaluate(el => parseFloat(getComputedStyle(el).fontSize)),
+    'under 16px makes iOS zoom in on tap').toBeGreaterThanOrEqual(16);
+  await page.locator('.agent-candidate-button-expected').click();
+  await expect(page.locator('.agent-candidate-button-expected')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.agent-answer-expected')).toHaveCount(1);
+  expect(answers).toEqual([{ method: 'PUT', body: { answer: 'expected', note: 'a note that has to wrap on a phone' } }]);
+
   const overflow = await page.evaluate(() => {
     const body = document.querySelector('.agent-view-body');
     const right = body.getBoundingClientRect().right;
     return {
-      page: document.documentElement.scrollWidth - window.innerWidth,
+      // clientWidth, not innerWidth: a page too wide for a phone is zoomed
+      // out, which makes innerWidth grow with it and hides the overflow.
+      page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       body: body.scrollWidth - body.clientWidth,
       past: [...body.querySelectorAll('*')].filter(el => el.getBoundingClientRect().right > right + 1).length,
     };

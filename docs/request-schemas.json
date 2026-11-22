@@ -1634,6 +1634,9 @@
           "minimum": 0,
           "maximum": 1000000
         },
+        "notesShared": {
+          "type": "boolean"
+        },
         "entries": {
           "maxItems": 20,
           "type": "array",
@@ -1749,6 +1752,41 @@
         "generatedAt",
         "total",
         "entries"
+      ],
+      "additionalProperties": false
+    },
+    "PUT /api/agents/outbound-candidates/:agentId/:candidateId/answer": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "expected",
+                "investigate"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "answer"
       ],
       "additionalProperties": false
     },
@@ -2053,6 +2091,9 @@
           },
           "outboundCandidates": {
             "type": "boolean"
+          },
+          "outboundCandidateAnswers": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -2062,6 +2103,7 @@
           "maxObservationsPerBatch",
           "observationFields",
           "observationUpdates",
+          "outboundCandidateAnswers",
           "outboundCandidates",
           "requestsPerMinute",
           "schemaVersions",
@@ -2090,6 +2132,46 @@
         },
         "required": [
           "error"
+        ]
+      }
+    },
+    "GET /api/agent/outbound-candidates/answers": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "candidateId": {
+                  "type": "string"
+                },
+                "answer": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "null"
+                },
+                "answeredAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "answer",
+                "answeredAt",
+                "candidateId",
+                "note"
+              ]
+            }
+          }
+        },
+        "required": [
+          "answers",
+          "version"
         ]
       }
     },
@@ -2632,6 +2714,12 @@
                 "receivedAt": {
                   "type": "integer"
                 },
+                "notesShared": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
                 "entries": {
                   "type": "array",
                   "items": {
@@ -2678,11 +2766,18 @@
                           "null",
                           "string"
                         ]
+                      },
+                      "answeredOn": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
                       }
                     },
                     "required": [
                       "answer",
                       "answeredAt",
+                      "answeredOn",
                       "application",
                       "bytesOut",
                       "candidateId",
@@ -2703,6 +2798,7 @@
                 "entries",
                 "generatedAt",
                 "hostName",
+                "notesShared",
                 "receivedAt",
                 "state",
                 "total"
@@ -5205,6 +5301,9 @@
           "replayed": {
             "type": "boolean"
           },
+          "outboundAnswersVersion": {
+            "type": "integer"
+          },
           "requestId": {},
           "expired": {
             "type": "integer"
@@ -7678,6 +7777,60 @@
           }
         },
         "required": [
+          "error"
+        ]
+      }
+    },
+    "PUT /api/agents/outbound-candidates/:agentId/:candidateId/answer": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "answeredAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "answeredAt",
+          "version"
+        ]
+      },
+      "400": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "404": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "409": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
           "error"
         ]
       }

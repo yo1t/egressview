@@ -199,6 +199,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `GET /api/agents/uptime` | `auth.admin`必須。`days`は`1`か`7`（既定`7`）。登録中のAgentごとに、期間の始まり（登録がそれより後なら登録時刻）から、記録が届いた5分の区切りの数と、15分以上の途切れ（回数・合計・長い順に5件）。Agentが止まっていたとみられる検出の時刻から始まる途切れは`agentStopped`（ルーターはPCの通信を見ていた）。Agentは通信の記録があるときだけ送るので、PCを閉じていた時間も途切れになる。`delivery`は同じ期間に、HubがそのAgentから受け取った送信の回数（`requests`、断った送信や再送も含む）、宣言された大きさの合計（`bytes`、大きさが無かった回は`requestsWithoutSize`）、Hubが保存期間より古くて除いた観測の数（`expired`）、Hubが数え始めた時刻（`countedFrom`）。Agentが送る前に除いた分は含まない |
 | Agent | `GET /api/agents/inbound-probes` | `auth.admin`必須。登録中のAgentごとに、直近14日にそのコンピューターの10ポート以上へ届いたLAN内の送り元（検出ログと同じ基準）。送り元ごとに最大20件と、その前の総数 |
 | Agent | `GET /api/agents/outbound-candidates` | `auth.admin`必須。登録中のAgentごとに、利用者が送ると決めた候補と答えを返す |
+| Agent | `PUT /api/agents/outbound-candidates/:agentId/:candidateId/answer` | `auth.admin`必須。Agentの一覧にある候補に、Hubで答える。`{ "answer": "expected" \| "investigate" \| null, "note"?: string }`（`null`は答えの取り消し）。メモはそのAgentがメモを共有しているときだけ受け付ける（共有していなければ`409`、`code: notes_not_shared`）。そのAgentの答えの版を上げ、Agentは次の送信の後に取り込む。監査ログには答えとメモの有無だけを書き、メモの中身は書かない |
 | Agent | `POST /api/agents/:agentId/revoke` | `auth.admin`必須 |
 | Agent | `POST /api/agent/token/rotate` | Agent bearerの`agent.ingest`だけ |
 | Agent | `POST /api/agent/registration/revoke` | Agent bearer。認証されたAgent自身だけを失効 |
@@ -207,6 +208,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `GET /api/agent/geo-cache` | Agent bearerの`agent.ingest`。位置キャッシュを全件返す。**Agentは宛先を送らない** — 絞り込みは「どの宛先に関心があるか」を伝えることになるため。`ETag`/`304`に対応 |
 | Agent | `GET /api/agent/threat-intel` | Agent bearerの`agent.ingest`。脅威指標を全件返す。**Agentは宛先を送らない** — 「危ないか」を尋ねるために宛先を送ると、何を気にしているかを相手に伝えることになるため。フィード未設定のHubでは`available: false`を返し、Agentはこれを**「脅威が無い」と読んではならない**。`ETag`/`304`に対応 |
 | Agent | `PUT /api/agent/outbound-candidates` | Agent bearerの`agent.ingest`。Agentが自分のふだんの通信と比べて見つけた「見ておきたい送信」と、利用者の答え。**利用者がAgentの設定で送ると決めたときだけ**届く。メモは別のスイッチを入れたときだけ。送るたびにそのAgentの分を置き換え、`sharing: false`で消す |
+| Agent | `GET /api/agent/outbound-candidates/answers` | Agent bearer。このAgentの一覧の候補にHubで付けた答えと、今の答えの版。メモはAgentがメモを共有しているときだけ。観測の送信への応答に`outboundAnswersVersion`が入り、それが変わったときにAgentがここへ問い合わせる |
 | Router初期設定 | `POST /api/nonce` | 認証必須 |
 | Router初期設定 | `POST /api/yamaha/detect` | 認証必須 |
 | Router初期設定 | `POST /api/cisco/detect` | 認証必須 |

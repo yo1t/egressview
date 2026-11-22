@@ -75,8 +75,9 @@ describe('shared i18n catalog', () => {
     // Grew by 16 on 2026-11-15: how much of the time each Agent's reports arrived.
     // Grew by 6 on 2026-11-15: the Agent tab says what period its numbers cover.
     // Grew by 4 on 2026-11-21: how much each Agent sent to the Hub.
-    assert.equal(jaKeys.size, 1081);
-    assert.equal(enKeys.size, 1081);
+    // Grew by 7 on 2026-11-22: answering an Agent's candidates on the Hub (P3-194 stage 2).
+    assert.equal(jaKeys.size, 1088);
+    assert.equal(enKeys.size, 1088);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
