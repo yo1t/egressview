@@ -50,7 +50,7 @@ developer or an external service operated for the developer.
 
 | Host | When | What is sent | What comes back |
 |---|---|---|---|
-| **Your Hub** (the address you entered) | Only after you enrol, and only if delivery is on. The "worth a look" list has its own switch, off by default ([below](#the-worth-a-look-list-only-if-you-turn-it-on)) | This Mac's host name and observed connection metadata: local/remote addresses and ports, protocol, process name and ID, bundle ID when available, timestamps, byte counts, collector and confidence, and the destination host name when one was observed | Acknowledgement; threat feed data; map locations for addresses you have already observed |
+| **Your Hub** (the address you entered) | Only after you enrol, and only if delivery is on. The "worth a look" list has its own switch, off by default ([below](#the-worth-a-look-list-only-if-you-turn-it-on)) | This Mac's host name and observed connection metadata: local/remote addresses and ports, protocol, process name and ID, bundle ID when available, timestamps, byte counts, collector and confidence, and the destination host name when one was observed | Acknowledgement; threat feed data; map locations for addresses you have already observed; while the "worth a look" list is shared, the answers the Hub's administrator gave to it ([below](#the-worth-a-look-list-only-if-you-turn-it-on)) |
 | **`dl.egressview.com`** | Update check on a schedule, and when you press Check for Updates | An HTTPS GET with the agent and OS versions. No identifier, no account, no observation data | A release manifest, and the `.pkg` if you choose to install |
 | **`feodotracker.abuse.ch`, `threatfox-api.abuse.ch`, `urlhaus-api.abuse.ch`, `www.spamhaus.org`** | **Only if you turn on direct feed download**, which is off when a Hub supplies feeds. ThreatFox and URLhaus are requested only if you have saved an abuse.ch Auth-Key | An ordinary HTTPS GET for the whole public list. For ThreatFox and URLhaus, the abuse.ch Auth-Key you saved is part of the address. **Your observations are not sent** — matching happens on your Mac, against the downloaded list | The public indicator lists |
 | **`download.maxmind.com`** | Only if you configure a local GeoLite2 country table | Your MaxMind account ID and licence key; no observed destination address | The GeoLite2 database |
@@ -113,7 +113,15 @@ Hub (macOS agent 0.5.141 and later, with a Hub that accepts it): the
 only if you also turn on **Include your notes**. Turning sending off removes
 the list from the Hub. The Hub's administrator can read what was sent.
 
-`schemaVersion`, `sharing`, `generatedAt`, `state`, `total`, `entries` (`candidateId` — a SHA-256 of the item, not its text — `kind`, `day`, `application`, `destination`, `bytesOut`, `usualBytesOut`, `answer`, `answeredAt`, `note`)
+`schemaVersion`, `sharing`, `generatedAt`, `state`, `total`, `entries` (`candidateId` — a SHA-256 of the item, not its text — `kind`, `day`, `application`, `destination`, `bytesOut`, `usualBytesOut`, `answer`, `answeredAt`, `note`), and `notesShared` (whether your notes are included) to a Hub that can answer the list
+
+From macOS agent 0.5.144, with a Hub that can, the Hub's administrator can
+also answer the list on the Hub: "expected", "look into it", or take an answer
+back. While sending is on, this Mac takes those answers in, usually within
+seconds, and marks them "Answered on the Hub". Whoever answered last wins, on
+this Mac or on the Hub. Notes travel both ways only when **Include your notes**
+is on; otherwise the Hub has no note of yours to show or change, and your note
+here is kept. Nothing comes back while sending is off.
 
 Individual connections, addresses and ports are not part of it.
 

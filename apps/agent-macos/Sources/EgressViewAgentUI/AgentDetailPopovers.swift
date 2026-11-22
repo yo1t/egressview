@@ -411,6 +411,10 @@ public struct AgentOutboundCandidatesView: View {
                         Text(AgentOutboundCandidateDetail.reason(candidate))
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
+                        if judgment?.answeredOnHub == true {
+                            Label(L("Answered on the Hub"), systemImage: "server.rack")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     Spacer(minLength: 8)
                     if actions == nil, let judgment {
@@ -636,6 +640,9 @@ struct AgentOutboundCandidateDetail: View {
                 }
             } else {
                 caption(L("Answer with the buttons at the left of the row; a note typed here goes with it."))
+            }
+            if judgment?.answeredOnHub == true {
+                caption(L("The Hub's administrator gave this answer on the Hub. Answering here replaces it, and the Hub follows."))
             }
             caption(L("Your answer and note are kept on this Mac. They go to an AI provider only with a question you send, and the AI context preview shows them first."))
             if sharesWithHub {

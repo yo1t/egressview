@@ -331,6 +331,8 @@ final class AgentMainViewModel: ObservableObject {
     private let threatCandidateCache = ThreatCandidateRefreshCache()
     private var refreshCoordinator = LatestWinsRefreshCoordinator()
 
+    private var hubAnswersObserver: NSObjectProtocol?
+
     init(store: ObservationStore?, ollama: AgentOllamaController) {
         self.store = store
         self.ollama = ollama
@@ -338,6 +340,17 @@ final class AgentMainViewModel: ObservableObject {
 
     func start() {
         refresh()
+        // Answers given on the Hub show as soon as they are taken in, not at
+        // the next refresh.
+        hubAnswersObserver = NotificationCenter.default.addObserver(
+            forName: .outboundCandidateAnswersTakenFromHub, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let store = self.store else { return }
+                self.outboundCandidateJudgments = (try? store.outboundCandidateJudgments()) ?? self.outboundCandidateJudgments
+                self.refreshInsightCandidates()
+            }
+        }
         // The timer is the floor, not the mechanism. While the network tab is
         // in front it follows arrivals instead -- see `networkPacer` -- and
         // this remains for the case nothing arrives at all: an idle network
@@ -368,6 +381,8 @@ final class AgentMainViewModel: ObservableObject {
 
     func stop() {
         refreshTimer.stop()
+        if let hubAnswersObserver { NotificationCenter.default.removeObserver(hubAnswersObserver) }
+        hubAnswersObserver = nil
     }
 
     func setMonitoringStatus(_ value: String) {

@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "answers": [
+    {
+      "candidateId": "31edf31d09919222998324a8b4a8d2bb89c5644eb6032fc537077480f7b0eec1",
+      "answer": "investigate",
+      "note": "Ask who ran curl",
+      "answeredAt": "2023-11-14T03:00:00.250Z"
+    },
+    {
+      "candidateId": "ce8b20ff51cd75c9574faa961f0a2fe040150ae3fc83f1756bce32bd2b91db0b",
+      "answer": null,
+      "note": null,
+      "answeredAt": "2023-11-14T03:05:00.000Z"
+    }
+  ]
+}

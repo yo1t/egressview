@@ -1263,6 +1263,32 @@ describe('Hubで答え、Agentへ戻す（P3-194 段階2）', () => {
   const answerUrl = (agentId, candidateId) => `/api/agents/outbound-candidates/${agentId}/${candidateId}/answer`;
   const listed = async app => (await request(app, 'GET', '/api/agents/outbound-candidates')).body.agents[0];
 
+  it('Mac Agentの見本の一覧に答えると、Macが読む答えの見本と同じ形で返す', async () => {
+    // Both files are read by the Mac's tests too: the list it sends, and the
+    // answers it takes back and applies to those same candidates.
+    const dir = path.join(__dirname, '../../protocol/agent-outbound-candidates/v1');
+    const list = JSON.parse(fs.readFileSync(path.join(dir, 'golden.json'), 'utf8'));
+    const expected = JSON.parse(fs.readFileSync(path.join(dir, 'answers-golden.json'), 'utf8'));
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const agentId = enrolled.body.agentId;
+    assert.equal((await request(app, 'PUT', '/api/agent/outbound-candidates', { body: list, headers: authorization })).status, 200);
+    for (const answer of expected.answers) {
+      const body = answer.note ? { answer: answer.answer, note: answer.note } : { answer: answer.answer };
+      assert.equal((await request(app, 'PUT', answerUrl(agentId, answer.candidateId), { body })).status, 200);
+    }
+    const response = await request(app, 'GET', '/api/agent/outbound-candidates/answers', { headers: authorization });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.version, expected.version);
+    for (const answer of response.body.answers) {
+      assert.match(answer.answeredAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+    }
+    const shape = answers => answers.map(({ answeredAt: _answeredAt, ...rest }) => rest)
+      .sort((a, b) => a.candidateId.localeCompare(b.candidateId));
+    assert.deepEqual(shape(response.body.answers), shape(expected.answers));
+  });
+
   it('Hubで答えると一覧はHubの答えを出し、どこで答えたかも示す', async () => {
     const { app, agentId } = await sharing();
     const answered = await request(app, 'PUT', answerUrl(agentId, CURL), { body: { answer: 'investigate', note: '  見覚えがない  ' } });

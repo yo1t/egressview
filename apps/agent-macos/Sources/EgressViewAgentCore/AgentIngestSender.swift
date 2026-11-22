@@ -7,6 +7,9 @@ public struct AgentIngestAcknowledgement: Decodable, Equatable, Sendable {
     public let duplicate: Int
     public let rejected: Int
     public let replayed: Bool
+    /// Changes whenever the Hub's administrator answers one of this Mac's
+    /// candidates (P3-194 stage 2). Absent from a Hub that cannot.
+    public let outboundAnswersVersion: Int?
 }
 
 public protocol AgentIngestTransport: Sendable {
@@ -145,6 +148,9 @@ public actor AgentIngestSender {
     private let now: @Sendable () -> Date
     private let statusHandler: StatusHandler
     private let failureHandler: @Sendable (AgentDeliveryFailureRecord) -> Void
+    /// Told what each accepted batch's reply said about the Hub's answers,
+    /// nil when it said nothing.
+    private let answersVersionHandler: @Sendable (Int?) -> Void
     private var enabled = false
     private var connected = false
     private var failureCount = 0
@@ -209,7 +215,8 @@ public actor AgentIngestSender {
         now: @escaping @Sendable () -> Date = { Date() },
         minimumSendSpacing: TimeInterval = 5,
         statusHandler: @escaping StatusHandler = { _, _ in },
-        failureHandler: @escaping @Sendable (AgentDeliveryFailureRecord) -> Void = { _ in }
+        failureHandler: @escaping @Sendable (AgentDeliveryFailureRecord) -> Void = { _ in },
+        answersVersionHandler: @escaping @Sendable (Int?) -> Void = { _ in }
     ) {
         self.queue = queue
         self.credentialStore = credentialStore
@@ -221,6 +228,7 @@ public actor AgentIngestSender {
         self.minimumSendSpacing = minimumSendSpacing
         self.statusHandler = statusHandler
         self.failureHandler = failureHandler
+        self.answersVersionHandler = answersVersionHandler
     }
 
     public func setEnabled(_ value: Bool) {
@@ -459,6 +467,7 @@ public actor AgentIngestSender {
                 throw AgentIngestSenderError.invalidAcknowledgement
             }
             try queue.acknowledge(batchID: envelope.batchId, at: now())
+            answersVersionHandler(acknowledgement.outboundAnswersVersion)
             failureCount = 0
             sendTask = nil
             publish(.idle)
