@@ -723,7 +723,8 @@ test('mobile viewer keeps navigation, logs, and device details inside the viewpo
     contentType: 'application/json',
     body: JSON.stringify({ devices: [{
       deviceId: 8001, ip: '192.0.2.80', mac: 'aa:bb:cc:dd:ee:80',
-      vendor: 'Mobile fixture', dnsName: 'phone.example', ipv6Addrs: [],
+      vendor: 'Mobile fixture', dnsName: 'phone.example',
+      ipv6Addrs: ['fe80::a8bb:ccff:fedd:ee80', '2001:db8:1234:5678:a8bb:ccff:fedd:ee80'],
       sources: 'yamaha,cisco', status: 'active', firstSeen: Date.now() - 60_000,
       lastSeen: Date.now(), note: 'Visible on a narrow screen',
     }] }),
@@ -758,9 +759,18 @@ test('mobile viewer keeps navigation, logs, and device details inside the viewpo
   await page.click('#btn-devices');
   const row = page.locator('#devices-tbody tr[data-ip]');
   await expect(row).toHaveCount(1);
+  // Both address families in one column: the IPv4 address, and under it how
+  // many IPv6 addresses there are.
+  await expect(row.locator('td').first()).toContainText('192.0.2.80');
+  await expect(row.locator('.dv-address-v6')).toHaveText('+2 IPv6');
   await row.click();
   const detail = page.locator('#dv-detail-panel');
   await expect(detail).toBeVisible();
+  // The global address is listed first, each with its kind.
+  const v6Lines = detail.locator('.dv-detail-ipv6-line');
+  await expect(v6Lines).toHaveCount(2);
+  await expect(v6Lines.first()).toContainText('2001:db8:1234:5678:a8bb:ccff:fedd:ee80');
+  await expect(v6Lines.locator('.dv-detail-ipv6-scope')).toHaveCount(2);
   const detailBox = await detail.boundingBox();
   expect(detailBox.x).toBeGreaterThanOrEqual(0);
   expect(detailBox.x + detailBox.width).toBeLessThanOrEqual(390);
@@ -1465,7 +1475,7 @@ test('device list and detail render external values as DOM text', async ({ page 
   await page.click('#btn-devices');
   const row = page.locator('#devices-tbody tr[data-ip]');
   await expect(row).toHaveCount(1);
-  await expect(row.locator('td')).toHaveCount(8);
+  await expect(row.locator('td')).toHaveCount(7);
   await expect(row).toContainText('<script>device-vendor</script>');
   await expect(row.locator('script, img')).toHaveCount(0);
 

@@ -36,7 +36,6 @@ function dvAppendCell(row, value, { className = '', placeholder = false } = {}) 
 
 function createDeviceTableRow(device) {
   const name = deviceName(device);
-  const ipv6 = deviceIpv6(device);
   const sources = (device.sources || '').split(',').filter(Boolean).join(' · ');
   const isOpen = dvDetailDevice && dvDetailDevice.ip === device.ip;
   const row = document.createElement('tr');
@@ -47,12 +46,11 @@ function createDeviceTableRow(device) {
   row.dataset.ip = device.ip || '';
   row.addEventListener('click', () => openDvDetail(device));
 
-  dvAppendCell(row, device.ip, { className: 'dv-cell-mono' });
+  row.appendChild(createDeviceAddressCell(device));
   dvAppendCell(row, device.mac, { className: 'dv-cell-mono dv-cell-muted', placeholder: !device.mac });
   const vendor = deviceVendor(device);
   dvAppendCell(row, vendor, { placeholder: !vendor });
   dvAppendCell(row, name, { placeholder: name === '—' });
-  dvAppendCell(row, ipv6, { className: 'dv-cell-mono-small', placeholder: ipv6 === '—' });
   dvAppendCell(row, sources, { className: 'dv-cell-small-muted', placeholder: !sources });
   dvAppendCell(row, fmtTs(device.firstSeen), { className: 'dv-cell-small-muted' });
   dvAppendCell(row, fmtTs(device.lastSeen), { className: 'dv-cell-small-muted' });
@@ -69,10 +67,36 @@ function deviceName(d) {
 function deviceVendor(d) {
   return d.vendor || d.agent?.manufacturer || '';
 }
-function deviceIpv6(d) {
-  if (!d.ipv6Addrs || !d.ipv6Addrs.length) return '—';
-  return d.ipv6Addrs.slice(0, 2).join(', ');
+// One address column: the IPv4 address, and under it how many IPv6
+// addresses the device also has. The addresses themselves are long enough to
+// push the table off a phone, so they are listed in the detail panel.
+function deviceIpv6List(d) {
+  return (d.ipv6Addrs || []).filter(Boolean);
 }
+function createDeviceAddressCell(d) {
+  const cell = document.createElement('td');
+  cell.className = 'dv-cell-address';
+  cell.appendChild(dvTextElement('span', d.ip || '', { className: 'dv-cell-mono dv-address-v4' }));
+  const ipv6 = deviceIpv6List(d);
+  if (ipv6.length) {
+    const badge = dvTextElement('span', tVars('devices.ipv6Count', { n: ipv6.length }), { className: 'dv-address-v6' });
+    badge.title = ipv6.join('\n');
+    cell.appendChild(badge);
+  }
+  return cell;
+}
+// Which kind of IPv6 address it is, so a reader can tell the one the device
+// uses on the internet from the ones that never leave the LAN.
+function ipv6Scope(address) {
+  const head = String(address).toLowerCase().split(':')[0];
+  const first = parseInt(head || '0', 16);
+  if (Number.isNaN(first)) return 'other';
+  if ((first & 0xffc0) === 0xfe80) return 'linkLocal';
+  if ((first & 0xfe00) === 0xfc00) return 'ula';
+  if ((first & 0xe000) === 0x2000) return 'global';
+  return 'other';
+}
+const IPV6_SCOPE_ORDER = { global: 0, ula: 1, linkLocal: 2, other: 3 };
 function getDeviceSortValue(d, col) {
   switch (col) {
     case 'ip':        return d.ip || '';
@@ -149,7 +173,8 @@ function renderDevicesTable() {
       const hit = (d.ip || '').includes(search) ||
         (d.mac || '').toLowerCase().includes(search) ||
         deviceVendor(d).toLowerCase().includes(search) ||
-        deviceName(d).toLowerCase().includes(search);
+        deviceName(d).toLowerCase().includes(search) ||
+        deviceIpv6List(d).some(address => address.toLowerCase().includes(search));
       if (!hit) return false;
     }
     // Column filters
@@ -262,7 +287,9 @@ function openDvDetail(d) {
   document.getElementById('dv-detail-title').textContent = d.ip + (d.mac ? ' / ' + d.mac : '');
 
   const name = deviceName(d);
-  const ipv6List = (d.ipv6Addrs || []).filter(Boolean);
+  const ipv6List = deviceIpv6List(d)
+    .map(address => ({ address, scope: ipv6Scope(address) }))
+    .sort((a, b) => IPV6_SCOPE_ORDER[a.scope] - IPV6_SCOPE_ORDER[b.scope]);
   const sources = (d.sources || '').split(',').filter(Boolean).join(', ');
   const noteText = d.note != null ? d.note : lookupNote(d.ip, d.mac, d.deviceId);
 
@@ -312,7 +339,11 @@ function openDvDetail(d) {
     ipv6Row.appendChild(dvTextElement('span', 'IPv6', { className: 'dv-detail-label' }));
     const ipv6Values = document.createElement('span');
     ipv6Values.className = 'dv-detail-value dv-detail-ipv6';
-    ipv6List.forEach(address => ipv6Values.appendChild(dvTextElement('span', address, { className: 'dv-detail-ipv6-line' })));
+    ipv6List.forEach(({ address, scope }) => {
+      const line = dvTextElement('span', address, { className: 'dv-detail-ipv6-line' });
+      if (scope !== 'other') line.appendChild(dvTextElement('span', t(`devices.ipv6.${scope}`), { className: 'dv-detail-ipv6-scope' }));
+      ipv6Values.appendChild(line);
+    });
     ipv6Row.appendChild(ipv6Values);
     detail.appendChild(ipv6Row);
   }

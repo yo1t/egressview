@@ -1007,13 +1007,17 @@
   .dv-detail-close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 4px; }
   .dv-table-row { cursor: pointer; }
   .dv-cell-mono { font-family: monospace; }
+  .dv-cell-address { white-space: nowrap; }
+  .dv-address-v4 { display: block; }
+  .dv-address-v6 { display: inline-block; margin-top: 2px; padding: 0 5px; border-radius: 8px; font-size: 10px; color: var(--muted); border: 1px solid var(--border); }
   .dv-cell-muted { color: var(--muted); }
   .dv-cell-mono-small { font-family: monospace; font-size: 10px; color: var(--muted); }
   .dv-cell-small-muted { color: var(--muted); font-size: 10px; }
   .dv-placeholder { color: var(--muted); opacity: .4; }
   .dv-detail-small { font-size: 10px; }
   .dv-detail-ipv6 { font-family: monospace; font-size: 10px; }
-  .dv-detail-ipv6-line { display: block; }
+  .dv-detail-ipv6-line { display: block; overflow-wrap: anywhere; }
+  .dv-detail-ipv6-scope { margin-left: 6px; font-family: system-ui, sans-serif; color: var(--muted); }
   .dv-detail-note-label { margin-top: 4px; margin-bottom: 2px; font-size: 11px; color: var(--muted); }
   .dv-investigate-result { margin-top: 4px; color: var(--muted); font-size: 10px; white-space: pre-wrap; }
   /* ── P1-8: status filter bar ── */
