@@ -197,8 +197,19 @@ final class OutboundCandidateSharingController: ObservableObject {
             return
         }
 
+        let uploader = OutboundCandidateUploader(
+            hubURL: credential.hubURL, token: credential.token, userAgent: userAgent
+        )
         let payload: OutboundCandidateSharePayload?
         if enabled {
+            // A Hub from 2026-11-22 on takes the whole list; an older one
+            // refuses more than 20, so ask before each send.
+            switch await uploader.hubMaximum() {
+            case .says(let maximum): preferences.hubMaximumEntries = maximum
+            case .doesNotSay: preferences.hubMaximumEntries = nil
+            case .unknown: break
+            }
+            let entryLimit = OutboundCandidateSharePayload.entryLimit(hubMaximum: preferences.hubMaximumEntries)
             let notes = preferences.includesNotes
             let takesAnswers = preferences.hubTakesAnswers
             payload = await Task.detached(priority: .utility) { () -> OutboundCandidateSharePayload? in
@@ -206,7 +217,8 @@ final class OutboundCandidateSharingController: ObservableObject {
                       let judgments = try? store.outboundCandidateJudgments()
                 else { return nil }
                 return OutboundCandidateSharePayload(
-                    report: report, judgments: judgments, includesNotes: notes, hubTakesAnswers: takesAnswers
+                    report: report, judgments: judgments, includesNotes: notes, hubTakesAnswers: takesAnswers,
+                    entryLimit: entryLimit
                 )
             }.value
             guard payload != nil else {
@@ -222,9 +234,6 @@ final class OutboundCandidateSharingController: ObservableObject {
             isEnabled: enabled, hubMayHoldList: preferences.hubMayHoldList,
             lastSentHash: preferences.lastSentHash, lastSentAt: preferences.lastSentAt,
             currentHash: hash
-        )
-        let uploader = OutboundCandidateUploader(
-            hubURL: credential.hubURL, token: credential.token, userAgent: userAgent
         )
         do {
             switch plan {

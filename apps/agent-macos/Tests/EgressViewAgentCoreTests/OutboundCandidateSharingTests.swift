@@ -73,6 +73,43 @@ final class OutboundCandidateSharingTests: XCTestCase {
         XCTAssertEqual(payload.total, 31)
     }
 
+    func test全件を受け取るHubには上限まで全部送る() throws {
+        let many = (0..<27).map { candidate(destination: "host\($0).example") }
+        let payload = OutboundCandidateSharePayload(
+            report: OutboundCandidateReport(state: .ready, candidates: many, total: 27),
+            judgments: [:], includesNotes: false,
+            entryLimit: OutboundCandidateSharePayload.entryLimit(hubMaximum: 150)
+        )
+        XCTAssertEqual(payload.entries.count, 27)
+        XCTAssertEqual(payload.total, 27)
+    }
+
+    func test送る件数はHubが言った数までで_言わなければ20件() {
+        XCTAssertEqual(OutboundCandidateSharePayload.entryLimit(hubMaximum: nil), 20)
+        XCTAssertEqual(OutboundCandidateSharePayload.entryLimit(hubMaximum: 10), 20)
+        XCTAssertEqual(OutboundCandidateSharePayload.entryLimit(hubMaximum: 100), 100)
+        XCTAssertEqual(OutboundCandidateSharePayload.entryLimit(hubMaximum: 150), 150)
+        XCTAssertEqual(OutboundCandidateSharePayload.entryLimit(hubMaximum: 5000), 150)
+    }
+
+    func test上限いっぱいの一覧もHubが読む512KiBに収まる() throws {
+        let longest = String(repeating: "あ", count: 300)
+        var many: [OutboundCandidate] = []
+        var judgments: [String: OutboundCandidateJudgment] = [:]
+        for index in 0..<OutboundCandidateSharePayload.maximumEntryLimit {
+            let item = candidate(application: "\(index)\(longest)", destination: "\(index)\(longest)")
+            many.append(item)
+            judgments.merge(judgment(item, note: String(repeating: "あ", count: 600))) { $1 }
+        }
+        let payload = OutboundCandidateSharePayload(
+            report: OutboundCandidateReport(state: .ready, candidates: many, total: many.count),
+            judgments: judgments, includesNotes: true, hubTakesAnswers: true,
+            entryLimit: OutboundCandidateSharePayload.maximumEntryLimit
+        )
+        XCTAssertEqual(payload.entries.count, OutboundCandidateSharePayload.maximumEntryLimit)
+        XCTAssertLessThan(try payload.encoded().count, 512 * 1024)
+    }
+
     func test送るのをやめる知らせは中身を持たない() throws {
         let object = try json(.off())
         XCTAssertEqual(object["sharing"] as? Bool, false)
@@ -182,6 +219,46 @@ final class OutboundCandidateSharingTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? OutboundCandidateShareError, .hubTooOld)
         }
+    }
+
+    private final class AnsweringTransport: GeoCacheTransport, @unchecked Sendable {
+        var requests: [URLRequest] = []
+        let status: Int
+        let body: String
+        init(status: Int, body: String = "{}") { self.status = status; self.body = body }
+        func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            requests.append(request)
+            return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
+    private func hubMaximum(status: Int, body: String = "{}", hub: String = "https://hub.example") async -> (OutboundCandidateUploader.HubMaximum, AnsweringTransport) {
+        let transport = AnsweringTransport(status: status, body: body)
+        let uploader = OutboundCandidateUploader(
+            hubURL: URL(string: hub)!, token: "egva_test", userAgent: "u", transport: transport
+        )
+        return (await uploader.hubMaximum(), transport)
+    }
+
+    func testHubが受け取れる件数はcapabilitiesで聞く() async throws {
+        let (said, transport) = await hubMaximum(status: 200, body: #"{"schemaVersions":[1],"maxOutboundCandidates":150}"#)
+        XCTAssertEqual(said, .says(150))
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/agent/capabilities")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer egva_test")
+    }
+
+    func test件数を言わないHubと古いHubは20件_聞けなければ前のまま() async {
+        let silent = await hubMaximum(status: 200, body: #"{"schemaVersions":[1]}"#)
+        XCTAssertEqual(silent.0, .doesNotSay)
+        let old = await hubMaximum(status: 404)
+        XCTAssertEqual(old.0, .doesNotSay)
+        let failing = await hubMaximum(status: 503)
+        XCTAssertEqual(failing.0, .unknown)
+        let insecure = await hubMaximum(status: 200, body: #"{"maxOutboundCandidates":150}"#, hub: "http://hub.example")
+        XCTAssertEqual(insecure.0, .unknown)
+        XCTAssertTrue(insecure.1.requests.isEmpty)
     }
 
     func testHTTPSでないHubへは送らない() async {
