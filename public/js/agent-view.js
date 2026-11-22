@@ -594,12 +594,19 @@ function renderCard(agent, report, now, probes, minPorts, appBytes, appState, de
       .filter(Boolean).join(' · '), 'agent-card-meta')
   );
   head.append(title, deliveryLine(agent, now));
-  // Answers waiting first, then what it sends, then what reached it. The
-  // first two share a row when the card is wide enough.
-  const pair = textElement('div', '', 'agent-card-pair');
-  pair.append(renderCandidates(agent, report), renderApps(appBytes, appState));
-  card.append(head, pair, renderUptime(uptime, uptimeState), renderProbes(agent, probes, minPorts),
-    renderFacts(agent, details, detailsOk, now));
+  // Answers waiting first, then what it sends, then what reached it. On a
+  // wide card the candidates keep the left column however long they grow, and
+  // what it sends, how long it reported, the device facts and the probes stack
+  // on the right. A narrow card reads them in this order.
+  const body = textElement('div', '', 'agent-card-body');
+  const place = (section, slot) => { section.classList.add(`agent-card-slot-${slot}`); return section; };
+  body.append(
+    place(renderCandidates(agent, report), 'candidates'),
+    place(renderApps(appBytes, appState), 'apps'),
+    place(renderUptime(uptime, uptimeState), 'uptime'),
+    place(renderProbes(agent, probes, minPorts), 'probes'),
+    place(renderFacts(agent, details, detailsOk, now), 'facts'));
+  card.append(head, body);
   return card;
 }
 
