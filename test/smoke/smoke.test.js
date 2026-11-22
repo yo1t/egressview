@@ -887,6 +887,12 @@ test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', asy
 
   // Answering on the Hub: the buttons are tapped with a finger, the note
   // field must not make iOS zoom in, and the answer keeps the note.
+  // The whole list can be long now; it scrolls inside the card rather than
+  // pushing the rest of the card down.
+  const frame = page.locator('.agent-candidates-scroll');
+  await expect(frame).toHaveCSS('overflow-y', 'auto');
+  expect(await frame.evaluate(el => parseFloat(getComputedStyle(el).maxHeight))).toBeLessThanOrEqual(640 * 0.7 + 1);
+
   // An item answered "expected" is folded to its summary; the triangle opens
   // it to change the answer or the note.
   const folded = page.locator('details.agent-candidate-fold');

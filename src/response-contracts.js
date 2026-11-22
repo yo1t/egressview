@@ -225,7 +225,7 @@ function createRegistry() {
   }).strict());
 
   // GET /api/agents/outbound-candidates -- one report per enrolled Agent that
-  // shares, each at most 20 entries (`MAX_ENTRIES`).
+  // shares, each at most 150 entries (`MAX_ENTRIES`).
   registry.declare('GET /api/agents/outbound-candidates', 200, z.object({
     agents: z.array(z.object({
       agentId: z.string(),
@@ -261,7 +261,7 @@ function createRegistry() {
   }).strict());
 
   // GET /api/agent/outbound-candidates/answers -- the Hub's answers for this
-  // Agent's listed candidates, so at most 20 (`MAX_ENTRIES`).
+  // Agent's listed candidates, so at most 150 (`MAX_ENTRIES`).
   registry.declare('GET /api/agent/outbound-candidates/answers', 200, z.object({
     version: z.number(),
     answers: z.array(z.object({

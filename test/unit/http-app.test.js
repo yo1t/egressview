@@ -4,6 +4,8 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const { Readable, Writable } = require('node:stream');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   agentJsonBoundary,
@@ -100,6 +102,19 @@ describe('Agent JSON boundary', () => {
       body: JSON.stringify({ ok: true }),
     });
     assert.equal(compressed.status, 415);
+  });
+});
+
+describe('Agentの候補一覧の本文', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'http-app.js'), 'utf8');
+
+  it('64 KBの共通の読み込みを通さず、認証の後に512 KiBまで読む', () => {
+    // 150 entries with long names and notes need more than 64 KB, and a
+    // body that size is read only once the Agent is known, as ingest is.
+    assert.match(source, /req\.path === '\/agent\/ingest' \|\| req\.path === '\/agent\/outbound-candidates'/);
+    const permissions = source.indexOf("app.use('/api', enforceApiPermissions);");
+    const boundary = source.indexOf("app.use('/api/agent/outbound-candidates'");
+    assert.ok(permissions > 0 && boundary > permissions, 'the body must be read after authentication');
   });
 });
 

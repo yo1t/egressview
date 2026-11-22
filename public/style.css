@@ -594,6 +594,8 @@
   .agent-card-section { display: grid; gap: 8px; }
   .agent-card-section-title { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); }
   .agent-candidates { display: grid; gap: 8px; }
+  /* A long list scrolls inside the card, so what sits under it stays near. */
+  .agent-candidates-scroll { max-height: 70vh; overflow-y: auto; padding-right: 4px; scrollbar-gutter: stable; }
   .agent-candidate {
     display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
     padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 8px;

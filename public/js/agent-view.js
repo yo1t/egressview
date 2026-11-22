@@ -270,7 +270,16 @@ function renderCandidates(agent, report) {
   }
   const list = textElement('div', '', 'agent-candidates');
   for (const entry of entries) list.appendChild(renderCandidate(report, entry));
-  if (entries.length) section.appendChild(list);
+  if (entries.length) {
+    // The Agent now sends its whole list, which can be long. It scrolls
+    // inside the card; the frame is focusable so the keyboard scrolls it too.
+    const frame = textElement('div', '', 'agent-candidates-scroll');
+    frame.tabIndex = 0;
+    frame.setAttribute('role', 'region');
+    frame.setAttribute('aria-label', t('agents.candidates.title'));
+    frame.appendChild(list);
+    section.appendChild(frame);
+  }
   const more = (Number(report.total) || 0) - entries.length;
   if (more > 0) {
     section.appendChild(textElement('div',
