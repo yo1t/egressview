@@ -7,6 +7,7 @@ const outboundCandidates = require('./agent-outbound-candidates');
 const appBytes = require('./agent-app-bytes');
 const deliveryVolume = require('./agent-delivery-volume');
 const agentAddresses = require('./agent-addresses');
+const agentHardware = require('./agent-hardware');
 const agentUptime = require('./agent-uptime');
 
 const runtimeProfiler = require('./runtime-profiler');
@@ -48,6 +49,7 @@ function initDb(dbPath) {
   outboundCandidates.ensureOutboundCandidatesTables(db);
   appBytes.ensureAppBytesTables(db);
   deliveryVolume.ensureDeliveryVolumeTables(db);
+  agentHardware.ensureAgentHardwareTable(db);
 }
 
 function closeDb() {
@@ -497,6 +499,7 @@ async function storeBatchOnce(agentId, envelope, { receivedAt = Date.now(), expi
       receivedAt,
       agentId
     );
+    agentHardware.recordAgentHardware(database, agentId, envelope.agent, receivedAt);
   });
   if (observations.length > OBSERVATIONS_PER_CHUNK) await yieldToLoop();
   runtimeProfiler.measureSync('agentIngest.finish', () => writeTimed('finish', finish));
@@ -820,6 +823,7 @@ function _initForTest(dbPath = ':memory:') {
   outboundCandidates.ensureOutboundCandidatesTables(db);
   appBytes.ensureAppBytesTables(db);
   deliveryVolume.ensureDeliveryVolumeTables(db);
+  agentHardware.ensureAgentHardwareTable(db);
 }
 
 /// Locations for destinations, as stored by enrichment (agent-geo-cache.js).
@@ -866,6 +870,10 @@ function listAgentAddresses(options) {
   return agentAddresses.listAgentAddresses(requireDb(), options);
 }
 
+function listAgentHardware() {
+  return agentHardware.listAgentHardware(requireDb());
+}
+
 function listUptime(options) {
   return agentUptime.listUptime(requireDb(), options);
 }
@@ -907,6 +915,7 @@ module.exports = {
   recordDelivery,
   listDeliveryVolume,
   listAgentAddresses,
+  listAgentHardware,
   listUptime,
   _dbForTest,
   _initForTest,

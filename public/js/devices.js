@@ -49,7 +49,8 @@ function createDeviceTableRow(device) {
 
   dvAppendCell(row, device.ip, { className: 'dv-cell-mono' });
   dvAppendCell(row, device.mac, { className: 'dv-cell-mono dv-cell-muted', placeholder: !device.mac });
-  dvAppendCell(row, device.vendor, { placeholder: !device.vendor });
+  const vendor = deviceVendor(device);
+  dvAppendCell(row, vendor, { placeholder: !vendor });
   dvAppendCell(row, name, { placeholder: name === '—' });
   dvAppendCell(row, ipv6, { className: 'dv-cell-mono-small', placeholder: ipv6 === '—' });
   dvAppendCell(row, sources, { className: 'dv-cell-small-muted', placeholder: !sources });
@@ -58,8 +59,15 @@ function createDeviceTableRow(device) {
   return row;
 }
 
+// The name the computer gives itself, when its Agent is on this row, comes
+// first: what a router hears on the LAN can be as general as "Mac" (P3-199).
 function deviceName(d) {
-  return d.mdnsName || d.dnsName || d.netbiosName || '—';
+  return d.agent?.hostName || d.mdnsName || d.dnsName || d.netbiosName || '—';
+}
+// The maker a router read from the hardware address; failing that, the one
+// the Agent read from the computer (a random Wi-Fi address names no maker).
+function deviceVendor(d) {
+  return d.vendor || d.agent?.manufacturer || '';
 }
 function deviceIpv6(d) {
   if (!d.ipv6Addrs || !d.ipv6Addrs.length) return '—';
@@ -69,7 +77,7 @@ function getDeviceSortValue(d, col) {
   switch (col) {
     case 'ip':        return d.ip || '';
     case 'mac':       return d.mac || '';
-    case 'vendor':    return (d.vendor || '').toLowerCase();
+    case 'vendor':    return deviceVendor(d).toLowerCase();
     case 'name':      return deviceName(d).toLowerCase();
     case 'firstSeen': return d.firstSeen || 0;
     case 'lastSeen':  return d.lastSeen  || 0;
@@ -80,7 +88,7 @@ function getDvCellValue(d, col) {
   switch (col) {
     case 'ip':     return d.ip || '';
     case 'mac':    return d.mac || '';
-    case 'vendor': return d.vendor || '';
+    case 'vendor': return deviceVendor(d);
     case 'name':   return deviceName(d) === '—' ? '' : deviceName(d);
     default:       return '';
   }
@@ -140,7 +148,7 @@ function renderDevicesTable() {
     if (search) {
       const hit = (d.ip || '').includes(search) ||
         (d.mac || '').toLowerCase().includes(search) ||
-        (d.vendor || '').toLowerCase().includes(search) ||
+        deviceVendor(d).toLowerCase().includes(search) ||
         deviceName(d).toLowerCase().includes(search);
       if (!hit) return false;
     }
@@ -287,7 +295,14 @@ function openDvDetail(d) {
   const detail = document.createDocumentFragment();
   detail.appendChild(createDvDetailRow(t('devices.detail.status'), statusLabels[statusStr] || statusStr, statusCls[statusStr]));
   if (d.vendor) detail.appendChild(createDvDetailRow(t('devices.detail.vendor'), d.vendor));
-  if (name !== '—') detail.appendChild(createDvDetailRow(t('devices.detail.name'), name));
+  else if (d.agent?.manufacturer) {
+    detail.appendChild(createDvDetailRow(t('devices.detail.vendor'),
+      `${d.agent.manufacturer} (${t('devices.detail.fromAgent')})`));
+  }
+  if (d.agent?.model) detail.appendChild(createDvDetailRow(t('devices.detail.model'), d.agent.model));
+  if (d.agent?.hostName) detail.appendChild(createDvDetailRow(t('devices.detail.agent'), d.agent.hostName));
+  // The Agent's name has its own row above.
+  if (name !== '—' && name !== d.agent?.hostName) detail.appendChild(createDvDetailRow(t('devices.detail.name'), name));
   if (d.dnsName) detail.appendChild(createDvDetailRow('DNS', d.dnsName, 'dv-detail-small'));
   if (d.mdnsName) detail.appendChild(createDvDetailRow('mDNS', d.mdnsName));
   if (d.netbiosName) detail.appendChild(createDvDetailRow('NetBIOS', d.netbiosName));

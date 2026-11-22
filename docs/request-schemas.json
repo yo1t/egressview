@@ -63,6 +63,16 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 64
+            },
+            "manufacturer": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
             }
           },
           "required": [
@@ -144,6 +154,16 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 64
+            },
+            "manufacturer": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
             }
           },
           "required": [
@@ -1638,7 +1658,7 @@
           "type": "boolean"
         },
         "entries": {
-          "maxItems": 20,
+          "maxItems": 150,
           "type": "array",
           "items": {
             "type": "object",
@@ -2094,13 +2114,24 @@
           },
           "outboundCandidateAnswers": {
             "type": "boolean"
+          },
+          "maxOutboundCandidates": {
+            "type": "integer"
+          },
+          "agentFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
+          "agentFields",
           "compression",
           "inboundProbes",
           "maxBodyBytes",
           "maxObservationsPerBatch",
+          "maxOutboundCandidates",
           "observationFields",
           "observationUpdates",
           "outboundCandidateAnswers",
@@ -2151,10 +2182,16 @@
                   "type": "string"
                 },
                 "answer": {
-                  "type": "string"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "note": {
-                  "type": "null"
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "answeredAt": {
                   "type": "string"
