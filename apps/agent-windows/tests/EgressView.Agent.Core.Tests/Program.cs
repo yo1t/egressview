@@ -391,6 +391,14 @@ try
         outbox.Add(Enumerable.Range(0, InboundProbeOutbox.Capacity + 5).Select(_ => summaries[0]));
         Assert(outbox.Pending == InboundProbeOutbox.Capacity && outbox.Dropped > 0, "the outbox is bounded and counts what it drops");
 
+        Assert(AgentCapabilityNegotiation.Decide(new AgentHubCapabilities([1], AgentFields: ["manufacturer", "model"])).IncludeHardware
+               && !AgentCapabilityNegotiation.Decide(new AgentHubCapabilities([1], AgentFields: ["manufacturer"])).IncludeHardware
+               && !AgentCapabilityNegotiation.Decide(new AgentHubCapabilities([1])).IncludeHardware
+               && !AgentCapabilityNegotiation.Decide(null).IncludeHardware,
+            "the maker and model are sent only to a Hub that lists both (P3-199)");
+        Assert(WindowsHardware.Clean("  LENOVO \u0007") == "LENOVO" && WindowsHardware.Clean("To Be Filled By O.E.M.") is null
+               && WindowsHardware.Clean("") is null && WindowsHardware.Clean(new string('x', 150))!.Length == 100,
+            "firmware maker and model are trimmed, bounded, and placeholders are dropped");
         Assert(AgentCapabilityNegotiation.Decide(new AgentHubCapabilities([1], InboundProbes: true)).IncludeInboundProbes
                && !AgentCapabilityNegotiation.Decide(new AgentHubCapabilities([1])).IncludeInboundProbes,
             "inbound probes are sent only to a Hub that says it takes them");
@@ -2806,7 +2814,7 @@ try
         var handler = new DeliveryHandler(200, 200)
         {
             CapabilitiesStatus = HttpStatusCode.OK,
-            CapabilitiesJson = """{"schemaVersions":[1],"maxObservationsPerBatch":2,"observationFields":["remoteHostname"],"inboundProbes":true}""",
+            CapabilitiesJson = """{"schemaVersions":[1],"maxObservationsPerBatch":2,"observationFields":["remoteHostname"],"inboundProbes":true,"agentFields":["manufacturer","model"]}""",
         };
         var clock = new ManualTimeProvider(deliveryStarted);
         // One probe summary, so the disclosure check below sees every key the
@@ -2815,7 +2823,7 @@ try
         probeOutbox.Add([new InboundProbeSummary(deliveryStarted, 120, "10.0.0.1", "10.0.0.53", "tcp", 30, 60, [1, 2, 3])]);
         var sender = new DeliverySender(new HttpClient(handler), clock) { InboundProbes = probeOutbox };
         var credential = new AgentCredential(new Uri("https://hub.example/"), agentId, agentToken, deliveryStarted);
-        var metadata = new DeliveryMetadata("host", "windows", "Windows", "dev");
+        var metadata = new DeliveryMetadata("host", "windows", "Windows", "dev", "VMware, Inc.", "VMware20,1");
         Assert((await sender.SendNextAsync(capableStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged,
             "a compatible Hub accepts the first bounded batch");
         Assert(handler.ObservationCounts.Single() == 2 && handler.SawRemoteHostname,
@@ -2828,6 +2836,10 @@ try
                 .Concat(root.GetProperty("observations")[0].EnumerateObject().Select(item => item.Name))
                 .Concat(root.GetProperty("inboundProbes")[0].EnumerateObject().Select(item => item.Name))
                 .ToHashSet(StringComparer.Ordinal);
+            var sentAgent = root.GetProperty("agent");
+            Assert(sentAgent.GetProperty("manufacturer").GetString() == "VMware, Inc."
+                   && sentAgent.GetProperty("model").GetString() == "VMware20,1",
+                "a Hub that lists agentFields receives the PC's maker and model (P3-199)");
             Assert(probeOutbox.Pending == 0 && probeOutbox.Sent == 1
                    && root.GetProperty("inboundProbes")[0].GetProperty("sourceAddress").GetString() == "10.0.0.53",
                 "an acknowledged batch carries the waiting probe summaries and they leave the outbox");
@@ -2882,9 +2894,15 @@ try
         var clock = new ManualTimeProvider(deliveryStarted);
         var sender = new DeliverySender(new HttpClient(handler), clock);
         var credential = new AgentCredential(new Uri("https://legacy.example/"), agentId, agentToken, deliveryStarted);
-        Assert((await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev"))).Kind == DeliveryAttemptKind.Acknowledged &&
+        Assert((await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev", "Maker", "Model 1"))).Kind == DeliveryAttemptKind.Acknowledged &&
             !handler.SawRemoteHostname && sender.CapabilityStatus.State == "unavailable",
             "an old Hub 404 keeps delivery working and never receives a hostname");
+        using (var legacyPayload = JsonDocument.Parse(handler.LastIngestBody!))
+        {
+            var legacyAgent = legacyPayload.RootElement.GetProperty("agent");
+            Assert(!legacyAgent.TryGetProperty("manufacturer", out _) && !legacyAgent.TryGetProperty("model", out _),
+                "a Hub that has not listed agentFields is never sent the maker or model; its strict schema would refuse the batch");
+        }
         handler.CapabilitiesStatus = HttpStatusCode.OK;
         handler.CapabilitiesJson = """{"schemaVersions":[1],"maxObservationsPerBatch":200,"observationFields":["remoteHostname"]}""";
         Assert((await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev"))).Kind == DeliveryAttemptKind.Empty &&

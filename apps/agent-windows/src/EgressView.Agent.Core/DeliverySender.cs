@@ -6,7 +6,19 @@ using System.Text.Json.Serialization;
 
 namespace EgressView.Agent.Core;
 
-public sealed record DeliveryMetadata(string HostName, string Platform, string OsVersion, string AgentVersion);
+/// <param name="Manufacturer">
+/// Who made this PC and which model it is, for the Hub's device list when the
+/// router cannot tell (P3-199). Sent only to a Hub that lists them in
+/// <c>agentFields</c>: the shipped schema is strict, so an older Hub refuses
+/// a batch that carries them.
+/// </param>
+public sealed record DeliveryMetadata(string HostName, string Platform, string OsVersion, string AgentVersion,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Manufacturer = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Model = null)
+{
+    public DeliveryMetadata IncludingHardware(bool include) =>
+        include ? this : this with { Manufacturer = null, Model = null };
+}
 public enum DeliveryAttemptKind { Empty, Acknowledged, AuthorizationRequired, RateLimited, Retryable, Rejected, InvalidAcknowledgement, Incompatible }
 /// <param name="Narrowed">
 /// Whether this refusal halved the batch, so the next attempt carries a
@@ -94,7 +106,8 @@ public sealed class DeliverySender
     private async Task<DeliveryAttempt> SendBatchAsync(ObservationStore store, AgentCredential credential, DeliveryMetadata metadata,
         AgentCapabilityOutcome outcome, DeliveryBatch batch, IReadOnlyList<InboundProbeSummary> probes, CancellationToken cancellationToken)
     {
-        var envelope = new DeliveryEnvelope(outcome.SchemaVersion, batch.BatchId, Timestamp(batch.SentAt), metadata,
+        var envelope = new DeliveryEnvelope(outcome.SchemaVersion, batch.BatchId, Timestamp(batch.SentAt),
+            metadata.IncludingHardware(outcome.IncludeHardware),
             batch.Observations.Select(item => new DeliveryPayload(
                 item.ObservationId, item.NetworkProtocol, item.LocalAddress, item.LocalPort, item.RemoteAddress,
                 item.RemotePort, item.ProcessId, item.ProcessName, item.BundleID, Timestamp(item.FirstObservedAt),

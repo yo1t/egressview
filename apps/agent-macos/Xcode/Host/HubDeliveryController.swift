@@ -156,7 +156,9 @@ final class HubDeliveryController: ObservableObject {
             hostName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
             platform: .macOS,
             osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
-            agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+            agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            manufacturer: "Apple",
+            model: MacHardwareModel.current()
         )
         return AgentIngestSender(
             queue: queue,

@@ -11,12 +11,33 @@ public struct AgentIngestMetadata: Codable, Equatable, Sendable {
     public let platform: AgentPlatform
     public let osVersion: String
     public let agentVersion: String
+    /// Who made this computer and which model it is, shown in the Hub's
+    /// device list when the router cannot tell (a randomized MAC has no
+    /// vendor). Sent only to a Hub that lists them in `agentFields`: the
+    /// shipped schema is strict, so an older Hub refuses a batch that carries
+    /// them. `nil` is not encoded (P3-199).
+    public let manufacturer: String?
+    public let model: String?
 
-    public init(hostName: String, platform: AgentPlatform, osVersion: String, agentVersion: String) {
+    public init(
+        hostName: String, platform: AgentPlatform, osVersion: String, agentVersion: String,
+        manufacturer: String? = nil, model: String? = nil
+    ) {
         self.hostName = hostName
         self.platform = platform
         self.osVersion = osVersion
         self.agentVersion = agentVersion
+        self.manufacturer = manufacturer
+        self.model = model
+    }
+
+    /// This metadata with the maker and model kept or left out, by whether
+    /// the Hub said it reads them.
+    public func includingHardware(_ include: Bool) -> AgentIngestMetadata {
+        AgentIngestMetadata(
+            hostName: hostName, platform: platform, osVersion: osVersion, agentVersion: agentVersion,
+            manufacturer: include ? manufacturer : nil, model: include ? model : nil
+        )
     }
 }
 

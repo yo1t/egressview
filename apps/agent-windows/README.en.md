@@ -35,7 +35,7 @@ You have two options:
 Enrollment sends the PC name, Windows version and Agent version to the chosen Hub. Enrollment alone does not enable observation delivery; you must explicitly switch it on in the app. When enabled, the Agent authenticates to that Hub with a Bearer token and sends the following JSON metadata. It neither collects nor sends packet contents.
 
 - Batch: `schemaVersion`, `batchId`, `sentAt`, `agent`, `observations`.
-- Agent: `hostName`, `platform`, `osVersion`, `agentVersion`.
+- Agent: `hostName`, `platform`, `osVersion`, `agentVersion`. The PC's maker and model, `manufacturer` and `model`, are added only when the Hub advertises support in its capabilities response (the Hub shows them in its device list).
 - Each observation: `observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`. Unavailable values are null.
 - `remoteHostname` (destination hostname) is added only when the Hub advertises support in its capabilities response. It is not sent to older Hubs.
 - Connection attempts that failed (the destination did not answer or refused) are sent too, as observations with no bytes, for LAN scan detection.

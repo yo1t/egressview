@@ -46,7 +46,7 @@ Appleの「収集」の判定は、開発者または第三者が、リクエス
 
 `schemaVersion`, `batchId`, `sentAt`, `agent` (`hostName`, `platform`, `osVersion`, `agentVersion`), `observations` (`observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`)
 
-`remoteHostname` は、Hubが対応を通知したときだけ追加されます。認証情報はBearer tokenとして、そのHubへ送られます。
+`remoteHostname` は、Hubが対応を通知したときだけ追加されます。`agent` の `manufacturer` と `model`（このコンピューターのメーカーと機種。例：Apple、Mac14,2）も、Hubが対応を通知したときだけ追加されます。ルーターからメーカーが分からない機器でも、Hubの端末一覧に出せるようにするためです。認証情報はBearer tokenとして、そのHubへ送られます。
 
 この一覧は、エージェントが登録前に画面へ表示するものと同じです。登録は、その内容を読んだことを確認しない限り開始できません。
 

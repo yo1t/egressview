@@ -9,6 +9,9 @@ internal sealed class DeliveryController : IDisposable
     private readonly DeliverySender sender;
     private readonly SemaphoreSlim wake = new(0, 1);
     private readonly SemaphoreSlim sendGate = new(1, 1);
+    // Read once: the firmware's maker and model do not change while the
+    // service runs (P3-199).
+    private readonly (string? Manufacturer, string? Model) hardware = WindowsHardware.Read();
     private readonly object stateGate = new();
     private DeliveryRuntimeStatus status = new("idle");
 
@@ -67,7 +70,8 @@ internal sealed class DeliveryController : IDisposable
                         if (!store.DeliveryEnabled) { SetState("disabled", null); continue; }
                         SetState("sending", null, attemptedAt);
                         result = await sender.SendNextAsync(store, credential,
-                            new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, DiagnosticsReport.CurrentVersion), cancellationToken);
+                            new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, DiagnosticsReport.CurrentVersion,
+                                hardware.Manufacturer, hardware.Model), cancellationToken);
                     }
                     finally { sendGate.Release(); }
                     delay = result.Narrowed ? NarrowingDelay : result.Kind switch

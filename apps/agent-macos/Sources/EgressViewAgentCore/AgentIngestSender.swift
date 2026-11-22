@@ -388,7 +388,11 @@ public actor AgentIngestSender {
             )
             logger.notice("hub-capabilities: includeHostname=\(includeHostname, privacy: .public)")
             guard let envelope = try queue.prepareBatch(
-                limit: limit, sentAt: now(), metadata: metadata, schemaVersion: schemaVersion,
+                limit: limit, sentAt: now(),
+                metadata: metadata.includingHardware(
+                    AgentCapabilityNegotiation.acceptsHardware(capabilities: hubCapabilities)
+                ),
+                schemaVersion: schemaVersion,
                 includeHostname: includeHostname,
                 includeInboundProbes: AgentCapabilityNegotiation.acceptsInboundProbes(capabilities: hubCapabilities)
             ) else {
