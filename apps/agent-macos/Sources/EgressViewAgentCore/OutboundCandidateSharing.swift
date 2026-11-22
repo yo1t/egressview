@@ -14,6 +14,7 @@ public struct OutboundCandidateSharingPreferences: @unchecked Sendable {
     static let hubTakesAnswersKey = "outboundCandidateSharingHubTakesAnswers"
     static let appliedAnswersVersionKey = "outboundCandidateSharingAppliedAnswersVersion"
     static let hubHasNotesSharedKey = "outboundCandidateSharingHubHasNotesShared"
+    static let hubMaximumEntriesKey = "outboundCandidateSharingHubMaximumEntries"
 
     private let defaults: UserDefaults
 
@@ -66,6 +67,14 @@ public struct OutboundCandidateSharingPreferences: @unchecked Sendable {
         nonmutating set { defaults.set(newValue, forKey: Self.hubHasNotesSharedKey) }
     }
 
+    /// How many candidates the Hub takes in one list, as its capabilities
+    /// last said. Nil until asked, or when the Hub does not say; it then
+    /// takes 20 (`OutboundCandidateSharePayload.legacyEntryLimit`).
+    public var hubMaximumEntries: Int? {
+        get { defaults.object(forKey: Self.hubMaximumEntriesKey) as? Int }
+        nonmutating set { defaults.set(newValue, forKey: Self.hubMaximumEntriesKey) }
+    }
+
     /// The Hub's answer version last taken in.
     public var appliedAnswersVersion: Int? {
         get { defaults.object(forKey: Self.appliedAnswersVersionKey) as? Int }
@@ -103,14 +112,29 @@ public struct OutboundCandidateSharePayload: Encodable, Equatable, Sendable {
     /// a Hub that does not answer candidates, which would refuse it.
     public let notesShared: Bool?
 
-    public static let entryLimit = AgentLocalInsightCandidateList.entryLimit
+    /// What every Hub takes, and all a Hub that does not name
+    /// `maxOutboundCandidates` in its capabilities takes: it refuses a
+    /// longer list whole.
+    public static let legacyEntryLimit = 20
+    /// The most this Mac sends even to a Hub that would take more, which
+    /// keeps the body under the Hub's 512 KiB with the longest names and
+    /// notes. A Mac watched in 2026-11 listed 27 at the most.
+    public static let maximumEntryLimit = 150
 
-    /// The list as it stands, with notes only when `includesNotes`.
+    /// How many to send to a Hub that said it takes `hubMaximum`.
+    public static func entryLimit(hubMaximum: Int?) -> Int {
+        guard let hubMaximum, hubMaximum > legacyEntryLimit else { return legacyEntryLimit }
+        return min(hubMaximum, maximumEntryLimit)
+    }
+
+    /// The list as it stands, with notes only when `includesNotes`, cut at
+    /// `entryLimit` (`total` still counts them all).
     public init(
         report: OutboundCandidateReport,
         judgments: [String: OutboundCandidateJudgment],
         includesNotes: Bool,
         hubTakesAnswers: Bool = false,
+        entryLimit: Int = Self.legacyEntryLimit,
         generatedAt: Date = Date()
     ) {
         schemaVersion = 1
@@ -124,7 +148,7 @@ public struct OutboundCandidateSharePayload: Encodable, Equatable, Sendable {
         }
         total = report.total
         let limit = AgentLocalInsightBuilder.nameCharacterLimit
-        entries = report.candidates.prefix(Self.entryLimit).map { candidate in
+        entries = report.candidates.prefix(max(0, entryLimit)).map { candidate in
             let judgment = judgments[candidate.id]
             let note = includesNotes
                 ? (judgment?.note.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
@@ -280,6 +304,46 @@ public struct OutboundCandidateUploader: Sendable {
         case 200: return
         case 404: throw OutboundCandidateShareError.hubTooOld
         default: throw OutboundCandidateShareError.httpStatus(response.statusCode)
+        }
+    }
+
+    /// What the Hub's capabilities say about the list's length.
+    public enum HubMaximum: Equatable, Sendable {
+        /// The Hub named how many it takes.
+        case says(Int)
+        /// The Hub answered and did not say, or has no capabilities at all
+        /// (404): it takes the legacy 20.
+        case doesNotSay
+        /// The Hub could not be asked; keep what it said before.
+        case unknown
+    }
+
+    private struct Capabilities: Decodable {
+        let maxOutboundCandidates: Int?
+    }
+
+    /// Asks `GET /api/agent/capabilities` how many candidates one list may
+    /// hold. Sent only where the list itself would go.
+    public func hubMaximum() async -> HubMaximum {
+        let url = hubURL.appendingPathComponent("api/agent/capabilities")
+        guard url.scheme == "https" || url.host == "localhost" || url.host == "127.0.0.1" else {
+            return .unknown
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.httpShouldHandleCookies = false
+        guard let (data, response) = try? await transport.fetch(request) else { return .unknown }
+        switch response.statusCode {
+        case 200:
+            guard let capabilities = try? JSONDecoder().decode(Capabilities.self, from: data) else {
+                return .unknown
+            }
+            return capabilities.maxOutboundCandidates.map { .says($0) } ?? .doesNotSay
+        case 404:
+            return .doesNotSay
+        default:
+            return .unknown
         }
     }
 }
