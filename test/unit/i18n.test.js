@@ -77,8 +77,9 @@ describe('shared i18n catalog', () => {
     // Grew by 4 on 2026-11-21: how much each Agent sent to the Hub.
     // Grew by 7 on 2026-11-22: answering an Agent's candidates on the Hub (P3-194 stage 2).
     // Grew by 3 on 2026-11-22: what an Agent says of its computer in the device list (P3-199).
-    assert.equal(jaKeys.size, 1091);
-    assert.equal(enKeys.size, 1091);
+    // Grew by 3 on 2026-11-22: the IPv6 count under the address and each address's kind (its own column went).
+    assert.equal(jaKeys.size, 1094);
+    assert.equal(enKeys.size, 1094);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 

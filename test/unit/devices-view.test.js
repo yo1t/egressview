@@ -26,7 +26,7 @@ function loadDeviceHelpers() {
   return context;
 }
 
-const { deviceName, deviceIpv6, getDeviceSortValue, getDvCellValue, dvMatchFilter } =
+const { deviceName, deviceIpv6List, ipv6Scope, getDeviceSortValue, getDvCellValue, dvMatchFilter } =
   loadDeviceHelpers();
 
 describe('deviceName', () => {
@@ -44,19 +44,20 @@ describe('deviceName', () => {
   });
 });
 
-describe('deviceIpv6', () => {
-  it('returns em-dash when no IPv6 addresses', () => {
-    assert.equal(deviceIpv6({}), '—');
-    assert.equal(deviceIpv6({ ipv6Addrs: [] }), '—');
+describe('IPv6アドレスはIPの欄に件数で出し、種類を見分ける', () => {
+  it('空の値を除いた一覧を返す。無ければ空', () => {
+    assert.deepEqual([...deviceIpv6List({})], []);
+    assert.deepEqual([...deviceIpv6List({ ipv6Addrs: ['2001:db8::1', '', null] })], ['2001:db8::1']);
   });
-  it('joins a single address', () => {
-    assert.equal(deviceIpv6({ ipv6Addrs: ['2001:db8::1'] }), '2001:db8::1');
-  });
-  it('shows at most the first two addresses', () => {
-    assert.equal(
-      deviceIpv6({ ipv6Addrs: ['2001:db8::1', '2001:db8::2', '2001:db8::3'] }),
-      '2001:db8::1, 2001:db8::2',
-    );
+  it('グローバル・ULA・リンクローカルを見分ける', () => {
+    assert.equal(ipv6Scope('2001:db8::1'), 'global');
+    assert.equal(ipv6Scope('240b:10::1'), 'global');
+    assert.equal(ipv6Scope('fd12:3456::1'), 'ula');
+    assert.equal(ipv6Scope('FC00::1'), 'ula');
+    assert.equal(ipv6Scope('fe80::1'), 'linkLocal');
+    assert.equal(ipv6Scope('febf::1'), 'linkLocal');
+    assert.equal(ipv6Scope('::1'), 'other');
+    assert.equal(ipv6Scope('ff02::1'), 'other');
   });
 });
 
