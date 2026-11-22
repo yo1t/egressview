@@ -7,6 +7,9 @@ extension Notification.Name {
     /// Posted when the person answers a candidate, takes an answer back, or
     /// forgets all of them, so a shared list follows without waiting an hour.
     static let outboundCandidateAnswersChanged = Notification.Name("EgressViewOutboundCandidateAnswersChanged")
+    /// Posted when answers the Hub's administrator gave were taken in, so the
+    /// window shows them without waiting for its next refresh.
+    static let outboundCandidateAnswersTakenFromHub = Notification.Name("EgressViewOutboundCandidateAnswersTakenFromHub")
 }
 
 /// Sends the "worth a look" list and the person's answers to the Hub, when the
@@ -16,6 +19,11 @@ extension Notification.Name {
 /// when what the Hub would show has changed, or six hours have passed. Turning
 /// it off sends one request that deletes the list from the Hub, and keeps
 /// trying until the Hub has taken it.
+///
+/// While sharing is on, it also takes in the answers the Hub's administrator
+/// gave (P3-194 stage 2): as soon as a delivery reply says the Hub's answers
+/// changed, which on a Mac that is delivering is within seconds, and every
+/// hour in case no reply came.
 @MainActor
 final class OutboundCandidateSharingController: ObservableObject {
     static let shared = OutboundCandidateSharingController()
@@ -56,8 +64,13 @@ final class OutboundCandidateSharingController: ObservableObject {
     private var isSending = false
     private var checkAgain = false
     private var observer: NSObjectProtocol?
+    private var isTakingIn = false
+    private var takeInFailedAt: Date?
 
     private static let checkInterval: TimeInterval = 3_600
+    /// After a failed fetch, delivery replies (every few seconds) do not ask
+    /// again for this long.
+    private static let takeInRetryInterval: TimeInterval = 60
 
     private init() {
         isEnabled = preferences.isEnabled
@@ -75,7 +88,10 @@ final class OutboundCandidateSharingController: ObservableObject {
             MainActor.assumeIsolated { self?.check() }
         }
         timer.start(every: Self.checkInterval, runNow: true) { [weak self] in
-            MainActor.assumeIsolated { self?.check() }
+            MainActor.assumeIsolated {
+                self?.check()
+                self?.takeInAnswers(hourly: true)
+            }
         }
     }
 
@@ -83,6 +99,74 @@ final class OutboundCandidateSharingController: ObservableObject {
         timer.stop()
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
+    }
+
+    /// What a delivery reply said about the Hub's answers: nil from a Hub
+    /// that does not answer candidates.
+    func hubAnswersVersion(_ version: Int?) {
+        guard let version else {
+            noteHubTakesAnswers(false)
+            return
+        }
+        noteHubTakesAnswers(true)
+        if version != preferences.appliedAnswersVersion { takeInAnswers(hourly: false) }
+    }
+
+    /// A Hub that starts or stops answering candidates is sent the list again,
+    /// with or without `notesShared`.
+    private func noteHubTakesAnswers(_ value: Bool) {
+        guard preferences.hubTakesAnswers != value else { return }
+        preferences.hubTakesAnswers = value
+        if !value { preferences.hubHasNotesShared = false }
+        preferences.lastSentHash = nil
+        check()
+    }
+
+    /// Fetches and applies the Hub's answers. The hourly call also asks a Hub
+    /// not yet known to answer, which is how a Mac that shares the list but
+    /// does not deliver observations finds out.
+    private func takeInAnswers(hourly: Bool) {
+        guard preferences.isEnabled, !isTakingIn else { return }
+        guard hourly || preferences.hubTakesAnswers else { return }
+        if !hourly, let failed = takeInFailedAt, Date().timeIntervalSince(failed) < Self.takeInRetryInterval { return }
+        guard let store, let credentialStore else { return }
+        isTakingIn = true
+        Task { [weak self] in
+            await self?.runTakeIn(store: store, credentialStore: credentialStore)
+            self?.isTakingIn = false
+        }
+    }
+
+    private func runTakeIn(store: ObservationStore, credentialStore: any AgentCredentialStoring) async {
+        guard let credential = await credentialStore.loadDetached() else { return }
+        let fetcher = OutboundCandidateAnswersFetcher(
+            hubURL: credential.hubURL, token: credential.token, userAgent: userAgent
+        )
+        do {
+            let answers = try await fetcher.fetch()
+            noteHubTakesAnswers(true)
+            let takesNotes = preferences.hubHasNotesShared && preferences.includesNotes
+            let changed = try await Task.detached(priority: .utility) { () throws -> Int in
+                let report = try store.outboundCandidates()
+                return try store.applyHubOutboundCandidateAnswers(
+                    answers.answers, candidates: report.candidates, takesNotes: takesNotes
+                )
+            }.value
+            preferences.appliedAnswersVersion = answers.version
+            takeInFailedAt = nil
+            if changed > 0 {
+                logger.notice("took in hub answers changed=\(changed, privacy: .public) version=\(answers.version, privacy: .public)")
+                NotificationCenter.default.post(name: .outboundCandidateAnswersTakenFromHub, object: nil)
+                // Sends the list back with the new answers, so the Hub sees
+                // this Mac has them.
+                NotificationCenter.default.post(name: .outboundCandidateAnswersChanged, object: nil)
+            }
+        } catch OutboundCandidateShareError.hubTooOld {
+            noteHubTakesAnswers(false)
+        } catch {
+            takeInFailedAt = Date()
+            logger.error("taking in hub answers failed: \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Sends if something is owed. A check that arrives during a send runs
@@ -116,11 +200,14 @@ final class OutboundCandidateSharingController: ObservableObject {
         let payload: OutboundCandidateSharePayload?
         if enabled {
             let notes = preferences.includesNotes
+            let takesAnswers = preferences.hubTakesAnswers
             payload = await Task.detached(priority: .utility) { () -> OutboundCandidateSharePayload? in
                 guard let report = try? store.outboundCandidates(),
                       let judgments = try? store.outboundCandidateJudgments()
                 else { return nil }
-                return OutboundCandidateSharePayload(report: report, judgments: judgments, includesNotes: notes)
+                return OutboundCandidateSharePayload(
+                    report: report, judgments: judgments, includesNotes: notes, hubTakesAnswers: takesAnswers
+                )
             }.value
             guard payload != nil else {
                 status = .failed(L("The list could not be read."))
@@ -151,11 +238,14 @@ final class OutboundCandidateSharingController: ObservableObject {
                 preferences.lastSentHash = hash
                 preferences.lastSentAt = now
                 preferences.hubMayHoldList = true
+                preferences.hubHasNotesShared = payload.notesShared == true
                 status = .sent(at: now)
                 logger.notice("sent entries=\(payload.entries.count, privacy: .public) total=\(payload.total, privacy: .public)")
             case .sendOff:
                 try await uploader.send(.off())
                 preferences.hubMayHoldList = false
+                preferences.hubHasNotesShared = false
+                preferences.appliedAnswersVersion = nil
                 preferences.lastSentHash = nil
                 preferences.lastSentAt = nil
                 status = .removedFromHub

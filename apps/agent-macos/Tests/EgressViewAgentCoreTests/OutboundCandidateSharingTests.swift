@@ -127,6 +127,21 @@ final class OutboundCandidateSharingTests: XCTestCase {
         XCTAssertFalse(preferences.isEnabled)
         XCTAssertFalse(preferences.includesNotes)
         XCTAssertFalse(preferences.hubMayHoldList)
+        XCTAssertFalse(preferences.hubTakesAnswers)
+        XCTAssertFalse(preferences.hubHasNotesShared)
+        XCTAssertNil(preferences.appliedAnswersVersion)
+    }
+
+    func testnotesSharedは答えを扱えるHubにだけ送る() throws {
+        let item = candidate()
+        let older = OutboundCandidateSharePayload(report: report([item]), judgments: [:], includesNotes: true)
+        XCTAssertNil(try json(older)["notesShared"], "an older Hub refuses a field it does not know")
+        let newer = OutboundCandidateSharePayload(
+            report: report([item]), judgments: [:], includesNotes: false, hubTakesAnswers: true
+        )
+        XCTAssertEqual(try json(newer)["notesShared"] as? Bool, false)
+        XCTAssertNil(try json(.off())["notesShared"])
+        XCTAssertNotEqual(try older.contentHash(), try newer.contentHash())
     }
 
     // MARK: - Sending
@@ -204,7 +219,8 @@ final class OutboundCandidateShareGoldenTests: XCTestCase {
             judgedAt: day.addingTimeInterval(3600)
         )]
         let payload = OutboundCandidateSharePayload(
-            report: report, judgments: judgments, includesNotes: true, generatedAt: day.addingTimeInterval(7200)
+            report: report, judgments: judgments, includesNotes: true, hubTakesAnswers: true,
+            generatedAt: day.addingTimeInterval(7200)
         )
         let golden = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -213,5 +229,103 @@ final class OutboundCandidateShareGoldenTests: XCTestCase {
         let expected = try JSONSerialization.jsonObject(with: Data(contentsOf: golden)) as? NSDictionary
         let actual = try JSONSerialization.jsonObject(with: payload.encoded()) as? NSDictionary
         XCTAssertEqual(actual, expected)
+    }
+}
+
+/// Answers the Hub's administrator gave come back to this Mac (P3-194 stage 2).
+final class OutboundCandidateHubAnswersTests: XCTestCase {
+    private final class ReplyingTransport: GeoCacheTransport, @unchecked Sendable {
+        var requests: [URLRequest] = []
+        let status: Int
+        let body: Data
+        init(status: Int, body: Data = Data("{}".utf8)) { self.status = status; self.body = body }
+        func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            requests.append(request)
+            return (body, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
+    private var golden: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("protocol/agent-outbound-candidates/v1/answers-golden.json")
+    }
+
+    func testHubの答えの見本を読める() throws {
+        let decoded = try OutboundCandidateHubAnswers.decode(Data(contentsOf: golden))
+        XCTAssertEqual(decoded.version, 2)
+        XCTAssertEqual(decoded.answers.count, 2)
+        XCTAssertEqual(decoded.answers[0].answer, "investigate")
+        XCTAssertEqual(decoded.answers[0].note, "Ask who ran curl")
+        // Milliseconds, as JavaScript writes them.
+        XCTAssertEqual(decoded.answers[0].answeredAt.timeIntervalSince1970, 1_699_930_800.25, accuracy: 0.001)
+        XCTAssertNil(decoded.answers[1].answer)
+    }
+
+    func test見本の答えは共通の一覧の候補に当たる() throws {
+        let day = Date(timeIntervalSince1970: 1_699_920_000)
+        let before = day.addingTimeInterval(-86_400)
+        let backup = OutboundCandidate(
+            kind: .aboveUsual, at: day, application: "com.example.backup", destination: "example.net",
+            bytesOut: 9_500_000_000, usualBytesOut: 400_000_000
+        )
+        let curl = OutboundCandidate(kind: .newPair, at: before, application: "curl", destination: "example.org", bytesOut: 120_000_000)
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("answers-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = try ObservationStore(fileURL: url)
+        try store.setOutboundCandidateJudgment(backup, verdict: .expected, note: "My weekly backup", now: day.addingTimeInterval(3600))
+        let decoded = try OutboundCandidateHubAnswers.decode(Data(contentsOf: golden))
+        let changed = try store.applyHubOutboundCandidateAnswers(decoded.answers, candidates: [backup, curl], takesNotes: true)
+        XCTAssertEqual(changed, 2)
+        let judgments = try store.outboundCandidateJudgments()
+        XCTAssertNil(judgments[backup.id], "taken back on the Hub")
+        XCTAssertEqual(judgments[curl.id]?.verdict, .investigate)
+        XCTAssertEqual(judgments[curl.id]?.note, "Ask who ran curl")
+        XCTAssertEqual(judgments[curl.id]?.answeredOnHub, true)
+    }
+
+    func testHubの答えはGETでトークン付きで取りに行く() async throws {
+        let transport = ReplyingTransport(status: 200, body: try Data(contentsOf: golden))
+        let fetcher = OutboundCandidateAnswersFetcher(
+            hubURL: URL(string: "https://hub.example")!, token: "egva_test", userAgent: "EgressViewAgent/test",
+            transport: transport
+        )
+        let answers = try await fetcher.fetch()
+        XCTAssertEqual(answers.version, 2)
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/agent/outbound-candidates/answers")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer egva_test")
+    }
+
+    func test答えを扱えないHubは404で分かり_HTTPSでなければ取りに行かない() async {
+        let old = OutboundCandidateAnswersFetcher(
+            hubURL: URL(string: "https://hub.example")!, token: "t", userAgent: "u",
+            transport: ReplyingTransport(status: 404)
+        )
+        do { _ = try await old.fetch(); XCTFail("expected an error") } catch {
+            XCTAssertEqual(error as? OutboundCandidateShareError, .hubTooOld)
+        }
+        let transport = ReplyingTransport(status: 200)
+        let plain = OutboundCandidateAnswersFetcher(
+            hubURL: URL(string: "http://hub.example")!, token: "t", userAgent: "u", transport: transport
+        )
+        do { _ = try await plain.fetch(); XCTFail("expected an error") } catch {
+            XCTAssertEqual(error as? OutboundCandidateShareError, .insecureURL)
+        }
+        XCTAssertTrue(transport.requests.isEmpty)
+    }
+
+    func test受領応答の答えの版を読む_無ければnil() throws {
+        let batch = UUID()
+        let with = try JSONDecoder().decode(AgentIngestAcknowledgement.self, from: Data(
+            #"{"batchId":"\#(batch.uuidString)","accepted":1,"duplicate":0,"rejected":0,"replayed":false,"outboundAnswersVersion":7}"#.utf8
+        ))
+        XCTAssertEqual(with.outboundAnswersVersion, 7)
+        let without = try JSONDecoder().decode(AgentIngestAcknowledgement.self, from: Data(
+            #"{"batchId":"\#(batch.uuidString)","accepted":1,"duplicate":0,"rejected":0,"replayed":false}"#.utf8
+        ))
+        XCTAssertNil(without.outboundAnswersVersion)
     }
 }

@@ -338,7 +338,7 @@ public final class ObservationStore: @unchecked Sendable {
     ///
     /// Named rather than counted from the code so the backup and the progress
     /// file can say where the migration is heading before it starts.
-    static let latestSchemaVersion = 20
+    static let latestSchemaVersion = 21
 
     private func migrate() throws {
         let version = try scalar("PRAGMA user_version") ?? 0
@@ -856,6 +856,20 @@ public final class ObservationStore: @unchecked Sendable {
             """)
             try execute("PRAGMA user_version=20")
             reportMigrationStep(20)
+        }
+        if version < 21 {
+            // Where an answer was given: NULL on this Mac, 'hub' when the
+            // Hub's administrator gave it and the Mac took it in (P3-194
+            // stage 2). Shown beside the answer, so the person knows they did
+            // not give it themselves.
+            if try !columnExists(table: "outbound_candidate_judgments", column: "answered_on") {
+                try execute(
+                    "ALTER TABLE outbound_candidate_judgments ADD COLUMN answered_on TEXT "
+                        + "CHECK (answered_on IS NULL OR answered_on = 'hub')"
+                )
+            }
+            try execute("PRAGMA user_version=21")
+            reportMigrationStep(21)
         }
     }
 
@@ -2771,7 +2785,8 @@ public final class ObservationStore: @unchecked Sendable {
     public func outboundCandidateJudgments() throws -> [String: OutboundCandidateJudgment] {
         try lock.withLock {
             let statement = try prepare("""
-            SELECT candidate_id, candidate_at, verdict, note, judged_at FROM outbound_candidate_judgments
+            SELECT candidate_id, candidate_at, verdict, note, judged_at, answered_on
+            FROM outbound_candidate_judgments
             """)
             defer { sqlite3_finalize(statement) }
             var result: [String: OutboundCandidateJudgment] = [:]
@@ -2784,11 +2799,87 @@ public final class ObservationStore: @unchecked Sendable {
                     candidateAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
                     verdict: verdict,
                     note: text(statement, 3) ?? "",
-                    judgedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+                    judgedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                    answeredOnHub: text(statement, 5) == "hub"
                 )
             }
             return result
         }
+    }
+
+    /// Takes in the answers the Hub's administrator gave (P3-194 stage 2).
+    ///
+    /// An answer is matched to a candidate by the hash this Mac sent for it,
+    /// and replaces this Mac's answer only when it was given later: whoever
+    /// answered last wins, on either side. A Hub answer of `nil` takes this
+    /// Mac's older answer back. The note follows the Hub's only when this Mac
+    /// shares notes (`takesNotes`); otherwise the Hub never had this Mac's
+    /// note and sends none, so the note here is kept.
+    ///
+    /// The Hub's time is rounded up to the whole second before it is kept,
+    /// because the time this Mac sends back is in whole seconds: kept as it
+    /// is, it would read as older than the Hub's answer and the Hub would
+    /// keep its own copy for good.
+    ///
+    /// Returns how many answers changed here.
+    @discardableResult
+    public func applyHubOutboundCandidateAnswers(
+        _ answers: [OutboundCandidateHubAnswer], candidates: [OutboundCandidate], takesNotes: Bool
+    ) throws -> Int {
+        guard !answers.isEmpty else { return 0 }
+        var byHash: [String: OutboundCandidate] = [:]
+        for candidate in candidates {
+            byHash[OutboundCandidateSharePayload.hashedID(candidate.id)] = candidate
+        }
+        let current = try outboundCandidateJudgments()
+        var changed = 0
+        try lock.withLock {
+            try execute("BEGIN IMMEDIATE")
+            do {
+                for answer in answers {
+                    guard let candidate = byHash[answer.candidateId] else { continue }
+                    let at = Date(timeIntervalSince1970: answer.answeredAt.timeIntervalSince1970.rounded(.up))
+                    let local = current[candidate.id]
+                    if let local, local.judgedAt >= at { continue }
+                    guard let verdict = answer.answer.flatMap(OutboundCandidateVerdict.init(rawValue:)) else {
+                        guard local != nil else { continue }
+                        let statement = try prepare("DELETE FROM outbound_candidate_judgments WHERE candidate_id = ?")
+                        defer { sqlite3_finalize(statement) }
+                        bindText(statement, 1, candidate.id)
+                        guard sqlite3_step(statement) == SQLITE_DONE else {
+                            throw ObservationStoreError.statement(lastMessage)
+                        }
+                        changed += 1
+                        continue
+                    }
+                    let note = takesNotes
+                        ? (answer.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        : (local?.note ?? "")
+                    let statement = try prepare("""
+                    INSERT OR REPLACE INTO outbound_candidate_judgments
+                        (candidate_id, candidate_at, application, destination, verdict, note, judged_at, answered_on)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'hub')
+                    """)
+                    defer { sqlite3_finalize(statement) }
+                    bindText(statement, 1, candidate.id)
+                    sqlite3_bind_double(statement, 2, candidate.at.timeIntervalSince1970)
+                    if let application = candidate.application { bindText(statement, 3, application) } else { sqlite3_bind_null(statement, 3) }
+                    if let destination = candidate.destination { bindText(statement, 4, destination) } else { sqlite3_bind_null(statement, 4) }
+                    bindText(statement, 5, verdict.rawValue)
+                    bindText(statement, 6, String(note.prefix(Self.judgmentNoteLimit)))
+                    sqlite3_bind_double(statement, 7, at.timeIntervalSince1970)
+                    guard sqlite3_step(statement) == SQLITE_DONE else {
+                        throw ObservationStoreError.statement(lastMessage)
+                    }
+                    changed += 1
+                }
+                try execute("COMMIT")
+            } catch {
+                try? execute("ROLLBACK")
+                throw error
+            }
+        }
+        return changed
     }
 
     /// Records the answer, replacing any earlier one. `nil` takes it back.

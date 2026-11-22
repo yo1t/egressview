@@ -167,6 +167,9 @@ final class HubDeliveryController: ObservableObject {
             },
             failureHandler: { [weak self] failure in
                 Task { @MainActor in self?.latestDeliveryFailure = failure }
+            },
+            answersVersionHandler: { version in
+                Task { @MainActor in OutboundCandidateSharingController.shared.hubAnswersVersion(version) }
             }
         )
     }

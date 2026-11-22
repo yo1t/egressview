@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import EgressViewAgentCore
 
@@ -46,9 +47,9 @@ final class OutboundCandidateTriageTests: XCTestCase {
         )
     }
 
-    func test版20で判断の表ができる() throws {
+    func test版21で判断の表ができる() throws {
         XCTAssertEqual(store.schemaVersion(), ObservationStore.latestSchemaVersion)
-        XCTAssertEqual(ObservationStore.latestSchemaVersion, 20)
+        XCTAssertEqual(ObservationStore.latestSchemaVersion, 21)
         XCTAssertTrue(try store.outboundCandidateJudgments().isEmpty)
     }
 
@@ -256,4 +257,107 @@ final class OutboundCandidateTriageTests: XCTestCase {
         XCTAssertEqual(top.bytesOut, 7_000)
         XCTAssertEqual(top.windowBytesOut, 12_000)
     }
+
+    // MARK: - Answers given on the Hub (P3-194 stage 2)
+
+    private func hubAnswer(
+        _ item: OutboundCandidate, _ answer: String?, note: String? = nil, at: Date
+    ) -> OutboundCandidateHubAnswer {
+        OutboundCandidateHubAnswer(
+            candidateId: OutboundCandidateSharePayload.hashedID(item.id), answer: answer, note: note, answeredAt: at
+        )
+    }
+
+    func testHubの答えが新しければ取り込み_Hubで答えたと残す() throws {
+        let item = candidate()
+        try store.setOutboundCandidateJudgment(item, verdict: .expected, note: "自分のバックアップ", now: day)
+        let changed = try store.applyHubOutboundCandidateAnswers(
+            [hubAnswer(item, "investigate", note: "管理者のメモ", at: day.addingTimeInterval(60.25))],
+            candidates: [item], takesNotes: true
+        )
+        XCTAssertEqual(changed, 1)
+        let judgment = try XCTUnwrap(try store.outboundCandidateJudgments()[item.id])
+        XCTAssertEqual(judgment.verdict, .investigate)
+        XCTAssertEqual(judgment.note, "管理者のメモ")
+        XCTAssertTrue(judgment.answeredOnHub)
+        // Rounded up to the second, so the time sent back is not older than the Hub's.
+        XCTAssertEqual(judgment.judgedAt, day.addingTimeInterval(61))
+    }
+
+    func testこのMacの答えの方が新しければHubの答えで上書きしない() throws {
+        let item = candidate()
+        try store.setOutboundCandidateJudgment(item, verdict: .expected, now: day.addingTimeInterval(120))
+        let changed = try store.applyHubOutboundCandidateAnswers(
+            [hubAnswer(item, "investigate", at: day.addingTimeInterval(60))], candidates: [item], takesNotes: true
+        )
+        XCTAssertEqual(changed, 0)
+        let judgment = try XCTUnwrap(try store.outboundCandidateJudgments()[item.id])
+        XCTAssertEqual(judgment.verdict, .expected)
+        XCTAssertFalse(judgment.answeredOnHub)
+    }
+
+    func test同じHubの答えを2回取り込んでも変わらない() throws {
+        let item = candidate()
+        let answers = [hubAnswer(item, "expected", at: day.addingTimeInterval(60.5))]
+        XCTAssertEqual(try store.applyHubOutboundCandidateAnswers(answers, candidates: [item], takesNotes: true), 1)
+        XCTAssertEqual(try store.applyHubOutboundCandidateAnswers(answers, candidates: [item], takesNotes: true), 0)
+    }
+
+    func testHubで取り消した答えは_このMacでも取り消す() throws {
+        let item = candidate()
+        try store.setOutboundCandidateJudgment(item, verdict: .investigate, now: day)
+        let changed = try store.applyHubOutboundCandidateAnswers(
+            [hubAnswer(item, nil, at: day.addingTimeInterval(60))], candidates: [item], takesNotes: true
+        )
+        XCTAssertEqual(changed, 1)
+        XCTAssertNil(try store.outboundCandidateJudgments()[item.id])
+    }
+
+    func testメモを共有していなければ_このMacのメモは残す() throws {
+        let item = candidate()
+        try store.setOutboundCandidateJudgment(item, verdict: .investigate, note: "手元だけのメモ", now: day)
+        try store.applyHubOutboundCandidateAnswers(
+            [hubAnswer(item, "expected", note: nil, at: day.addingTimeInterval(60))], candidates: [item], takesNotes: false
+        )
+        let judgment = try XCTUnwrap(try store.outboundCandidateJudgments()[item.id])
+        XCTAssertEqual(judgment.verdict, .expected)
+        XCTAssertEqual(judgment.note, "手元だけのメモ")
+    }
+
+    func test一覧に無い候補へのHubの答えは無視する() throws {
+        let listed = candidate()
+        let gone = candidate(application: "other", destination: "two.example")
+        let changed = try store.applyHubOutboundCandidateAnswers(
+            [hubAnswer(gone, "expected", at: day.addingTimeInterval(60))], candidates: [listed], takesNotes: true
+        )
+        XCTAssertEqual(changed, 0)
+        XCTAssertTrue(try store.outboundCandidateJudgments().isEmpty)
+    }
+
+    func testこのMacで答え直すとHubで答えた印は消える() throws {
+        let item = candidate()
+        try store.applyHubOutboundCandidateAnswers(
+            [hubAnswer(item, "expected", at: day.addingTimeInterval(60))], candidates: [item], takesNotes: true
+        )
+        try store.setOutboundCandidateJudgment(item, verdict: .investigate, now: day.addingTimeInterval(600))
+        let judgment = try XCTUnwrap(try store.outboundCandidateJudgments()[item.id])
+        XCTAssertFalse(judgment.answeredOnHub)
+    }
+
+    func test版20の判断を残したまま版21へ上がる() throws {
+        let item = candidate()
+        try store.setOutboundCandidateJudgment(item, verdict: .expected, note: "前の版の答え", now: day)
+        store = nil
+        // Back to version 20: the column did not exist yet.
+        var raw: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &raw), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(raw, "ALTER TABLE outbound_candidate_judgments DROP COLUMN answered_on; PRAGMA user_version=20", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(raw)
+        store = try ObservationStore(fileURL: url)
+        XCTAssertEqual(store.schemaVersion(), 21)
+        let judgment = try XCTUnwrap(try store.outboundCandidateJudgments()[item.id])
+        XCTAssertEqual(judgment.note, "前の版の答え")
+        XCTAssertFalse(judgment.answeredOnHub)
+    }
+
 }

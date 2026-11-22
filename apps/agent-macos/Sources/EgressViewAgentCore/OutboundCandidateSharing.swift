@@ -11,6 +11,9 @@ public struct OutboundCandidateSharingPreferences: @unchecked Sendable {
     static let lastSentHashKey = "outboundCandidateSharingLastHash"
     static let lastSentAtKey = "outboundCandidateSharingLastSentAt"
     static let hubMayHoldListKey = "outboundCandidateSharingHubMayHoldList"
+    static let hubTakesAnswersKey = "outboundCandidateSharingHubTakesAnswers"
+    static let appliedAnswersVersionKey = "outboundCandidateSharingAppliedAnswersVersion"
+    static let hubHasNotesSharedKey = "outboundCandidateSharingHubHasNotesShared"
 
     private let defaults: UserDefaults
 
@@ -45,6 +48,29 @@ public struct OutboundCandidateSharingPreferences: @unchecked Sendable {
         get { defaults.bool(forKey: Self.hubMayHoldListKey) }
         nonmutating set { defaults.set(newValue, forKey: Self.hubMayHoldListKey) }
     }
+
+    /// Whether the Hub answers candidates itself (P3-194 stage 2): learned
+    /// from its delivery replies, which then carry `outboundAnswersVersion`.
+    /// Only such a Hub is told `notesShared`; an older one refuses a field
+    /// it does not know.
+    public var hubTakesAnswers: Bool {
+        get { defaults.bool(forKey: Self.hubTakesAnswersKey) }
+        nonmutating set { defaults.set(newValue, forKey: Self.hubTakesAnswersKey) }
+    }
+
+    /// Whether the last list the Hub took said `notesShared: true`. Until it
+    /// has, the Hub sends no notes, and an answer without one must not wipe
+    /// the note here.
+    public var hubHasNotesShared: Bool {
+        get { defaults.bool(forKey: Self.hubHasNotesSharedKey) }
+        nonmutating set { defaults.set(newValue, forKey: Self.hubHasNotesSharedKey) }
+    }
+
+    /// The Hub's answer version last taken in.
+    public var appliedAnswersVersion: Int? {
+        get { defaults.object(forKey: Self.appliedAnswersVersionKey) as? Int }
+        nonmutating set { defaults.set(newValue, forKey: Self.appliedAnswersVersionKey) }
+    }
 }
 
 /// What goes to `PUT /api/agent/outbound-candidates`.
@@ -73,6 +99,9 @@ public struct OutboundCandidateSharePayload: Encodable, Equatable, Sendable {
     public let state: String?
     public let total: Int
     public let entries: [Entry]
+    /// Whether notes travel between this Mac and the Hub. Left out (nil) for
+    /// a Hub that does not answer candidates, which would refuse it.
+    public let notesShared: Bool?
 
     public static let entryLimit = AgentLocalInsightCandidateList.entryLimit
 
@@ -81,10 +110,12 @@ public struct OutboundCandidateSharePayload: Encodable, Equatable, Sendable {
         report: OutboundCandidateReport,
         judgments: [String: OutboundCandidateJudgment],
         includesNotes: Bool,
+        hubTakesAnswers: Bool = false,
         generatedAt: Date = Date()
     ) {
         schemaVersion = 1
         sharing = true
+        notesShared = hubTakesAnswers ? includesNotes : nil
         self.generatedAt = generatedAt
         switch report.state {
         case .learning: state = "learning"
@@ -115,6 +146,7 @@ public struct OutboundCandidateSharePayload: Encodable, Equatable, Sendable {
     private init(off generatedAt: Date) {
         schemaVersion = 1
         sharing = false
+        notesShared = nil
         self.generatedAt = generatedAt
         state = nil
         total = 0
@@ -157,14 +189,16 @@ public struct OutboundCandidateSharePayload: Encodable, Equatable, Sendable {
     public func contentHash() throws -> String {
         let stable = OutboundCandidateSharePayload(
             schemaVersion: schemaVersion, sharing: sharing, generatedAt: Date(timeIntervalSince1970: 0),
-            state: state, total: total, entries: entries
+            state: state, total: total, entries: entries, notesShared: notesShared
         )
         return SHA256.hash(data: try stable.encoded()).map { String(format: "%02x", $0) }.joined()
     }
 
     private init(
-        schemaVersion: Int, sharing: Bool, generatedAt: Date, state: String?, total: Int, entries: [Entry]
+        schemaVersion: Int, sharing: Bool, generatedAt: Date, state: String?, total: Int, entries: [Entry],
+        notesShared: Bool?
     ) {
+        self.notesShared = notesShared
         self.schemaVersion = schemaVersion
         self.sharing = sharing
         self.generatedAt = generatedAt
@@ -244,6 +278,93 @@ public struct OutboundCandidateUploader: Sendable {
         }
         switch response.statusCode {
         case 200: return
+        case 404: throw OutboundCandidateShareError.hubTooOld
+        default: throw OutboundCandidateShareError.httpStatus(response.statusCode)
+        }
+    }
+}
+
+/// One answer the Hub's administrator gave, as `GET
+/// /api/agent/outbound-candidates/answers` lists it (P3-194 stage 2).
+public struct OutboundCandidateHubAnswer: Decodable, Equatable, Sendable {
+    /// The hash this Mac sent for the candidate.
+    public let candidateId: String
+    /// `expected`, `investigate`, or nil when the administrator took the
+    /// answer back.
+    public let answer: String?
+    /// Only when this Mac shares notes.
+    public let note: String?
+    public let answeredAt: Date
+
+    public init(candidateId: String, answer: String?, note: String?, answeredAt: Date) {
+        self.candidateId = candidateId
+        self.answer = answer
+        self.note = note
+        self.answeredAt = answeredAt
+    }
+}
+
+public struct OutboundCandidateHubAnswers: Decodable, Equatable, Sendable {
+    public let version: Int
+    public let answers: [OutboundCandidateHubAnswer]
+
+    /// The Hub writes times as JavaScript does, with milliseconds.
+    public static func decode(_ data: Data) throws -> OutboundCandidateHubAnswers {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            let precise = ISO8601DateFormatter()
+            precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = precise.date(from: text) ?? ISO8601DateFormatter().date(from: text) {
+                return date
+            }
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath, debugDescription: "not an ISO 8601 time"
+            ))
+        }
+        return try decoder.decode(OutboundCandidateHubAnswers.self, from: data)
+    }
+}
+
+/// Asks the Hub for the answers its administrator gave. HTTPS only, as for
+/// sending the list.
+public struct OutboundCandidateAnswersFetcher: Sendable {
+    private let hubURL: URL
+    private let token: String
+    private let userAgent: String
+    private let transport: any GeoCacheTransport
+
+    public init(
+        hubURL: URL, token: String, userAgent: String,
+        transport: any GeoCacheTransport = URLSessionGeoCacheTransport(timeout: 60)
+    ) {
+        self.hubURL = hubURL
+        self.token = token
+        self.userAgent = userAgent
+        self.transport = transport
+    }
+
+    public func fetch() async throws -> OutboundCandidateHubAnswers {
+        let url = hubURL.appendingPathComponent("api/agent/outbound-candidates/answers")
+        guard url.scheme == "https" || url.host == "localhost" || url.host == "127.0.0.1" else {
+            throw OutboundCandidateShareError.insecureURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpShouldHandleCookies = false
+
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await transport.fetch(request)
+        } catch {
+            throw OutboundCandidateShareError.transport(error.localizedDescription)
+        }
+        switch response.statusCode {
+        case 200: return try OutboundCandidateHubAnswers.decode(data)
         case 404: throw OutboundCandidateShareError.hubTooOld
         default: throw OutboundCandidateShareError.httpStatus(response.statusCode)
         }

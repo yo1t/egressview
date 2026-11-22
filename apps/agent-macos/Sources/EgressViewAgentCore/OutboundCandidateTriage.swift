@@ -17,25 +17,31 @@ public enum OutboundCandidateVerdict: String, Sendable, CaseIterable {
 /// Kept apart from the candidate, which is recomputed from the baseline every
 /// time and is never changed by a judgment.
 ///
-/// Stays on this Mac: not sent to the Hub, not given to an AI provider, not
-/// written to the diagnostics report or a notification. A note can name
-/// people and places.
+/// Stays on this Mac unless the person turns on sending to the Hub (then the
+/// answer goes, and the note only with the second switch). Not given to an
+/// AI provider except with a question the person sends, and never written to
+/// the diagnostics report or a notification. A note can name people and
+/// places.
 public struct OutboundCandidateJudgment: Equatable, Sendable {
     public var candidateID: String
     public var candidateAt: Date
     public var verdict: OutboundCandidateVerdict
     public var note: String
     public var judgedAt: Date
+    /// Given by the Hub's administrator and taken in from the Hub (P3-194
+    /// stage 2), rather than answered on this Mac.
+    public var answeredOnHub: Bool
 
     public init(
         candidateID: String, candidateAt: Date, verdict: OutboundCandidateVerdict,
-        note: String = "", judgedAt: Date
+        note: String = "", judgedAt: Date, answeredOnHub: Bool = false
     ) {
         self.candidateID = candidateID
         self.candidateAt = candidateAt
         self.verdict = verdict
         self.note = note
         self.judgedAt = judgedAt
+        self.answeredOnHub = answeredOnHub
     }
 }
 
