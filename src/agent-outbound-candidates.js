@@ -24,9 +24,14 @@
 
 const { z } = require('zod');
 
-// The Agent's own list stops at 20, and the Hub reads JSON bodies outside
-// ingest at up to 64 KB: 20 entries with the longest names and notes fit.
-const MAX_ENTRIES = 20;
+// The Agent lists everything it found over 14 days, about one a day on a
+// Mac watched in 2026-11 and 27 at the most so far. Agents up to macOS
+// 0.5.144 send the first 20 only; a later Agent sends as many as
+// /api/agent/capabilities names here. The body is read after the Agent is
+// authenticated, at up to 512 KiB like ingest (http-app.js): 150 entries
+// with the longest IDs, names and notes fit (about 2.8 KB each), and 150 is
+// over five times the longest list seen.
+const MAX_ENTRIES = 150;
 const NAME_LIMIT = 255;
 const NOTE_LIMIT = 500;
 // The Agent lists 14 days; an answer it still holds can be up to 30 days

@@ -29,7 +29,9 @@ const {
   AGENT_INGEST_MAX_BODY_BYTES,
 } = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
-const { outboundCandidatesSchema, hubAnswerBodySchema } = require('../agent-outbound-candidates');
+const {
+  outboundCandidatesSchema, hubAnswerBodySchema, MAX_ENTRIES: OUTBOUND_CANDIDATES_MAX_ENTRIES,
+} = require('../agent-outbound-candidates');
 const { PROBE_NOTIFY_MIN_PORTS } = require('../agent-inbound-probes');
 
 // The same window the Agent tab uses for worth-a-look candidates.
@@ -760,6 +762,9 @@ module.exports = function agentRoutes({
       // GET /api/agent/outbound-candidates/answers when an ingest reply's
       // `outboundAnswersVersion` changes (P3-194 stage 2).
       outboundCandidateAnswers: true,
+      // How many outbound candidates one PUT may list. A Hub without this
+      // takes 20, the most an Agent sent before it.
+      maxOutboundCandidates: OUTBOUND_CANDIDATES_MAX_ENTRIES,
     });
   });
 

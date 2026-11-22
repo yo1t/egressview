@@ -1089,6 +1089,30 @@ describe('outbound candidates shared by an Agent', () => {
     const { app, authorization } = await sharingAgent();
     const response = await request(app, 'GET', '/api/agent/capabilities', { headers: authorization });
     assert.equal(response.body.outboundCandidates, true);
+    // An Agent sends more than 20 only when this says so; a Hub without it
+    // refuses the whole list.
+    assert.equal(response.body.maxOutboundCandidates, 150);
+  });
+
+  it('150件までの一覧を全部受け取り、151件は受け取らない', async () => {
+    const { app, authorization } = await sharingAgent();
+    const entries = count => Array.from({ length: count }, (_, index) => ({
+      candidateId: `newPair|2026-11-${String(1 + (index % 14)).padStart(2, '0')}|app${index}|example.org`,
+      kind: 'newPair', day: '2026-11-01T00:00:00Z',
+      application: `com.example.app${index}`, destination: 'example.org', bytesOut: 2_000_000 + index,
+    }));
+    const full = await request(app, 'PUT', '/api/agent/outbound-candidates', {
+      body: report({ total: 150, entries: entries(150) }), headers: authorization,
+    });
+    assert.equal(full.status, 200);
+    assert.deepEqual(full.body, { stored: 150, sharing: true });
+    const listed = await request(app, 'GET', '/api/agents/outbound-candidates');
+    assert.equal(listed.body.agents[0].entries.length, 150);
+
+    const over = await request(app, 'PUT', '/api/agent/outbound-candidates', {
+      body: report({ total: 151, entries: entries(151) }), headers: authorization,
+    });
+    assert.equal(over.status, 400);
   });
 
   it('届いた一覧を登録名と一緒に管理者へ見せる。メモは前後の空白を落とす', async () => {
@@ -1175,7 +1199,8 @@ describe('outbound candidates shared by an Agent', () => {
       answer: 'investigate', answeredAt: '2026-11-14T01:00:00.000Z', note: 'あ'.repeat(outboundCandidates.NOTE_LIMIT),
     }));
     assert.equal(outboundCandidates.outboundCandidatesSchema.safeParse(body).success, true);
-    assert.ok(Buffer.byteLength(JSON.stringify(body)) < 64 * 1024);
+    // Read after authentication at up to 512 KiB, as ingest is (http-app.js).
+    assert.ok(Buffer.byteLength(JSON.stringify(body)) < 512 * 1024);
   });
 
   it('Mac Agentが作る見本をそのまま受け取る', async () => {

@@ -207,7 +207,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `GET /api/agent/capabilities` | Agent bearerの`agent.ingest`。受理するschema versionとbatch上限を返し、Agentが双方の話せるversionを選べるようにする |
 | Agent | `GET /api/agent/geo-cache` | Agent bearerの`agent.ingest`。位置キャッシュを全件返す。**Agentは宛先を送らない** — 絞り込みは「どの宛先に関心があるか」を伝えることになるため。`ETag`/`304`に対応 |
 | Agent | `GET /api/agent/threat-intel` | Agent bearerの`agent.ingest`。脅威指標を全件返す。**Agentは宛先を送らない** — 「危ないか」を尋ねるために宛先を送ると、何を気にしているかを相手に伝えることになるため。フィード未設定のHubでは`available: false`を返し、Agentはこれを**「脅威が無い」と読んではならない**。`ETag`/`304`に対応 |
-| Agent | `PUT /api/agent/outbound-candidates` | Agent bearerの`agent.ingest`。Agentが自分のふだんの通信と比べて見つけた「見ておきたい送信」と、利用者の答え。**利用者がAgentの設定で送ると決めたときだけ**届く。メモは別のスイッチを入れたときだけ。送るたびにそのAgentの分を置き換え、`sharing: false`で消す |
+| Agent | `PUT /api/agent/outbound-candidates` | Agent bearerの`agent.ingest`。Agentが自分のふだんの通信と比べて見つけた「見ておきたい送信」と、利用者の答え。**利用者がAgentの設定で送ると決めたときだけ**届く。メモは別のスイッチを入れたときだけ。送るたびにそのAgentの分を置き換え、`sharing: false`で消す。一覧は`GET /api/agent/capabilities`の`maxOutboundCandidates`件（150件）まで。この項目の無いHubは20件まで。本文は認証の後に512 KiBまで読む |
 | Agent | `GET /api/agent/outbound-candidates/answers` | Agent bearer。このAgentの一覧の候補にHubで付けた答えと、今の答えの版。メモはAgentがメモを共有しているときだけ。観測の送信への応答に`outboundAnswersVersion`が入り、それが変わったときにAgentがここへ問い合わせる |
 | Router初期設定 | `POST /api/nonce` | 認証必須 |
 | Router初期設定 | `POST /api/yamaha/detect` | 認証必須 |

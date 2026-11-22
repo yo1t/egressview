@@ -98,7 +98,7 @@ function agentJsonBoundary(req, res, next) {
   return agentJsonParser(req, res, (error) => {
     if (!error) return next();
     if (error.type === 'entity.too.large') {
-      return res.status(413).json({ error: 'Agent ingest body exceeds 512 KiB' });
+      return res.status(413).json({ error: 'Agent body exceeds 512 KiB' });
     }
     if (error.type === 'encoding.unsupported') {
       return res.status(415).json({ error: 'Compressed Agent ingest bodies are not supported' });
@@ -146,7 +146,9 @@ function configureHttpApp(app, {
     // Ingest bodies are read after authentication, below. A batch is 512 KiB,
     // and reading that much from a caller who turns out to have no credential
     // is the expensive half of a flood.
-    if (req.path === '/agent/ingest') return next();
+    // The outbound candidates list goes the same way: up to 150 entries
+    // (agent-outbound-candidates.js) need more than 64 KB.
+    if (req.path === '/agent/ingest' || req.path === '/agent/outbound-candidates') return next();
     return req.body === undefined ? apiJson(req, res, next) : next();
   });
   // Watches responses against their contracts. Off unless
@@ -226,6 +228,8 @@ function configureHttpApp(app, {
   cacheSummary.unref();
   app.use('/api', enforceApiPermissions);
   app.use('/api/agent/ingest', agentJsonBoundary);
+  app.use('/api/agent/outbound-candidates', (req, res, next) => (
+    req.path === '/' ? agentJsonBoundary(req, res, next) : next()));
   if (demoReadOnly) app.use('/api', createDemoReadOnly());
 
   const indexRoutes = ['/', '/index.html'];
