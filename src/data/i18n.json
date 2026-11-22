@@ -1080,7 +1080,14 @@
     "agents.duration.minutes": "{count}分",
     "agents.duration.hours": "{hours}時間{minutes}分",
     "agents.duration.days": "{days}日{hours}時間",
-    "settings.agents.viewHint": "各Agentが届いているかと、Agentが共有した調べる候補は、画面上部の「Agent」タブで見られます。"
+    "settings.agents.viewHint": "各Agentが届いているかと、Agentが共有した調べる候補は、画面上部の「Agent」タブで見られます。",
+    "agents.candidates.clear": "答えを取り消す",
+    "agents.candidates.answeredOnHub": "Hubで答えました。Macには、次にMacがHubへ送ったときに反映されます（Hubの答えを取り込める版のAgentのみ）。",
+    "agents.candidates.noteLabel": "メモ（Macにも反映されます）",
+    "agents.candidates.saveNote": "メモを保存",
+    "agents.candidates.saving": "保存しています…",
+    "agents.candidates.saveFailed": "保存できませんでした。",
+    "agents.candidates.notesNotShared": "このMacはメモをHubと共有していないため、Hubではメモを書けません。"
   },
   "en": {
     "tab.graph": "📊 Graph Map",
@@ -2163,6 +2170,13 @@
     "agents.duration.minutes": "{count} min",
     "agents.duration.hours": "{hours} h {minutes} min",
     "agents.duration.days": "{days} d {hours} h",
-    "settings.agents.viewHint": "Whether each Agent is delivering, and the \"worth a look\" lists Agents share, are on the Agent tab at the top of the screen."
+    "settings.agents.viewHint": "Whether each Agent is delivering, and the \"worth a look\" lists Agents share, are on the Agent tab at the top of the screen.",
+    "agents.candidates.clear": "Take the answer back",
+    "agents.candidates.answeredOnHub": "Answered on the Hub. The Mac takes it in the next time it sends to the Hub (Agents that can take Hub answers in only).",
+    "agents.candidates.noteLabel": "Note (also goes to the Mac)",
+    "agents.candidates.saveNote": "Save note",
+    "agents.candidates.saving": "Saving…",
+    "agents.candidates.saveFailed": "Could not save.",
+    "agents.candidates.notesNotShared": "This Mac does not share notes with the Hub, so a note cannot be written here."
   }
 }

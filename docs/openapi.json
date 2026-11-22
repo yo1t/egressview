@@ -971,6 +971,9 @@
                     "replayed": {
                       "type": "boolean"
                     },
+                    "outboundAnswersVersion": {
+                      "type": "number"
+                    },
                     "requestId": {
                       "type": "string"
                     }
@@ -1151,6 +1154,9 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 1000000
+                  },
+                  "notesShared": {
+                    "type": "boolean"
                   },
                   "entries": {
                     "maxItems": 20,
@@ -1334,6 +1340,87 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agent/outbound-candidates/answers": {
+      "get": {
+        "summary": "GET /api/agent/outbound-candidates/answers",
+        "description": "Requires an enrolled agent token. The request body is not described here.",
+        "security": [
+          {
+            "agentToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Declared by the server, and checked in CI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "number"
+                    },
+                    "answers": {
+                      "maxItems": 500,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "candidateId": {
+                            "type": "string"
+                          },
+                          "answer": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "expected",
+                                  "investigate"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "note": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "answeredAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "candidateId",
+                          "answer",
+                          "note",
+                          "answeredAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "answers"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential."
           },
           "403": {
             "description": "Authenticated, but not permitted."
@@ -2528,6 +2615,12 @@
                           "receivedAt": {
                             "type": "number"
                           },
+                          "notesShared": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
                           "entries": {
                             "maxItems": 500,
                             "type": "array",
@@ -2581,6 +2674,20 @@
                                     "string",
                                     "null"
                                   ]
+                                },
+                                "answeredOn": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "agent",
+                                        "hub"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 }
                               },
                               "required": [
@@ -2593,7 +2700,8 @@
                                 "usualBytesOut",
                                 "answer",
                                 "answeredAt",
-                                "note"
+                                "note",
+                                "answeredOn"
                               ],
                               "additionalProperties": false
                             }
@@ -2606,6 +2714,7 @@
                           "total",
                           "generatedAt",
                           "receivedAt",
+                          "notesShared",
                           "entries"
                         ],
                         "additionalProperties": false
@@ -2625,6 +2734,158 @@
           },
           "403": {
             "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents/outbound-candidates/:agentId/:candidateId/answer": {
+      "put": {
+        "summary": "PUT /api/agents/outbound-candidates/:agentId/:candidateId/answer",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "answer": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "expected",
+                          "investigate"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "answer"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Declared by the server, and checked in CI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "number"
+                    },
+                    "answeredAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "answeredAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          },
+          "404": {
+            "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "error"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
           }
         }
       }
@@ -11649,6 +11910,7 @@
   "x-response-contract-coverage": {
     "declared": [
       "GET /api/agent/capabilities",
+      "GET /api/agent/outbound-candidates/answers",
       "GET /api/agent/threat-intel",
       "GET /api/agents",
       "GET /api/agents/app-bytes",
@@ -11677,7 +11939,8 @@
       "GET /api/routers",
       "GET /api/status",
       "POST /api/agent/ingest",
-      "PUT /api/agent/outbound-candidates"
+      "PUT /api/agent/outbound-candidates",
+      "PUT /api/agents/outbound-candidates/:agentId/:candidateId/answer"
     ],
     "observedOnly": [
       "DELETE /api/ai/conversations/:id",

@@ -234,6 +234,8 @@ function createRegistry() {
       total: z.number(),
       generatedAt: z.number(),
       receivedAt: z.number(),
+      // null: an Agent from before P3-194 stage 2, which does not say.
+      notesShared: z.boolean().nullable(),
       entries: z.array(z.object({
         candidateId: z.string(),
         kind: z.string(),
@@ -245,7 +247,28 @@ function createRegistry() {
         answer: z.string().nullable(),
         answeredAt: z.number().nullable(),
         note: z.string().nullable(),
+        // Where the answer shown was given: on the Agent or on the Hub.
+        answeredOn: z.enum(['agent', 'hub']).nullable(),
       }).strict()).max(BOUNDED_ARRAY_LIMIT),
+    }).strict()).max(BOUNDED_ARRAY_LIMIT),
+  }).strict());
+
+  // PUT /api/agents/outbound-candidates/:agentId/:candidateId/answer -- the
+  // Agent's new answer version and when the Hub took the answer.
+  registry.declare('PUT /api/agents/outbound-candidates/:agentId/:candidateId/answer', 200, z.object({
+    version: z.number(),
+    answeredAt: z.number(),
+  }).strict());
+
+  // GET /api/agent/outbound-candidates/answers -- the Hub's answers for this
+  // Agent's listed candidates, so at most 20 (`MAX_ENTRIES`).
+  registry.declare('GET /api/agent/outbound-candidates/answers', 200, z.object({
+    version: z.number(),
+    answers: z.array(z.object({
+      candidateId: z.string(),
+      answer: z.enum(['expected', 'investigate']).nullable(),
+      note: z.string().nullable(),
+      answeredAt: z.string(),
     }).strict()).max(BOUNDED_ARRAY_LIMIT),
   }).strict());
 
@@ -271,6 +294,8 @@ function createRegistry() {
     expired: z.number().optional(),
     receivedAt: z.number(),
     replayed: z.boolean(),
+    // Bumped when an answer is given on the Hub (P3-194 stage 2).
+    outboundAnswersVersion: z.number().optional(),
     requestId: z.string().optional(),
   }).loose());
 
