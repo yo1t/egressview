@@ -192,6 +192,8 @@ public partial class App : System.Windows.Application
             Visible = true,
         };
         trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowMainWindow);
+        // Every notification says "open the Agent", so pressing one does.
+        trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(ShowMainWindow);
         RefreshTrayText();
     }
 
@@ -298,7 +300,22 @@ public partial class App : System.Windows.Application
             window.RefreshUpdateStatus();
             window.RefreshUpdateBanner();
         }
+        NotifyNewVersion();
     });
+
+    /// Once per version, when the check finds it: the banner waits for the
+    /// window to be opened, and someone who keeps it closed would never see it.
+    private void NotifyNewVersion()
+    {
+        if (AgentUpdateNotice.VersionToNotify(AgentSettings.AvailableUpdateVersion, Updates.CurrentVersion,
+                AgentSettings.DismissedUpdateVersion, AgentSettings.NotifiedUpdateVersion) is not { } version) return;
+        // Recorded before it is sent, so a category that is off, or a daily
+        // limit reached, does not bring it back on every later check.
+        AgentSettings.NotifiedUpdateVersion = version;
+        Notifications.Notify("Update", $"update-{version}", "EgressView Agent",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, LocalizationManager.Text("UpdateNotificationFormat"), version),
+            ShowNotification);
+    }
 
     private async Task CheckForUpdatesAsync()
     {

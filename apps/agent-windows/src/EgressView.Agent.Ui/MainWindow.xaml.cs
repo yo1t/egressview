@@ -1663,6 +1663,7 @@ public partial class MainWindow : Window
         NotifyThreatIntel.IsChecked = AgentSettings.NotificationCategoryEnabled("ThreatIntel");
         NotifyRecovery.IsChecked = AgentSettings.NotificationCategoryEnabled("Recovery");
         NotifyOutboundAnomaly.IsChecked = AgentSettings.NotificationCategoryEnabled("OutboundAnomaly");
+        NotifyUpdate.IsChecked = AgentSettings.NotificationCategoryEnabled("Update");
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
         PopulateHomeCountryChoice();
@@ -2345,7 +2346,7 @@ public partial class MainWindow : Window
     {
         if (loadingSettings) return;
         AgentSettings.NotificationsEnabled = NotificationsEnabled.IsChecked == true;
-        foreach (var box in new[] { NotifyThreat, NotifyMonitoring, NotifyHubDelivery, NotifyThreatIntel, NotifyRecovery, NotifyOutboundAnomaly })
+        foreach (var box in new[] { NotifyThreat, NotifyMonitoring, NotifyHubDelivery, NotifyThreatIntel, NotifyRecovery, NotifyOutboundAnomaly, NotifyUpdate })
             if (box.Tag is string kind) AgentSettings.SetNotificationCategory(kind, box.IsChecked == true);
         if (DailyLimitChoice.SelectedItem is ComboBoxItem item && int.TryParse(item.Tag?.ToString(), out var value)) AgentSettings.NotificationDailyLimit = value;
         RefreshNotifications();
@@ -3198,6 +3199,7 @@ internal sealed class NotificationRow(NotificationHistoryEntry value)
         "ThreatIntelChange" => LocalizationManager.Text("NotificationKindThreatIntelChange"),
         "Recovery" => LocalizationManager.Text("NotificationKindRecovery"),
         "OutboundAnomaly" => LocalizationManager.Text("NotificationKindOutboundAnomaly"),
+        "Update" => LocalizationManager.Text("NotificationKindUpdate"),
         _ => value.Kind,
     };
     public string Title => value.Title;

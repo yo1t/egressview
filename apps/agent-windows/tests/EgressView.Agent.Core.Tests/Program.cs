@@ -2569,6 +2569,13 @@ try
     Assert(AgentUpdateNotice.VersionToAnnounce("0.1.173", "0.1.172", "0.1.173") is null
            && AgentUpdateNotice.VersionToAnnounce("0.1.174", "0.1.172", "0.1.173") == "0.1.174",
         "a closed notice stays closed for that version and comes back for the next");
+    Assert(AgentUpdateNotice.VersionToNotify("0.1.175", "0.1.174", null, null) == "0.1.175"
+           && AgentUpdateNotice.VersionToNotify("0.1.175", "0.1.174", null, "0.1.175") is null
+           && AgentUpdateNotice.VersionToNotify("0.1.176", "0.1.174", null, "0.1.175") == "0.1.176",
+        "a Windows notification is sent once per version, and again for the next");
+    Assert(AgentUpdateNotice.VersionToNotify("0.1.175", "0.1.174", "0.1.175", null) is null
+           && AgentUpdateNotice.VersionToNotify("0.1.174", "0.1.174", null, null) is null,
+        "nor for a version whose banner was closed, or the one already running");
 
     // A PC off for longer than the Hub keeps anything: what the Hub would
     // refuse for its age is taken out before sending, and counted.
