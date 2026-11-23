@@ -17,3 +17,14 @@
 <link rel="alternate" hreflang="x-default" href="{{ en.url | absolute_url }}">
   {%- endif -%}
 {%- endif -%}
+{%- comment -%}
+  At 320px the English ATT&CK mapping table was 4px wider than its box: the
+  theme pads every cell 13px on each side, and a cell cannot be narrower than
+  its longest word ("destination"). Narrower padding on a phone lets it fit.
+{%- endcomment -%}
+<style>
+@media (max-width: 480px) {
+  .markdown-body table th,
+  .markdown-body table td { padding: 6px 8px; }
+}
+</style>
