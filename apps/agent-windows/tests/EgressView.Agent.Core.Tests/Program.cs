@@ -2556,6 +2556,25 @@ try
         Assert(fresh.Observations.Count == 2 && spillDelivery.ReadCounters()["delivery-observations-expired"] == 1,
             "what was set aside past the Hub's seven days is dropped and counted like the rest of the queue");
     }
+    // A second overflow, into a spill that already holds rows, all queued at
+    // the same moment: exactly the overflow moves, and nothing is lost.
+    using (var tiedSpill = new ObservationStore(Path.Combine(directory, "delivery-spill-tied.db")))
+    {
+        var at = DateTimeOffset.UtcNow.AddHours(-1);
+        NetworkObservation Flow(int port) => new(at, 77, "TCP", "10.0.0.1", port, "203.0.113.9", 443,
+            1, 0, ObservationLayer.Logical, "if", "etw", "Browser");
+        tiedSpill.QueueForDelivery(Enumerable.Range(51000, 6).Select(Flow).ToArray(), at, maximumPending: 3);
+        tiedSpill.QueueForDelivery(Enumerable.Range(51100, 4).Select(Flow).ToArray(), at, maximumPending: 3);
+        Assert(tiedSpill.ReadDeliveryStatus().Pending == 10 && tiedSpill.ReadCounters()["delivery-observations-spilled"] == 7,
+            "a second overflow with tied times moves exactly its excess into a spill that already holds rows");
+        var delivered = new HashSet<Guid>();
+        for (var step = 0; step < 10 && tiedSpill.PrepareDeliveryBatch(at.AddMinutes(1 + step)) is { } batch; step++)
+        {
+            foreach (var item in batch.Observations) delivered.Add(item.ObservationId);
+            tiedSpill.AcknowledgeDelivery(batch.BatchId, at.AddMinutes(1 + step));
+        }
+        Assert(delivered.Count == 10 && tiedSpill.ReadDeliveryStatus().Pending == 0, "and all ten are delivered once");
+    }
 
     // The notice of a newer version across the top of the window.
     Assert(AgentUpdateNotice.VersionToAnnounce("0.1.173", "0.1.172", null) == "0.1.173"

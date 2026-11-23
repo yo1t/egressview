@@ -82,9 +82,14 @@ public sealed partial class ObservationStore
         if (overflow <= 0) return;
         // Set aside, not deleted: they have never been sent, so they can go
         // later under the same id without the Hub counting anything twice.
-        const string oldest = "SELECT delivery_id FROM delivery_queue WHERE batch_id IS NULL ORDER BY queued_at LIMIT ";
-        Execute($"INSERT OR IGNORE INTO delivery_spill({SpillColumns}) SELECT {SpillColumns} FROM delivery_queue WHERE delivery_id IN ({oldest}{overflow})");
-        var moved = DeleteWhere("delivery_queue", $"delivery_id IN (SELECT delivery_id FROM delivery_spill) AND batch_id IS NULL");
+        // The same rows both times: ordered to the last tie (by rowid, which
+        // the batch index already carries, so it is not sorted), so the second
+        // select cannot pick a row the first one did not copy. Matched against
+        // what was just chosen, not against the whole spill, which at its
+        // bound made every write of a few observations take some 40 ms.
+        var oldest = $"SELECT delivery_id FROM delivery_queue WHERE batch_id IS NULL ORDER BY queued_at, rowid LIMIT {overflow}";
+        Execute($"INSERT OR IGNORE INTO delivery_spill({SpillColumns}) SELECT {SpillColumns} FROM delivery_queue WHERE delivery_id IN ({oldest})");
+        var moved = DeleteWhere("delivery_queue", $"delivery_id IN ({oldest})");
         if (moved > 0) Execute($"INSERT INTO collector_counters(name,value) VALUES('delivery-observations-spilled',{moved}) " +
                                "ON CONFLICT(name) DO UPDATE SET value=value+excluded.value");
         // Bounded too. Past this, the oldest are lost, and counted as before.
@@ -97,8 +102,9 @@ public sealed partial class ObservationStore
     /// Where the queue's overflow waits. On 2026-11-15 a queue held at its
     /// limit for five hours by a blocked batch deleted 66,847 observations
     /// the Hub never received; held here, they would have gone once delivery
-    /// moved again. About 200 bytes a row, so the bound is some 40 MB, and
-    /// nothing in it outlives the Hub's seven days.
+    /// moved again. Measured at the bound (2026-11-23), the queue and the
+    /// spill together took 89 MB, about 420 bytes a row with their indexes,
+    /// and nothing in it outlives the Hub's seven days.
     public const int SpillCapacity = 200_000;
     public const int DeliveryQueueCapacity = 10_000;
 
