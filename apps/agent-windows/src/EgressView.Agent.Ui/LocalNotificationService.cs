@@ -88,8 +88,7 @@ internal sealed class LocalNotificationService
         var ja = LocalizationManager.EffectiveLanguage == "ja";
         var delivered = action == DeliveryNotificationAction.Outage
             ? Notify("HubDelivery", "hub-delivery-outage", "EgressView Agent",
-                ja ? $"Hubへの送信が完了していません。未送信 {sample.Pending:N0} 件。Agentを開いて確認してください。"
-                   : $"Delivery to the Hub is not completing. {sample.Pending:N0} observations are pending. Open the Agent for details.", show)
+                DeliveryOutageText.Body(sample.State, sample.StatusCode, sample.Network, sample.Pending, ja), show)
             : Notify("Recovery", "hub-delivery-recovery", "EgressView Agent",
                 ja ? "Hubへの送信が復旧し、ACKを確認しました。" : "Hub delivery recovered and an acknowledgement was confirmed.", show);
         deliveryNotifications.RecordAttempt(action, sample, delivered);

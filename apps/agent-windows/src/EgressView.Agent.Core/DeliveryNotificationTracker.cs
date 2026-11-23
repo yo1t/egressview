@@ -2,8 +2,11 @@ namespace EgressView.Agent.Core;
 
 public enum DeliveryNotificationAction { None, Outage, Recovery }
 
+/// StatusCode and Network say why, for the notice's words only; whether to
+/// notify does not depend on them.
 public sealed record DeliveryNotificationSample(DateTimeOffset ObservedAt, bool Active, string State, long Pending,
-    DateTimeOffset? OldestPendingAt, DateTimeOffset? LastAcknowledgedAt);
+    DateTimeOffset? OldestPendingAt, DateTimeOffset? LastAcknowledgedAt, int? StatusCode = null,
+    PcNetwork Network = PcNetwork.Unknown);
 
 public sealed record DeliveryNotificationState(DateTimeOffset? FailureStartedAt = null,
     DateTimeOffset? LastOutageAttemptAt = null, DateTimeOffset? LastRecoveryAttemptAt = null, bool OutageWasDelivered = false,

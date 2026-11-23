@@ -361,6 +361,9 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
             lastFailure = runtime.LastFailure,
             lastFailureAt = runtime.LastFailureAt,
             lastStatusCode = runtime.LastStatusCode,
+            // Windows' own judgment, asked only while delivery is failing, so
+            // the notice can say whether this PC has a network at all.
+            network = DeliveryNotificationTracker.IsFailure(runtime.State) ? WindowsNetwork.Code(WindowsNetwork.Read()) : null,
             capability = delivery.CapabilityStatus,
         });
     }
