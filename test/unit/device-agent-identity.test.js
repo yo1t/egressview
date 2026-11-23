@@ -58,6 +58,36 @@ describe('端末でない行を作らず、残っていれば非表示にする'
     assert.equal(rowAt('2001:db8::10').status, 'archived');
     assert.equal(devices.archiveNonDevices(), 0, 'nothing left the second time');
   });
+
+  it('起動時の書き戻しでnatと付いたAgentだけの行も非表示にする。ルーターが見た行は残す', () => {
+    // What the start-up seeding left on production: Agent-only rows tagged 'nat'.
+    devices.upsert({ ip: '192.0.2.255', source: 'agent' });
+    devices.upsert({ ip: '192.0.2.255', source: 'nat' });
+    devices.upsert({ ip: '198.51.100.1', source: 'agent' });
+    devices.upsert({ ip: '198.51.100.1', source: 'nat' });
+    // A gateway a router polled, and a VM row only an Agent sees.
+    devices.upsert({ ip: '203.0.113.1', source: 'yamaha' });
+    devices.upsert({ ip: '203.0.113.1', source: 'agent' });
+    devices.upsert({ ip: '198.51.100.134', source: 'agent' });
+    devices.upsert({ ip: '198.51.100.134', source: 'nat' });
+
+    assert.equal(devices.archiveNonDevices(), 2);
+    assert.deepEqual(devices.getAll().map(row => row.ip).sort(), ['198.51.100.134', '203.0.113.1']);
+    // Archived by hand, not merged: an Agent's later sighting does not bring it back.
+    devices.observeDevice({ ip: '192.0.2.255', source: 'agent' });
+    assert.equal(rowAt('192.0.2.255').status, 'archived');
+  });
+
+  it('起動時の書き戻しでは、ルーターが見ていないAgentの通信の行にnatと付けない', () => {
+    devices.seedFromConnectionHistory(new Map([
+      ['a', { src: '198.51.100.134', agentHost: 'vm', observedBy: [], firstSeen: 1, lastSeen: 2 }],
+      ['b', { src: '192.0.2.20', srcMac: 'aa:bb:cc:00:00:20', observedBy: ['r1'], firstSeen: 1, lastSeen: 2 }],
+      ['c', { src: '192.0.2.21', agentHost: 'pc', observedBy: ['r1'], firstSeen: 1, lastSeen: 2 }],
+    ]));
+    assert.equal(rowAt('198.51.100.134').sources, 'agent');
+    assert.equal(rowAt('192.0.2.20').sources, 'nat');
+    assert.equal(rowAt('192.0.2.21').sources, 'nat');
+  });
 });
 
 function fakeAgents(list) {

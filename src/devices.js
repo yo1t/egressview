@@ -509,6 +509,16 @@ function isAgentSideAddress(ip) {
   return /\.(1|255)$/.test(String(ip || ''));
 }
 
+// Sources that say only an Agent saw the address. 'nat' is not a router: it
+// is the tag the start-up seeding used to put on every row, Agent-only flows
+// included, so on the production Hub 2026-11-23 eleven virtual-adapter and
+// broadcast rows read 'agent,nat' and were kept. A router poll tags its own
+// kind ('yamaha', 'cisco') and 'inspect' is the Hub's own capture.
+function isAgentOnlySources(sources) {
+  const tags = String(sources || '').split(',').filter(Boolean);
+  return tags.includes('agent') && tags.every(tag => tag === 'agent' || tag === 'nat');
+}
+
 /**
  * Hides rows that were never devices: addresses isDeviceAddress refuses, and
  * rows an Agent alone started for its virtual adapters or a broadcast. They
@@ -527,7 +537,7 @@ function archiveNonDevices(now = Date.now()) {
   let archived = 0;
   db.transaction(() => {
     for (const row of rows) {
-      const agentOnly = !row.mac && String(row.sources || '') === 'agent' && isAgentSideAddress(row.ip);
+      const agentOnly = !row.mac && isAgentOnlySources(row.sources) && isAgentSideAddress(row.ip);
       if (isDeviceAddress(row.ip) && !agentOnly) continue;
       archived += archive.run(now, row.deviceId).changes;
     }
@@ -1094,7 +1104,9 @@ function seedFromConnectionHistory(connectionHistory) {
         mdnsName:  entry.srcMdnsName || null,
         firstSeen: entry.firstSeen,
         lastSeen:  entry.lastSeen,
-        source:    'nat',
+        // A flow no router observed came from an Agent; calling it 'nat'
+        // made the row look as if a router had seen it.
+        source:    entry.agentHost && !(entry.observedBy || []).length ? 'agent' : 'nat',
       });
     }
   });
