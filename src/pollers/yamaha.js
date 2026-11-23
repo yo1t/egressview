@@ -297,6 +297,48 @@ function parseDhcpStatus(raw) {
   return leases;
 }
 
+/**
+ * `show ipv6 neighbor cache`, keyed by MAC: the global addresses each LAN1
+ * neighbour holds. Rows look like
+ *   "2001:db8:0:ed00:5de6:a5c8:44fb:a1e5    aa:bb:cc:dd:ee:ff LAN1  REACHABLE"
+ *
+ * Also counts what it did not keep. With the router passing IPv6 through, every
+ * read gave 0 entries (P3-200), and "0 entries" alone cannot say whether the
+ * cache was empty or held rows on another interface that this skips. The
+ * counts say which.
+ */
+function parseNdpCache(raw) {
+  const text = String(raw || '');
+  const byMac = new Map();
+  const otherInterfaces = {};
+  let linkLocal = 0;
+  let rows = 0;
+  const re = /([0-9a-fA-F:]{6,45})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\s+(\S+)\s+\w+/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    rows += 1;
+    const [, ipv6, macRaw, iface] = m;
+    if (iface !== 'LAN1') {
+      otherInterfaces[iface] = (otherInterfaces[iface] || 0) + 1;
+      continue;
+    }
+    if (ipv6.toLowerCase().startsWith('fe80:')) { linkLocal += 1; continue; }
+    const mac = macRaw.toLowerCase();
+    if (!byMac.has(mac)) byMac.set(mac, []);
+    byMac.get(mac).push(ipv6);
+  }
+  const lines = text.split(/\r?\n/).filter(line => line.trim()).length;
+  return { byMac, rows, lines, linkLocal, otherInterfaces };
+}
+
+/** Why an NDP read kept nothing, in the words the log line uses. */
+function describeEmptyNdp({ rows, lines, linkLocal, otherInterfaces }) {
+  if (!rows) return `no neighbour rows in ${lines} line(s) of output`;
+  const other = Object.entries(otherInterfaces).map(([name, count]) => `${name} ${count}`).join(', ');
+  return `${rows} neighbour row(s): link-local on LAN1 ${linkLocal}`
+    + (other ? `, on other interfaces ${other}` : '');
+}
+
 // ── Poller factory ────────────────────────────────────────────────────────────
 
 const YAMAHA_ARP_REFRESH_MS = 60 * 1000;
@@ -619,26 +661,14 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
     try {
       const raw = await profiler.measureAsync('router.yamaha.ndp.ssh', () =>
         yamahaExec('show ipv6 neighbor cache', 45000, { signal }));
-      const newMap = profiler.measureSync('router.yamaha.ndp.parse', () => {
-        const parsed = new Map();
-        // Parse lines like: "2001:db8:0:ed00:5de6:a5c8:44fb:a1e5    aa:bb:cc:dd:ee:ff LAN1  REACHABLE"
-        const re = /([0-9a-fA-F:]{6,45})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\s+LAN1\s+\w+/g;
-        let m;
-        while ((m = re.exec(raw)) !== null) {
-          const ipv6 = m[1];
-          const mac = m[2].toLowerCase();
-          if (ipv6.startsWith('fe80:')) continue;
-          if (!parsed.has(mac)) parsed.set(mac, []);
-          parsed.get(mac).push(ipv6);
-        }
-        return parsed;
-      });
+      const ndp = profiler.measureSync('router.yamaha.ndp.parse', () => parseNdpCache(raw));
+      const newMap = ndp.byMac;
       profiler.measureSync('router.yamaha.ndp.cache', () => {
         yamahaNdpCache.clear();
         for (const [k, v] of newMap) yamahaNdpCache.set(k, v);
       });
       yamahaNdpLastRefresh = Date.now();
-      logger.info(`${TAG_NDP} cache refreshed: ${newMap.size} entries`);
+      logger.info(`${TAG_NDP} cache refreshed: ${newMap.size} entries${newMap.size ? '' : ` (${describeEmptyNdp(ndp)})`}`);
     } catch (e) {
       logger.error(`${TAG_NDP} refresh failed:`, e.message);
       if (signal?.aborted) throw e;
@@ -703,6 +733,8 @@ module.exports = {
   createYamahaPoller,
   // Pure parsers (shared, stateless)
   parseDhcpStatus,
+  parseNdpCache,
+  describeEmptyNdp,
   parseNatDetail,
   parseNatDescriptorCandidates,
   parseLanIp,
