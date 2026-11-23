@@ -120,4 +120,7 @@
   <system:String x:Key="WorthALookMachineFormat">{0}: 24時間に {1} 送信（普段は多くて {2}）</system:String>
   <system:String x:Key="UpdateBannerFormat">EgressView Agent の新しい版 {0} があります。このPCの版は {1} です。</system:String>
   <system:String x:Key="UpdateBannerDismiss">閉じる</system:String>
+  <system:String x:Key="UpdateAlerts">Agentの新しい版</system:String>
+  <system:String x:Key="NotificationKindUpdate">新しい版</system:String>
+  <system:String x:Key="UpdateNotificationFormat">EgressView Agent の新しい版 {0} があります。Agentを開いてダウンロードしてください。</system:String>
 </ResourceDictionary>

@@ -34,6 +34,7 @@ internal static class AgentSettings
         "ThreatIntel" => ReadBool("NotifyThreatIntel", true),
         "Recovery" => ReadBool("NotifyRecovery", true),
         "OutboundAnomaly" => ReadBool("NotifyOutboundAnomaly", true),
+        "Update" => ReadBool("NotifyUpdate", true),
         _ => true,
     };
 
@@ -46,7 +47,7 @@ internal static class AgentSettings
     }
 
     internal static void SetNotificationCategory(string kind, bool enabled) =>
-        Write(kind switch { "Threat" => "NotifyThreat", "Monitoring" => "NotifyMonitoring", "HubDelivery" => "NotifyHubDelivery", "ThreatIntel" => "NotifyThreatIntel", "Recovery" => "NotifyRecovery", "OutboundAnomaly" => "NotifyOutboundAnomaly", _ => throw new ArgumentOutOfRangeException(nameof(kind)) }, enabled ? "1" : "0");
+        Write(kind switch { "Threat" => "NotifyThreat", "Monitoring" => "NotifyMonitoring", "HubDelivery" => "NotifyHubDelivery", "ThreatIntel" => "NotifyThreatIntel", "Recovery" => "NotifyRecovery", "OutboundAnomaly" => "NotifyOutboundAnomaly", "Update" => "NotifyUpdate", _ => throw new ArgumentOutOfRangeException(nameof(kind)) }, enabled ? "1" : "0");
 
     internal static int GlobeFrameRate
     {
@@ -138,6 +139,13 @@ internal static class AgentSettings
     {
         get => Read("AvailableUpdateVersion") is { Length: > 0 } value ? value : null;
         set => Write("AvailableUpdateVersion", value ?? "");
+    }
+
+    /// The version a Windows notification has already been sent about.
+    internal static string? NotifiedUpdateVersion
+    {
+        get => Read("NotifiedUpdateVersion") is { Length: > 0 } value ? value : null;
+        set => Write("NotifiedUpdateVersion", value ?? "");
     }
 
     /// The version whose notice the person closed.
