@@ -134,5 +134,6 @@ You can enable up to 10 Yamaha RTX and Cisco IOS routers in any combination. Giv
 - Multi-router automation covers 10 mixed fake routers, concurrency capped at 3, one-router failure isolation, and deduplication
 - Physical supplementary testing used one Cisco and one Yamaha, each registered twice under distinct router IDs; this does not validate multiple distinct same-vendor units
 - EgressView observes router state but does not configure or control HSRP/VRRP, synchronize NAT state, or perform failover
+- The IPv6 address of a device without an Agent is known only when the router's `show ipv6 neighbors` lists it. When the router does not route IPv6 on the LAN, it cannot be known, and the device's detail shows IPv6 as "Not known". A PC with an Agent shows the IPv6 addresses the Agent used for its traffic
 
 Reports from other models and redacted output fixtures are welcome.
