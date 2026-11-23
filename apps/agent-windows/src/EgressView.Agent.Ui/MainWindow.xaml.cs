@@ -1054,6 +1054,7 @@ public partial class MainWindow : Window
             var statusCode = data.TryGetProperty("lastStatusCode", out var statusValue) && statusValue.ValueKind == JsonValueKind.Number
                 ? $" (HTTP {statusValue.GetInt32()})" : string.Empty;
             HubLastFailure.Text = $"{LocalizationManager.Text("LastFailure")}: {failure}{statusCode}";
+            ShowDeliveryReasonAndHistory(data, state);
             SendNowButton.IsEnabled = enrolled && enabled && state != "sending";
             if (System.Windows.Application.Current is App app)
                 app.Notifications.ObserveHubDelivery(new(DateTimeOffset.Now, enrolled && enabled, state, pending,
@@ -1067,6 +1068,26 @@ public partial class MainWindow : Window
             HubDeliveryState.Text = LocalizationManager.Text("CannotConnect");
             SendNowButton.IsEnabled = false;
         }
+    }
+
+    /// Why delivery is failing, in the notice's words, and the latest changes
+    /// in how it went: a notice is gone once dismissed, and the
+    /// window is where someone looks afterwards.
+    private void ShowDeliveryReasonAndHistory(JsonElement data, string state)
+    {
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        int? code = data.TryGetProperty("lastStatusCode", out var codeValue) && codeValue.ValueKind == JsonValueKind.Number ? codeValue.GetInt32() : null;
+        var network = WindowsNetwork.Parse(data.TryGetProperty("network", out var networkValue) && networkValue.ValueKind == JsonValueKind.String ? networkValue.GetString() : null);
+        var reason = DeliveryNotificationTracker.IsFailure(state) ? DeliveryOutageText.Reason(state, code, network, ja).Trim() : "";
+        HubFailureReason.Text = reason;
+        HubFailureReason.Visibility = reason.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        DeliveryEvent[] history = [];
+        try { if (data.TryGetProperty("history", out var items)) history = items.Deserialize<DeliveryEvent[]>() ?? []; }
+        catch (JsonException) { }
+        HubRecentChanges.Text = string.Join(Environment.NewLine, history.Select(item => DeliveryOutageText.HistoryLine(item, ja, TimeZoneInfo.Local)));
+        var shown = history.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        HubRecentChanges.Visibility = shown;
+        HubRecentChangesTitle.Visibility = shown;
     }
 
     /// The enrollment box said "Not enrolled" on a PC that was enrolled and
@@ -1144,7 +1165,7 @@ public partial class MainWindow : Window
     /// Keyed on the window, so the same finding is announced once however
     /// often the status is polled, and a window seen before a restart is not
     /// announced again.
-    private void AnnounceOutboundAnomaly(JsonElement data)
+    internal static void AnnounceOutboundAnomaly(JsonElement data)
     {
         if (System.Windows.Application.Current is not App app) return;
         if (!data.TryGetProperty("outboundAnomaly", out var anomaly) || anomaly.ValueKind != JsonValueKind.Object) return;

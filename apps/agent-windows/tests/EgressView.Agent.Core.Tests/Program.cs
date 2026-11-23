@@ -1110,6 +1110,24 @@ try
     for (var i = 0; i < 300; i++) floodLog.Observe(logAt.AddSeconds(i), i % 2 == 0 ? "retryable" : "acknowledged", null, Queue, Network);
     Assert(DeliveryHistory.Read(Path.Combine(directory, "delivery-history-flood")).Count == DeliveryHistory.Kept,
         "a flapping Hub cannot grow the file past its bound");
+    var historyZone = TimeZoneInfo.CreateCustomTimeZone("test+9", TimeSpan.FromHours(9), "test+9", "test+9");
+    var outageAt = new DateTimeOffset(2026, 11, 21, 12, 48, 44, TimeSpan.Zero);
+    var outageLine = DeliveryOutageText.HistoryLine(new DeliveryEvent(outageAt, "retryable", null, 6187, outageAt.AddMinutes(-4), "local-only"), true, historyZone);
+    Assert(outageLine == "11/21 21:48 Hubから応答がありません。WindowsはこのPCをインターネットにつながっていないと判定しています（未送信 6,187 件、最後にHubが受け取ったのは 11/21 21:44）",
+        "a failure in the window says when, why, how many waited and when the Hub last took a batch");
+    Assert(DeliveryOutageText.HistoryLine(new DeliveryEvent(outageAt, "start", null, 63, null, null), false, historyZone) == "11/21 21:48 Service started (63 pending)"
+           && DeliveryOutageText.HistoryLine(new DeliveryEvent(outageAt, "acknowledged", null, 0, outageAt, null), true, historyZone) == "11/21 21:48 送信できた"
+           && DeliveryOutageText.HistoryLine(new DeliveryEvent(outageAt, "retryable", 503, 5, null, null), false, historyZone) == "11/21 21:48 The Hub is answering with an error (HTTP 503) (5 pending)",
+        "starts and recoveries read plainly, and a failure without an earlier acknowledgement says nothing about one");
+    Assert(DeliveryOutageText.Reason("acknowledged", null, PcNetwork.None, true) == "", "a delivering Hub has no reason to show");
+    deliveryLog.Forget(logAt.AddSeconds(15));
+    var keptAfterForget = DeliveryHistory.Read(historyDirectory);
+    Assert(keptAfterForget.Count == 2 && keptAfterForget.All(item => item.At >= logAt.AddSeconds(15)),
+        "deleting local history before a time forgets the delivery changes before it");
+    deliveryLog.Forget(null);
+    Assert(DeliveryHistory.Read(historyDirectory).Count == 0
+           && deliveryLog.Observe(logAt.AddMinutes(2), "acknowledged", null, Queue, Network),
+        "deleting all of it forgets them all, and the next change is written again");
 
     var unnotified = new DeliveryNotificationTracker();
     var unnotifiedFailure = new DeliveryNotificationSample(notificationNow, true, "retryable", 1, notificationNow.AddMinutes(-6), deliveryAck);

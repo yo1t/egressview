@@ -20,7 +20,9 @@ public static class DeliveryOutageText
             : $"Delivery to the Hub is not completing. {reason}{count} observations are pending. Open the Agent for details.";
     }
 
-    private static string Reason(string state, int? statusCode, PcNetwork network, bool ja) => state switch
+    /// The reason alone, for the window as well as the notice. Empty when
+    /// nothing is known.
+    public static string Reason(string state, int? statusCode, PcNetwork network, bool ja) => state switch
     {
         "authorization-required" => ja ? "Hubがこの端末の登録を受け付けていません。" : "The Hub no longer accepts this device's enrollment. ",
         "hub-incompatible" => ja ? "HubとAgentの版が合いません。" : "The Hub and the Agent have no version in common. ",
@@ -39,4 +41,23 @@ public static class DeliveryOutageText
         },
         _ => "",
     };
+
+    /// One line of the recent delivery changes shown in the window: when,
+    /// what happened, and for a failure how many were waiting and when the
+    /// Hub last took a batch.
+    public static string HistoryLine(DeliveryEvent item, bool ja, TimeZoneInfo zone)
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        string Time(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, zone).ToString("M/d HH:mm", culture);
+        var count = item.Pending.ToString("N0", culture);
+        if (item.State == "start") return ja ? $"{Time(item.At)} サービス起動（未送信 {count} 件）" : $"{Time(item.At)} Service started ({count} pending)";
+        if (!DeliveryNotificationTracker.IsFailure(item.State)) return ja ? $"{Time(item.At)} 送信できた" : $"{Time(item.At)} Delivering";
+        var reason = Reason(item.State, item.StatusCode, WindowsNetwork.Parse(item.Network), ja).Trim();
+        if (reason.Length == 0) reason = ja ? "送信できなかった。" : "Delivery failed.";
+        var last = item.LastAcknowledgedAt is { } acknowledged
+            ? ja ? $"、最後にHubが受け取ったのは {Time(acknowledged)}" : $", last taken by the Hub {Time(acknowledged)}"
+            : "";
+        return ja ? $"{Time(item.At)} {reason.TrimEnd('。')}（未送信 {count} 件{last}）"
+            : $"{Time(item.At)} {reason.TrimEnd('.', ' ')} ({count} pending{last})";
+    }
 }
