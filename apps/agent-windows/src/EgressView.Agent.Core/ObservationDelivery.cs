@@ -143,6 +143,25 @@ public sealed partial class ObservationStore
         catch { TryRollback(); throw; }
     }
 
+    /// What is past the Hub's seven days is looked for before every batch.
+    /// Without this index that was a scan of the whole spill: at its bound
+    /// (2026-11-23) preparing a batch took a median of 29 ms, nearly all of
+    /// it the scan, while nothing in the spill was old enough to go.
+    private const string Version35Schema = """
+        CREATE INDEX IF NOT EXISTS delivery_spill_last_observed ON delivery_spill(last_observed_at);
+        """;
+
+    /// No backup: one index on a table that is empty unless delivery has
+    /// been stopped for a while, in one transaction.
+    private void MigrateVersion34To35()
+    {
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version35Schema + " UPDATE schema_version SET version=35 WHERE version=34; COMMIT;");
+        }
+        catch { TryRollback(); throw; }
+    }
+
     /// Brings set-aside observations back once the queue has room for a whole
     /// batch of them, oldest first, so they go before what came after them.
     /// One already waiting for the same flow takes them in, as a new
