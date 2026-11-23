@@ -18,6 +18,13 @@ public static class AgentUpdateNotice
         return string.Equals(available, dismissed, StringComparison.Ordinal) ? null : available;
     }
 
+    /// The version to send a Windows notification about, or null: once per
+    /// version, so a restart or a second check does not say it again, and
+    /// never for one the person already closed the banner for.
+    public static string? VersionToNotify(string? available, string current, string? dismissed, string? notified) =>
+        VersionToAnnounce(available, current, dismissed) is { } version && !string.Equals(version, notified, StringComparison.Ordinal)
+            ? version : null;
+
     public static bool IsNewer(string? candidate, string current) =>
         Version.TryParse(candidate, out var offered) && Version.TryParse(current, out var running) && offered > running;
 }

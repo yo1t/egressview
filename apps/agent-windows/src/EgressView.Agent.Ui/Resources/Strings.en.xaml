@@ -120,4 +120,7 @@
   <system:String x:Key="WorthALookMachineFormat">{0}: {1} sent in 24 hours, usually up to {2}</system:String>
   <system:String x:Key="UpdateBannerFormat">Version {0} of EgressView Agent is available. This PC has {1}.</system:String>
   <system:String x:Key="UpdateBannerDismiss">Dismiss</system:String>
+  <system:String x:Key="UpdateAlerts">A newer version of the Agent</system:String>
+  <system:String x:Key="NotificationKindUpdate">New version</system:String>
+  <system:String x:Key="UpdateNotificationFormat">Version {0} of EgressView Agent is available. Open the Agent to download it.</system:String>
 </ResourceDictionary>
