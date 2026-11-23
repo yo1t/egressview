@@ -255,7 +255,12 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
             delivery.SettingsChanged();
         }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
         enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
-        cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall, CountryHistory,
+        cutoff =>
+        {
+            var deleted = store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow);
+            delivery.History?.Forget(cutoff);
+            return deleted;
+        }, Diagnostics, PrepareUninstall, CountryHistory,
         store.ReadRecentObservations, store.ReadLogSnapshot, store.ReadObservationsSince, RecordUiRun, setReadsHostnames,
         enrichment.SetPublicFeedsEnabled, SetCountryTableAccount, enrichment.SetCountryTableEnabled,
         () => _ = enrichment.FetchPublicFeedsOnceAsync(CancellationToken.None),
@@ -364,6 +369,9 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
             // Windows' own judgment, asked only while delivery is failing, so
             // the notice can say whether this PC has a network at all.
             network = DeliveryNotificationTracker.IsFailure(runtime.State) ? WindowsNetwork.Code(WindowsNetwork.Read()) : null,
+            // The newest changes, for the window. Fixed vocabularies, the
+            // Hub's status code and the Agent's own times.
+            history = delivery.History is null ? Array.Empty<DeliveryEvent>() : DeliveryHistory.Read(delivery.History.DataDirectory).TakeLast(6).Reverse().ToArray(),
             capability = delivery.CapabilityStatus,
         });
     }
@@ -382,6 +390,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
             revoked = true;
         }
         var result = store.CompleteUninstallPreparation(removeHistory, revoked, credential is not null && continueWithoutRevocation, DateTimeOffset.UtcNow);
+        if (removeHistory) delivery.History?.Forget(null);
         credentialStore.Delete();
         return result;
     }

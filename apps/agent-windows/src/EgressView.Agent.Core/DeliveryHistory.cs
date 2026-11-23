@@ -26,6 +26,8 @@ public sealed class DeliveryHistory(string dataDirectory)
 {
     public const string FileName = "delivery-history.json";
 
+    public string DataDirectory => dataDirectory;
+
     /// Bounded. At a few changes a day this is weeks; a Hub that flaps every
     /// minute fills it in a few hours, and the newest are what is asked about.
     public const int Kept = 200;
@@ -86,6 +88,27 @@ public sealed class DeliveryHistory(string dataDirectory)
         // Being unable to keep the history must never be what stops delivery.
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    /// Forgets the events before a time, or all of them, when the person
+    /// deletes their local history: these say when this PC delivered and how
+    /// much was waiting, which is history too.
+    public void Forget(DateTimeOffset? before)
+    {
+        lock (gate)
+        {
+            try
+            {
+                var kept = before is { } cutoff ? Read(dataDirectory).Where(item => item.At >= cutoff).ToArray() : [];
+                var target = Path.Combine(dataDirectory, FileName);
+                var aside = target + ".tmp";
+                File.WriteAllText(aside, JsonSerializer.Serialize(kept));
+                File.Move(aside, target, overwrite: true);
+                last = kept.LastOrDefault();
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     /// The events on record, oldest first, or none.

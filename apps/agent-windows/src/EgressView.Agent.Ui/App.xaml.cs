@@ -356,6 +356,11 @@ public partial class App : System.Windows.Application
                 issueAction = first.TryGetProperty("action", out var action) ? action.GetString() : null;
             }
             UpdateTrayState(enabled, healthy, issueCode, issueAction);
+            // Here as well as in the window: the window stops refreshing
+            // while it is closed, and an anomaly was announced only when it
+            // was next opened -- 21 minutes to an hour late on 2026-11-21/23.
+            // Keyed on the window, so it is never announced twice.
+            EgressView.Agent.Ui.MainWindow.AnnounceOutboundAnomaly(data);
             if (MainWindow is MainWindow window)
                 window.ApplyMonitoringStatusFromTray(enabled, healthy, hasActiveCoverage, issueCode, issueAction);
         }
