@@ -1057,7 +1057,10 @@ public partial class MainWindow : Window
             SendNowButton.IsEnabled = enrolled && enabled && state != "sending";
             if (System.Windows.Application.Current is App app)
                 app.Notifications.ObserveHubDelivery(new(DateTimeOffset.Now, enrolled && enabled, state, pending,
-                    DateValue(data, "oldestPendingAt"), DateValue(data, "lastAcknowledgedAt")), app.ShowNotification);
+                    DateValue(data, "oldestPendingAt"), DateValue(data, "lastAcknowledgedAt"),
+                    data.TryGetProperty("lastStatusCode", out var noticeCode) && noticeCode.ValueKind == JsonValueKind.Number ? noticeCode.GetInt32() : null,
+                    WindowsNetwork.Parse(data.TryGetProperty("network", out var noticeNetwork) && noticeNetwork.ValueKind == JsonValueKind.String ? noticeNetwork.GetString() : null)),
+                    app.ShowNotification);
         }
         catch
         {

@@ -103,6 +103,10 @@ public static class DiagnosticsReport
             // service that is running again is exactly when someone asks why
             // the start before it did not.
             serviceFailures = SafeServiceFailures(Path.GetDirectoryName(store.DatabasePath)),
+            // How delivery went, change by change: when the Hub last took a
+            // batch before each failure, and what Windows said about the
+            // network then. The newest 50.
+            deliveryHistory = SafeDeliveryHistory(Path.GetDirectoryName(store.DatabasePath)),
             installer = ReadInstallerState(),
             privacy = new { includesEndpoints = false, includesHostnames = false, includesProcessNames = false, includesCredentials = false, includesHubEndpoint = false, includesRawObservations = false, includesDatabase = false },
         }, new JsonSerializerOptions { WriteIndented = true });
@@ -142,6 +146,21 @@ public static class DiagnosticsReport
             migration = failure.Migration is { } m
                 ? new { fromVersion = m.FromVersion, toVersion = m.ToVersion, step = m.Step, steps = m.Steps }
                 : null,
+        }).ToArray();
+    }
+
+    /// Fixed vocabularies, the Hub's status code and the Agent's own times.
+    private static object[] SafeDeliveryHistory(string? dataDirectory)
+    {
+        if (string.IsNullOrEmpty(dataDirectory)) return [];
+        return DeliveryHistory.Read(dataDirectory).TakeLast(50).Select(item => (object)new
+        {
+            at = item.At,
+            state = SafeCode(item.State),
+            statusCode = item.StatusCode,
+            pending = item.Pending,
+            lastAcknowledgedAt = item.LastAcknowledgedAt,
+            network = item.Network is null ? null : WindowsNetwork.Code(WindowsNetwork.Parse(item.Network)),
         }).ToArray();
     }
 

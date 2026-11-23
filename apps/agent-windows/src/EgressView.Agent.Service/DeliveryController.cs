@@ -14,11 +14,13 @@ internal sealed class DeliveryController : IDisposable
     private readonly (string? Manufacturer, string? Model) hardware = WindowsHardware.Read();
     private readonly object stateGate = new();
     private DeliveryRuntimeStatus status = new("idle");
+    private readonly DeliveryHistory? history;
 
     internal DeliveryController(ObservationStore store, WindowsCredentialStore credentials, DeliverySender? sender = null,
-        InboundProbeOutbox? inboundProbes = null)
+        InboundProbeOutbox? inboundProbes = null, string? dataDirectory = null)
     {
         this.store = store;
+        if (dataDirectory is not null) history = new DeliveryHistory(dataDirectory);
         this.credentials = credentials;
         this.sender = sender ?? new DeliverySender();
         this.sender.InboundProbes ??= inboundProbes;
@@ -51,6 +53,7 @@ internal sealed class DeliveryController : IDisposable
     internal async Task RunAsync(CancellationToken cancellationToken)
     {
         var retry = TimeSpan.FromSeconds(5);
+        Record(started: true, "start", null);
         while (!cancellationToken.IsCancellationRequested)
         {
             var delay = TimeSpan.FromSeconds(15);
@@ -86,6 +89,7 @@ internal sealed class DeliveryController : IDisposable
                     var state = State(result.Kind);
                     SetState(state, delay > TimeSpan.Zero ? DateTimeOffset.UtcNow + delay : null, attemptedAt,
                         IsFailure(result.Kind) ? state : null, result.StatusCode);
+                    Record(started: false, state, IsFailure(result.Kind) ? result.StatusCode : null);
                     // A refusal that halved the batch is not a reason to wait
                     // longer. Backoff protects a server in trouble, and this
                     // one answered: it said no to a payload we have already
@@ -104,6 +108,7 @@ internal sealed class DeliveryController : IDisposable
             {
                 delay = retry;
                 SetState("retryable", DateTimeOffset.UtcNow + delay, DateTimeOffset.UtcNow, "retryable");
+                Record(started: false, "retryable", null);
                 retry = TimeSpan.FromSeconds(Math.Min(retry.TotalSeconds * 2, 300));
             }
 
@@ -111,6 +116,25 @@ internal sealed class DeliveryController : IDisposable
             try { await wake.WaitAsync(delay, cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
         }
+    }
+
+    /// Writes a change in how delivery is going to delivery-history.json.
+    /// Never allowed to fail delivery: the history is for reading afterwards.
+    private void Record(bool started, string state, int? statusCode)
+    {
+        if (history is null) return;
+        try
+        {
+            if (started)
+            {
+                var queue = store.ReadDeliveryStatus();
+                history.Started(DateTimeOffset.UtcNow, queue.Pending, queue.LastAcknowledgedAt);
+            }
+            else history.Observe(DateTimeOffset.UtcNow, state, statusCode,
+                () => store.ReadDeliveryStatus() is var queue ? (queue.Pending, queue.LastAcknowledgedAt) : default,
+                WindowsNetwork.Read);
+        }
+        catch { }
     }
 
     /// How long to wait between the steps of a bisection.

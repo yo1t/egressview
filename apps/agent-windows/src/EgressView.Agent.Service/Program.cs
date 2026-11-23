@@ -303,7 +303,8 @@ internal sealed class AgentWindowsService : ServiceBase
         await using var monitoring = new MonitoringController(store, pipeline, Path.Combine(root, "monitoring.disabled"));
         monitoring.Start();
         var credentialStore = new WindowsCredentialStore();
-        using var deliveryController = new DeliveryController(store, credentialStore, inboundProbes: monitoring.InboundProbeOutbox);
+        using var deliveryController = new DeliveryController(store, credentialStore, inboundProbes: monitoring.InboundProbeOutbox,
+            dataDirectory: DataDirectory);
         using var enrichmentController = new EnrichmentController(store, credentialStore,
             Path.Combine(root, "public-threat-feeds.enabled"), new MaxMindCredentialStore(), new AbuseChKeyStore(),
             Path.Combine(root, "country", GeoLite2Updater.EditionId + ".mmdb"),

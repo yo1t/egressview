@@ -383,7 +383,9 @@ public partial class App : System.Windows.Application
                 data.GetProperty("state").GetString() ?? "idle",
                 data.GetProperty("pending").GetInt64(),
                 DateValue(data, "oldestPendingAt"),
-                DateValue(data, "lastAcknowledgedAt"));
+                DateValue(data, "lastAcknowledgedAt"),
+                data.TryGetProperty("lastStatusCode", out var code) && code.ValueKind == JsonValueKind.Number ? code.GetInt32() : null,
+                WindowsNetwork.Parse(data.TryGetProperty("network", out var network) && network.ValueKind == JsonValueKind.String ? network.GetString() : null));
             hubDeliveryHealthy = ThreatNotificationPlanner.HubDeliveryHealthy(sample);
             Notifications.ObserveHubDelivery(sample, ShowNotification);
         }

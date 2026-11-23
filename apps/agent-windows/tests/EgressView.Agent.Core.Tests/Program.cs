@@ -1052,6 +1052,65 @@ try
         "once the Hub has taken nothing for the grace, the same backlog is reported");
     Assert(new DeliveryNotificationTracker().Evaluate(drainingSample with { State = "contract-rejected" }) == DeliveryNotificationAction.Outage,
         "a refusal of the content is reported at once even while other batches were taken");
+
+    // Why delivery stopped, in the notice (2026-11-21: the PC had lost its
+    // network, and the notice could not say so).
+    Assert(WindowsNetwork.Classify(0) == PcNetwork.None && WindowsNetwork.Classify(0x1 | 0x2) == PcNetwork.None
+           && WindowsNetwork.Classify(0x20) == PcNetwork.LocalOnly && WindowsNetwork.Classify(0x100) == PcNetwork.LocalOnly
+           && WindowsNetwork.Classify(0x40) == PcNetwork.Internet && WindowsNetwork.Classify(0x200 | 0x400) == PcNetwork.Internet,
+        "Windows' connectivity flags read as none, local only, or internet");
+    Assert(WindowsNetwork.Parse(WindowsNetwork.Code(PcNetwork.LocalOnly)) == PcNetwork.LocalOnly && WindowsNetwork.Parse("other") == PcNetwork.Unknown,
+        "the network code survives the pipe, and anything else is unknown");
+    var noticeOffline = DeliveryOutageText.Body("retryable", null, PcNetwork.None, 6187, ja: true);
+    var noticeNoInternet = DeliveryOutageText.Body("retryable", null, PcNetwork.LocalOnly, 6187, ja: true);
+    var noticeSilent = DeliveryOutageText.Body("retryable", null, PcNetwork.Internet, 6187, ja: true);
+    var noticeErroring = DeliveryOutageText.Body("retryable", 503, PcNetwork.None, 6187, ja: true);
+    Assert(noticeOffline.Contains("ネットワークにつながっていません") && noticeNoInternet.Contains("インターネットにつながっていない")
+           && noticeSilent.Contains("Hubから応答がありません") && !noticeSilent.Contains("インターネット") && noticeOffline.Contains("6,187"),
+        "no answer is told apart by what Windows says about the network");
+    Assert(noticeErroring.Contains("HTTP 503") && !noticeErroring.Contains("ネットワーク"),
+        "a status code is the Hub answering, so the network is not mentioned");
+    Assert(DeliveryOutageText.Body("authorization-required", 401, PcNetwork.Internet, 1, ja: false).Contains("enrollment")
+           && DeliveryOutageText.Body("contract-rejected", 400, PcNetwork.Internet, 1, ja: false).Contains("HTTP 400")
+           && DeliveryOutageText.Body("rate-limited", 429, PcNetwork.Internet, 1, ja: false).Contains("limiting"),
+        "a refusal says which kind");
+    Assert(DeliveryOutageText.Body("unexpected", null, PcNetwork.Unknown, 6187, ja: true)
+               == "Hubへの送信が完了していません。未送信 6,187 件。Agentを開いて確認してください。"
+           && DeliveryOutageText.Body("unexpected", null, PcNetwork.Unknown, 6187, ja: false)
+               == "Delivery to the Hub is not completing. 6,187 observations are pending. Open the Agent for details.",
+        "without a reason, the notice says what it always said");
+
+    // The changes in delivery, kept beside the database.
+    var historyDirectory = Path.Combine(directory, "delivery-history");
+    var deliveryLog = new DeliveryHistory(historyDirectory);
+    var logAt = DateTimeOffset.UtcNow.AddHours(-1);
+    var queueReads = 0; var networkReads = 0;
+    (long, DateTimeOffset?) Queue() { queueReads++; return (42, logAt); }
+    PcNetwork Network() { networkReads++; return PcNetwork.LocalOnly; }
+    deliveryLog.Started(logAt, 40, logAt.AddMinutes(-3));
+    var written = new[]
+    {
+        deliveryLog.Observe(logAt.AddSeconds(1), "acknowledged", null, Queue, Network),
+        deliveryLog.Observe(logAt.AddSeconds(3), "up-to-date", null, Queue, Network),
+        deliveryLog.Observe(logAt.AddSeconds(5), "retryable", null, Queue, Network),
+        deliveryLog.Observe(logAt.AddSeconds(10), "retryable", null, Queue, Network),
+        deliveryLog.Observe(logAt.AddSeconds(20), "retryable", 503, Queue, Network),
+        deliveryLog.Observe(logAt.AddSeconds(30), "sending", null, Queue, Network),
+        deliveryLog.Observe(logAt.AddSeconds(40), "acknowledged", null, Queue, Network),
+    };
+    Assert(written.SequenceEqual([true, false, true, false, true, false, true]) && queueReads == 4 && networkReads == 2,
+        "only changes are written, and the queue and the network are read only for those");
+    var logged = DeliveryHistory.Read(historyDirectory);
+    Assert(logged.Count == 5 && logged[0].State == "start" && logged[2].Network == "local-only" && logged[2].LastAcknowledgedAt == logAt
+           && logged[3].StatusCode == 503 && logged[4].Network is null,
+        "each failure carries the last acknowledgement before it and what Windows said about the network");
+    Assert(!new DeliveryHistory(historyDirectory).Observe(logAt.AddMinutes(1), "up-to-date", null, Queue, Network),
+        "a restarted service continues from what is on disk");
+    var floodLog = new DeliveryHistory(Path.Combine(directory, "delivery-history-flood"));
+    for (var i = 0; i < 300; i++) floodLog.Observe(logAt.AddSeconds(i), i % 2 == 0 ? "retryable" : "acknowledged", null, Queue, Network);
+    Assert(DeliveryHistory.Read(Path.Combine(directory, "delivery-history-flood")).Count == DeliveryHistory.Kept,
+        "a flapping Hub cannot grow the file past its bound");
+
     var unnotified = new DeliveryNotificationTracker();
     var unnotifiedFailure = new DeliveryNotificationSample(notificationNow, true, "retryable", 1, notificationNow.AddMinutes(-6), deliveryAck);
     Assert(unnotified.Evaluate(unnotifiedFailure) == DeliveryNotificationAction.Outage, "a long outage is eligible for delivery");
