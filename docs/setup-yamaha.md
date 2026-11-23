@@ -277,6 +277,17 @@ If the connection succeeded but the traffic log is empty:
 - Check sessions on the router: `show nat descriptor address 100 detail`
 - Wait for the polling interval to elapse (default: 30 seconds)
 
+### IPv6 addresses missing from the device list
+
+The device list learns IPv6 addresses from two places: the router's neighbor cache (`show ipv6 neighbor cache`) and reports from Agents.
+
+- **PCs with an Agent:** the IPv6 addresses the Agent used for its traffic are shown, whatever the router's setup.
+- **Devices without an Agent:** an address is shown only when the router's neighbor cache has it. Otherwise the device's detail shows IPv6 as "Not known".
+- **IPv6 passthrough:** when the RTX passes IPv6 through instead of routing it, the router cannot tell EgressView the IPv6 addresses of devices on the LAN. On an RTX passing IPv6 through, every read of the neighbor cache returned 0 entries. In this setup, the IPv6 address of a device without an Agent cannot be known.
+- **Not yet checked:** whether the cache is really empty, or EgressView reads 0 entries because it only reads `LAN1` rows; and whether an RTX that routes IPv6 on the LAN can be read.
+
+Missing IPv6 addresses do not affect the IPv4 traffic records or the device list.
+
 ---
 
 ## Security notes

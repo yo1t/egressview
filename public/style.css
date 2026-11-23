@@ -1017,6 +1017,7 @@
   .dv-detail-small { font-size: 10px; }
   .dv-detail-ipv6 { font-family: monospace; font-size: 10px; }
   .dv-detail-ipv6-line { display: block; overflow-wrap: anywhere; }
+  .dv-detail-ipv6-hint { display: block; margin-top: 2px; font-size: 10px; color: var(--muted); overflow-wrap: anywhere; }
   .dv-detail-ipv6-scope { margin-left: 6px; font-family: system-ui, sans-serif; color: var(--muted); }
   .dv-detail-note-label { margin-top: 4px; margin-bottom: 2px; font-size: 11px; color: var(--muted); }
   .dv-investigate-result { margin-top: 4px; color: var(--muted); font-size: 10px; white-space: pre-wrap; }

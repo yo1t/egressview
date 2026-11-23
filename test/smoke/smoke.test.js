@@ -781,6 +781,50 @@ test('mobile viewer keeps navigation, logs, and device details inside the viewpo
   expect(fatalErrors(errors), `Mobile viewer errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
+for (const viewport of [{ width: 320, height: 640 }, { width: 375, height: 812 }, { width: 740, height: 360 }]) test(`device detail says why a device has no IPv6 address, inside ${viewport.width}x${viewport.height}`, async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await page.setViewportSize(viewport);
+  await page.route(/\/api\/devices\/merge-candidates\?/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ candidates: [] }),
+  }));
+  const now = Date.now();
+  await page.route(/\/api\/devices\?/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ devices: [
+      { deviceId: 8101, ip: '192.0.2.101', mac: 'aa:bb:cc:dd:01:01', vendor: 'Printer fixture',
+        sources: 'yamaha', status: 'active', firstSeen: now - 60_000, lastSeen: now },
+      { deviceId: 8102, ip: '192.0.2.102', mac: 'aa:bb:cc:dd:01:02',
+        agent: { hostName: 'ipv4-only-mac', manufacturer: 'Apple', model: 'Mac14,2' },
+        sources: 'yamaha', status: 'active', firstSeen: now - 60_000, lastSeen: now - 1000 },
+    ] }),
+  }));
+  await authPage(page);
+  const errors = collectErrors(page);
+
+  await page.click('#btn-devices');
+  const detail = page.locator('#dv-detail-panel');
+  // Without an Agent: not known, and why.
+  await page.locator('#devices-tbody tr[data-ip="192.0.2.101"]').click();
+  await expect(detail).toBeVisible();
+  await expect(detail.locator('.dv-detail-ipv6-line')).toHaveText(/分かりません|Not known/);
+  await expect(detail.locator('.dv-detail-ipv6-hint')).toContainText(/パススルー|passes IPv6 through/);
+  const box = await detail.boundingBox();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(await detail.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+  await page.click('#dv-detail-close');
+
+  // With an Agent that used no IPv6: none, not unknown.
+  await page.locator('#devices-tbody tr[data-ip="192.0.2.102"]').click();
+  await expect(detail).toContainText(/なし（このPCのAgent|None \(this PC's Agent/);
+  await expect(detail.locator('.dv-detail-ipv6-hint')).toHaveCount(0);
+  await page.click('#dv-detail-close');
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(fatalErrors(errors), `Device detail errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
 test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 

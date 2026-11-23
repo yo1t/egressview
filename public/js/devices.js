@@ -346,6 +346,20 @@ function openDvDetail(d) {
     });
     ipv6Row.appendChild(ipv6Values);
     detail.appendChild(ipv6Row);
+  } else if (d.agent) {
+    detail.appendChild(createDvDetailRow('IPv6', t('devices.ipv6.noneFromAgent'), 'dv-detail-small'));
+  } else {
+    // Without an Agent the only source is the router's neighbor cache, which
+    // stays empty when the router passes IPv6 through (P3-200).
+    const ipv6Row = document.createElement('div');
+    ipv6Row.className = 'dv-detail-row';
+    ipv6Row.appendChild(dvTextElement('span', 'IPv6', { className: 'dv-detail-label' }));
+    const ipv6Values = document.createElement('span');
+    ipv6Values.className = 'dv-detail-value';
+    ipv6Values.appendChild(dvTextElement('span', t('devices.ipv6.unknown'), { className: 'dv-detail-ipv6-line' }));
+    ipv6Values.appendChild(dvTextElement('span', t('devices.ipv6.unknownHint'), { className: 'dv-detail-ipv6-hint' }));
+    ipv6Row.appendChild(ipv6Values);
+    detail.appendChild(ipv6Row);
   }
   detail.appendChild(createDvDetailRow(t('devices.detail.sources'), sources || '—'));
   detail.appendChild(createDvDetailRow(t('devices.detail.firstSeen'), fmtTs(d.firstSeen)));
