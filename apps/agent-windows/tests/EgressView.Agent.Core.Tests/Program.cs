@@ -1600,7 +1600,7 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 34, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 35, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
@@ -2026,7 +2026,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 34, "v1 database migrates through v2-v34");
+        Assert(migrated.SchemaVersion == 35, "v1 database migrates through v2-v35");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -2078,7 +2078,7 @@ try
     Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v29.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 34, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 35, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -3716,7 +3716,7 @@ try
             var baselineDatabase = Path.Combine(directory, "baseline.db");
             using (var store = new ObservationStore(baselineDatabase))
             {
-                Assert(store.SchemaVersion == 34 && store.ReadOutboundBaselineSummary().HoursRecorded == 0,
+                Assert(store.SchemaVersion == 35 && store.ReadOutboundBaselineSummary().HoursRecorded == 0,
                     "a new database starts with an empty baseline");
                 var now = DateTimeOffset.UtcNow;
                 var start = Hour(now).AddHours(-5);
@@ -3806,7 +3806,7 @@ try
             Assert(PairDayBytes("two.example") == 2300, "the fixture holds the merged sum");
             using (var store = new ObservationStore(rebuildDatabase))
             {
-                Assert(store.SchemaVersion == 34, "the baseline moves to v33");
+                Assert(store.SchemaVersion == 35, "the baseline moves to v33");
                 var known = store.ReadOutboundBaselineSummary();
                 store.CaptureBaselineHours(rebuildNow, maxHours: 1000);
                 Assert(store.ReadOutboundBaselineSummary() is { } after && after.PairsKnown == known.PairsKnown
@@ -5296,7 +5296,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 34 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 35 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
