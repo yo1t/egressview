@@ -110,8 +110,8 @@
     "api:check-responses": "node scripts/check-response-contracts.js"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock": "^3.1169.0",
-    "@aws-sdk/client-bedrock-runtime": "^3.1169.0",
+    "@aws-sdk/client-bedrock": "^3.1175.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1175.0",
     "@modelcontextprotocol/node": "^2.1.2",
     "@modelcontextprotocol/server": "^2.0.0",
     "axios": "^1.21.1",
