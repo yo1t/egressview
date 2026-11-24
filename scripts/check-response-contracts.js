@@ -29,24 +29,33 @@ const { testFiles } = require('./capture-request-schemas');
 const ROOT = path.join(__dirname, '..');
 const MARKER = '__RESPONSE_CONTRACTS__';
 
+function decode(text) {
+  const encoded = text.match(/^b64:([A-Za-z0-9+/=]+)/);
+  return JSON.parse(encoded ? Buffer.from(encoded[1], 'base64').toString('utf8') : text);
+}
+
 function collect(output) {
   const violations = [];
   const verified = new Set();
   let unresolved = 0;
+  // A report that cannot be read is counted, not skipped. Skipping is how a
+  // test process's violations once vanished without a word (see the runner).
+  let unreadable = 0;
   for (const line of output.split('\n')) {
     const at = line.indexOf(MARKER);
     if (at === -1) continue;
     let payload;
     try {
-      payload = JSON.parse(line.slice(at + MARKER.length));
+      payload = decode(line.slice(at + MARKER.length).trim());
     } catch {
+      unreadable += 1;
       continue;
     }
     violations.push(...(payload.violations || []));
     for (const key of payload.verified || []) verified.add(key);
     unresolved += payload.unresolved || 0;
   }
-  return { violations, verified, unresolved };
+  return { violations, verified, unresolved, unreadable };
 }
 
 function declaredKeys() {
@@ -81,7 +90,7 @@ function main() {
     process.exit(error.status || 1);
   }
 
-  const { violations, verified, unresolved } = collect(output);
+  const { violations, verified, unresolved, unreadable } = collect(output);
   const declared = declaredKeys();
   const unverified = declared.filter((key) => !verified.has(key));
 
@@ -91,6 +100,7 @@ function main() {
   process.stdout.write(`  violations:                ${violations.length}\n`);
   // Ordinary: a rejection before any route matched has no `req.route` to name.
   process.stdout.write(`  responses with no resolvable route: ${unresolved}\n`);
+  process.stdout.write(`  test-process reports unreadable:   ${unreadable}\n`);
 
   for (const violation of violations) {
     process.stderr.write(
@@ -102,6 +112,13 @@ function main() {
     process.stderr.write(`\n${key} is declared but nothing exercised it.\n`);
   }
 
+  if (unreadable) {
+    process.stderr.write(
+      `\n${unreadable} test process report(s) could not be read. Their violations,\n`
+      + 'if any, are unknown, so the contracts are not known to hold.\n'
+    );
+    process.exit(1);
+  }
   if (violations.length || unverified.length) {
     process.stderr.write(
       '\nA contract that is never checked proves nothing, and one that is broken\n'

@@ -66,11 +66,11 @@ try {
 
 process.on('exit', () => {
   if (!violations.length && !verified.size && !unresolved) return;
-  process.stdout.write(
-    `__RESPONSE_CONTRACTS__${JSON.stringify({
-      violations,
-      verified: [...verified],
-      unresolved,
-    })}\n`
-  );
+  // Base64, so the line carries no quotes or backslashes. Node 22's test
+  // runner relays a child's stdout as a TAP comment and escapes it on the way
+  // (\" became \\"), and every issue zod writes about an enum quotes the
+  // allowed values. The JSON then no longer parsed and the gate dropped the
+  // line: 16 violations seen on Node 26 read as 0 on CI (2026-11-23).
+  const payload = JSON.stringify({ violations, verified: [...verified], unresolved });
+  process.stdout.write(`__RESPONSE_CONTRACTS__b64:${Buffer.from(payload).toString('base64')}\n`);
 });
