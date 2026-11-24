@@ -136,7 +136,12 @@ async function loadSlackSettings() {
 }
 
 document.querySelector('.settings-tab[data-tab="notifications"]')?.addEventListener('click', loadSlackSettings);
-loadSlackSettings();
+
+// Deliberately no load here. This runs while auth-socket.js is still being
+// evaluated (it imports settings.js, which imports this module), so apiFetch
+// threw "Cannot access 'adminToken' before initialization" into the Slack
+// status line. It would also send a protected request before login.
+// settings.js calls the returned loader when the settings dialog opens.
 
 return { loadSlackSettings };
 }

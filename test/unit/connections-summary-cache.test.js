@@ -44,6 +44,16 @@ function request(app, path) {
 
 // The cache lives at module scope, so each case picks a base far from the
 // others rather than sharing entries by accident.
+// The shape summarizeByTimeRange answers with, timeline fields included
+// (P3-155). Without them every response broke its declared contract, which
+// the response-contract check reported as 16 violations.
+function emptySummary() {
+  return {
+    byDst: [], byDevice: [], total: 0,
+    timelineBasis: 'observed', timelineBucketMs: null, timelineScopeFallback: false,
+  };
+}
+
 let baseOffset = 0;
 function freshBase() {
   baseOffset += 7 * 86_400_000;
@@ -56,7 +66,7 @@ describe('連続する要約要求がキャッシュを共有する（P3-67）',
     const app = mount({
       summarizeByTimeRange: () => {
         calls += 1;
-        return { byDst: [], byDevice: [], total: 0 };
+        return emptySummary();
       },
     });
     const now = freshBase();
@@ -74,7 +84,7 @@ describe('連続する要約要求がキャッシュを共有する（P3-67）',
     // The quantisation must not merge ranges a user actually chose apart.
     let calls = 0;
     const app = mount({
-      summarizeByTimeRange: () => { calls += 1; return { byDst: [], byDevice: [], total: 0 }; },
+      summarizeByTimeRange: () => { calls += 1; return emptySummary(); },
     });
     const now = freshBase();
     await request(app, `/api/connections/summary?from=${now}`);
@@ -85,7 +95,7 @@ describe('連続する要約要求がキャッシュを共有する（P3-67）',
   it('src が違えば共有しない', async () => {
     let calls = 0;
     const app = mount({
-      summarizeByTimeRange: () => { calls += 1; return { byDst: [], byDevice: [], total: 0 }; },
+      summarizeByTimeRange: () => { calls += 1; return emptySummary(); },
     });
     const now = freshBase();
     await request(app, `/api/connections/summary?from=${now}&src=192.0.2.10`);
@@ -97,7 +107,7 @@ describe('連続する要約要求がキャッシュを共有する（P3-67）',
     // The defect was invisible: the query was correct, the response was
     // correct, and only the cost was wrong. A hit rate is what that looks
     // like from outside.
-    const app = mount({ summarizeByTimeRange: () => ({ byDst: [], byDevice: [], total: 0 }) });
+    const app = mount({ summarizeByTimeRange: () => emptySummary() });
     const before = connectionsRoutes.summaryCacheSnapshot();
     const now = freshBase();
     await request(app, `/api/connections/summary?from=${now}`);
@@ -160,7 +170,7 @@ describe('高くついた答えほど長く使い回す（P3-139）', () => {
     const app = mount({
       summarizeByTimeRange: () => {
         calls += 1;
-        return { byDst: [], byDevice: [], total: 0 };
+        return emptySummary();
       },
     });
     assert.equal((await request(app, '/api/connections/summary')).body.cached, false);
@@ -175,7 +185,7 @@ describe('高くついた答えほど長く使い回す（P3-139）', () => {
 describe('外れた理由を、外れた数と一緒に記録する（P3-139）', () => {
   it('鍵が動いていれば、期限切れではなく「見たことのない鍵」と数える', async () => {
     connectionsRoutes._resetReadCacheForTest();
-    const app = mount({ summarizeByTimeRange: () => ({ byDst: [], byDevice: [], total: 0 }) });
+    const app = mount({ summarizeByTimeRange: () => emptySummary() });
 
     // Two rolling requests far enough apart to land in different cells of the
     // grid this span uses -- five minutes, for a window this wide.
@@ -191,7 +201,7 @@ describe('外れた理由を、外れた数と一緒に記録する（P3-139）'
 
   it('同じ鍵が戻ってきて外れたなら、期限切れと数える', async () => {
     connectionsRoutes._resetReadCacheForTest();
-    const app = mount({ summarizeByTimeRange: () => ({ byDst: [], byDevice: [], total: 0 }) });
+    const app = mount({ summarizeByTimeRange: () => emptySummary() });
 
     await request(app, '/api/connections/summary');
     // Drop the entry but keep the memory of the key, the way an expiry does.
@@ -257,7 +267,7 @@ describe('鍵が繰り返すだけの粗さを持たせる（P3-139）', () => {
     const app = mount({
       summarizeByTimeRange: () => {
         calls += 1;
-        return { byDst: [], byDevice: [], total: 0 };
+        return emptySummary();
       },
     });
     // Both land in the same one-minute cell, as two polls seconds apart do.
