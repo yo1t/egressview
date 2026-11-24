@@ -29,7 +29,17 @@ let statsSummaryGeneration = 0;
 let statsSummaryCache = { key: null, at: 0, data: null };
 let statsSummaryInflight = { key: null, promise: null };
 let statsMapSummaryKey = null;
-let statsRenderedSummary = { key: null, data: null, mode: null };
+let statsRenderedSummary = { key: null, data: null, mode: null, layout: null };
+
+// The charts are drawn at the width they had when drawn (their viewBox), and
+// a phone width shows fewer bars. Turning a phone kept the old drawing,
+// stretched or squeezed, because the same summary within the cache's minute
+// counted as nothing to draw again. The layout is part of what was drawn.
+function statsChartLayout() {
+  const width = document.getElementById('stats-charts')?.clientWidth || 0;
+  const isMobile = window.matchMedia('(max-width: 768px)').matches;
+  return `${width}:${isMobile ? 'mobile' : 'wide'}`;
+}
 const STATS_SUMMARY_CACHE_MS = 60_000;
 let statsSummaryRequestWindow = { key: null, from: null, to: null, at: 0 };
 
@@ -325,7 +335,8 @@ async function updateStats() {
     if (
       statsRenderedSummary.key === summaryKey &&
       statsRenderedSummary.data === summary &&
-      statsRenderedSummary.mode === getChartMode()
+      statsRenderedSummary.mode === getChartMode() &&
+      statsRenderedSummary.layout === statsChartLayout()
     ) {
       // Nothing to draw again, but something may still have to be put back.
       // Leaving this tab stops the globe and empties the flat map's particles,
@@ -338,7 +349,7 @@ async function updateStats() {
     }
     renderStatsSummary(summary, selIp);
     statsMapSummaryKey = summaryKey;
-    statsRenderedSummary = { key: summaryKey, data: summary, mode: getChartMode() };
+    statsRenderedSummary = { key: summaryKey, data: summary, mode: getChartMode(), layout: statsChartLayout() };
   } catch (e) {
     console.error('[stats] summary fetch failed:', e);
     if (generation !== statsSummaryGeneration || !statsMode) return;

@@ -37,10 +37,42 @@ describe('レスポンス契約のgate（P2-95 step 3）', () => {
     assert.equal(result.unresolved, 3);
   });
 
-  it('壊れた出力で落ちない', () => {
+  it('壊れた出力で落ちない。読めなかった報告は数える', () => {
     // The marker travels through test output, which carries anything a test
-    // chose to print.
+    // chose to print. Skipping an unreadable report silently is how 16
+    // violations read as 0 on CI, so it is counted and the gate fails on it.
     assert.doesNotThrow(() => collect('__RESPONSE_CONTRACTS__{not json'));
+    assert.equal(collect('__RESPONSE_CONTRACTS__{not json').unreadable, 1);
+  });
+
+  it('Node 22がTAPのコメントとして中継した行でも、引用符を含む違反を読める', () => {
+    // Node 22's test runner relays a child's stdout as "# ..." and escapes
+    // backslashes, so a JSON marker whose issue quotes an enum value no longer
+    // parsed. The runner now writes base64; this is the line it produces,
+    // relayed the way Node 22 relays it.
+    const payload = {
+      violations: [{
+        route: 'GET /api/connections/summary',
+        status: 200,
+        issues: ['timelineBasis: Invalid option: expected one of "observed"|"lastSeen"'],
+      }],
+      verified: [],
+      unresolved: 0,
+    };
+    const relayed = `# __RESPONSE_CONTRACTS__b64:${Buffer.from(JSON.stringify(payload)).toString('base64')}`;
+    const result = collect(relayed);
+    assert.equal(result.unreadable, 0);
+    assert.equal(result.violations.length, 1);
+    assert.match(result.violations[0].issues[0], /"observed"/);
+
+    // The old JSON line, escaped the same way, is what used to vanish.
+    const escaped = `# __RESPONSE_CONTRACTS__${JSON.stringify(payload).replace(/\\/g, '\\\\')}`;
+    assert.equal(collect(escaped).violations.length, 0);
+    assert.equal(collect(escaped).unreadable, 1);
+  });
+
+  it('テストの子プロセスはbase64で報告する', () => {
+    assert.match(read('scripts/check-response-contracts-runner.js'), /__RESPONSE_CONTRACTS__b64:/);
   });
 });
 
@@ -53,6 +85,7 @@ describe('gateが止めるべきときに止まる', () => {
     // has tested.
     const script = read('scripts/check-response-contracts.js');
     assert.match(script, /if \(violations\.length \|\| unverified\.length\) \{/);
+    assert.match(script, /if \(unreadable\) \{/);
     assert.match(script, /process\.exit\(1\)/);
   });
 

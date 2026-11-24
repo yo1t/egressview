@@ -712,6 +712,40 @@ test('mobile keeps the connected device panel populated across every tab', async
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+// Turning a phone used to keep the charts drawn for the old width: the same
+// summary within the cache's minute counted as nothing to draw again, so the
+// pie was squeezed into a third of its width and the bars stretched. A fixed
+// period ("yesterday") keeps the summary cached across the turn, which is the
+// case that failed.
+for (const [portrait, landscape] of [
+  [{ width: 375, height: 812 }, { width: 812, height: 375 }],
+  [{ width: 320, height: 640 }, { width: 740, height: 360 }],
+]) {
+  test(`stats charts are redrawn at the new width when a ${portrait.width}px phone turns`, async ({ page }) => {
+    if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+    const chartWidths = () => page.evaluate(() => [
+      ...document.querySelectorAll('#stats-container svg[viewBox]'),
+    ].filter(svg => svg.clientWidth > 0).map(svg => ({
+      id: svg.id || svg.parentElement.id,
+      drawn: Number(svg.getAttribute('viewBox').split(' ')[2]),
+      shown: svg.clientWidth,
+    })));
+
+    await page.setViewportSize(portrait);
+    await authPage(page);
+    await page.click('#btn-stats');
+    await page.selectOption('#time-filter-select', 'yesterday');
+    await expect.poll(async () => (await chartWidths()).length).toBeGreaterThanOrEqual(3);
+
+    await page.setViewportSize(landscape);
+    await expect.poll(async () => (await chartWidths())
+      .filter(chart => chart.drawn !== chart.shown)
+      .map(chart => `${chart.id}: drawn ${chart.drawn}, shown ${chart.shown}`)).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  });
+}
+
 test('mobile viewer keeps navigation, logs, and device details inside the viewport', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 

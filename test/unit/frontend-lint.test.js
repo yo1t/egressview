@@ -1092,20 +1092,20 @@ describe('Server runtime invariants', () => {
       'loading decrement should match the conditional increment');
   });
 
-  it('stats view skips redraw only when both cached summary and chart mode are unchanged', () => {
+  it('stats view skips redraw only when the cached summary, chart mode and chart layout are unchanged', () => {
     const script = getScriptContent();
     const start = script.indexOf('async function updateStats()');
     assert.notEqual(start, -1, 'updateStats should exist');
     const end = script.indexOf('\n// === ', start);  // next concatenated file
     assert.notEqual(end, -1, 'updateStats section end marker should exist');
     const updateStatsFn = script.slice(start, end);
-    assert.match(script, /let\s+statsRenderedSummary\s*=\s*\{\s*key:\s*null,\s*data:\s*null,\s*mode:\s*null\s*\}/,
-      'stats should remember the last rendered summary object and the last chart mode');
+    assert.match(script, /let\s+statsRenderedSummary\s*=\s*\{\s*key:\s*null,\s*data:\s*null,\s*mode:\s*null,\s*layout:\s*null\s*\}/,
+      'stats should remember the last rendered summary object, chart mode and chart layout');
     assert.match(updateStatsFn, /!\(\s*statsSummaryCache\.key\s*===\s*summaryKey\s*&&\s*statsSummaryCache\.data\s*\)[\s\S]*?renderStatsPiePreview\(selIp\)/,
       'same-period socket refreshes should not clear/redraw the pie preview while cached summary exists');
-    assert.match(updateStatsFn, /statsRenderedSummary\.key\s*===\s*summaryKey[\s\S]*?statsRenderedSummary\.data\s*===\s*summary[\s\S]*?statsRenderedSummary\.mode\s*===\s*getChartMode\(\)[\s\S]*?return/,
-      'cached summary objects should only skip redraw when the chart mode is also unchanged');
-    assert.match(updateStatsFn, /statsRenderedSummary\s*=\s*\{\s*key:\s*summaryKey,\s*data:\s*summary,\s*mode:\s*getChartMode\(\)\s*\}/,
+    assert.match(updateStatsFn, /statsRenderedSummary\.key\s*===\s*summaryKey[\s\S]*?statsRenderedSummary\.data\s*===\s*summary[\s\S]*?statsRenderedSummary\.mode\s*===\s*getChartMode\(\)[\s\S]*?statsRenderedSummary\.layout\s*===\s*statsChartLayout\(\)[\s\S]*?return/,
+      'cached summary objects should only skip redraw when the chart mode and layout (a turned phone) are also unchanged');
+    assert.match(updateStatsFn, /statsRenderedSummary\s*=\s*\{\s*key:\s*summaryKey,\s*data:\s*summary,\s*mode:\s*getChartMode\(\),\s*layout:\s*statsChartLayout\(\)\s*\}/,
       'successful summary rendering should update the rendered-summary guard with the chart mode');
   });
 
