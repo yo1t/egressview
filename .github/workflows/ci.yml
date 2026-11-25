@@ -538,6 +538,15 @@ jobs:
           exit 1
 
       - name: Start EgressView (demo mode)
+        # The whole suite comes from one address and sends more than the
+        # production budget of 600 reads a minute in its first minute. Past it
+        # the server answers 429, /api/auth/status included, the page shows its
+        # login screen, and whichever test is running then times out. The
+        # budget is sized for one person's browser, not for 80 tests in a row,
+        # so only this test server gets a larger one.
+        env:
+          EGRESSVIEW_RATE_LIMIT_READS: '6000'
+          EGRESSVIEW_RATE_LIMIT_WRITES: '1200'
         run: |
           DEMO_MODE=true DEMO_ADMIN_TOKEN=demo-token-ci PORT=3002 npm start > server.log 2>&1 &
           for i in {1..30}; do
