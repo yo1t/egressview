@@ -88,6 +88,29 @@ function alertFromLogRow(r) {
   };
 }
 
+// P3-199. The device list in the browser names a computer by what its Agent
+// reports, because the router often knows only a generic "Mac" and a random
+// Wi-Fi address has no vendor. This tool dropped those fields, so an assistant
+// reading the list still saw an unnamed row with no vendor.
+function deviceFromRow(d) {
+  const agent = d.agent || null;
+  return {
+    deviceId:  d.deviceId,
+    ip:        d.ip,
+    mac:       d.mac      || null,
+    vendor:    d.vendor   || null,
+    dnsName:   d.dnsName  || null,
+    mdnsName:  d.mdnsName || null,
+    agentHostName:     agent?.hostName     || null,
+    agentPlatform:     agent?.platform     || null,
+    agentManufacturer: agent?.manufacturer || null,
+    agentModel:        agent?.model        || null,
+    status:    d.status,
+    firstSeen: tsToIso(d.firstSeen),
+    lastSeen:  tsToIso(d.lastSeen),
+  };
+}
+
 function registerTool(server, name, description, inputShape, handler) {
   if (!permissionForMcpTool(name)) {
     throw new Error(`MCP tool is missing a permission classification: ${name}`);
@@ -263,23 +286,13 @@ function buildMcpServer({
   // ⑧ Devices
   registerTool(server,
     'get_devices',
-    'Lists all known devices with MAC address, vendor, names, status, and last-seen time.',
+    'Lists all known devices with MAC address, vendor, names, status, and last-seen time. Where an EgressView Agent runs on the device, also its computer name, OS, manufacturer and model.',
     {
       include_archived: z.boolean().default(false).describe('Include archived/merged devices'),
     },
     async ({ include_archived }) => {
       const data = await apiClient.get('/devices', { includeArchived: include_archived ? '1' : undefined });
-      const devs = (data.devices ?? data ?? []).map(d => ({
-        deviceId:  d.deviceId,
-        ip:        d.ip,
-        mac:       d.mac      || null,
-        vendor:    d.vendor   || null,
-        dnsName:   d.dnsName  || null,
-        mdnsName:  d.mdnsName || null,
-        status:    d.status,
-        firstSeen: tsToIso(d.firstSeen),
-        lastSeen:  tsToIso(d.lastSeen),
-      }));
+      const devs = (data.devices ?? data ?? []).map(deviceFromRow);
       return ok({ count: devs.length, devices: devs });
     }
   );
@@ -375,6 +388,7 @@ function buildMcpServer({
 }
 
 module.exports = {
+  deviceFromRow,
   PERIOD_MS,
   PERIOD_ENUM,
   TOOL_AUDIT_CALLBACK,
