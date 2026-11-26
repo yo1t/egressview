@@ -58,7 +58,7 @@ The agent selects the appropriate tool automatically and combines multiple tool 
 | `get_new_nodes` | devices and destinations first seen during the period |
 | `get_threat_connections` | destinations flagged as threats (low/high confidence) |
 | `get_alerts` | detection log entries (threats, new devices, beacons) |
-| `get_devices` | all known LAN devices with MAC, vendor, status, last-seen |
+| `get_devices` | all known LAN devices with MAC, vendor, status, last-seen. For a computer running an Agent, also its computer name, OS, manufacturer and model, so a PC the router knows only as "Mac" can still be told apart |
 | `query_connections` | connection log search with src/dst filters |
 | `get_device_notes` | device memo notes; omit src for all devices with notes, pass src IP for one device |
 | `set_device_note` | set or update a device memo by src IP; pass empty string to delete |

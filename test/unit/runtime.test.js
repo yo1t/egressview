@@ -525,3 +525,14 @@ describe('scheduleInspectEmit: delta push', () => {
     assert.equal(emits[0][1].connections.length, 2);
   });
 });
+
+describe('端末の観測に通信の相手を付ける', () => {
+  it('devicesが逆向きのAgentの通信を見分けられるよう、宛先をpeerとして渡す', () => {
+    const { devices } = initRuntime();
+    runtime.recordConnection({ ...SESSION, src: '203.0.113.203', dst: '10.0.0.129', dport: 50123, agentHost: 'pc' }, Date.now(), 'agent');
+    const observed = devices._upserted.at(-1);
+    assert.equal(observed.ip, '203.0.113.203');
+    assert.equal(observed.peer, '10.0.0.129');
+    assert.equal(observed.source, 'agent');
+  });
+});
