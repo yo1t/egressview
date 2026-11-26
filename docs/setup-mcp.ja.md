@@ -57,7 +57,7 @@ AIエージェントが適切なツールを自動で選択し、必要であれ
 | `get_new_nodes` | 指定期間に初出現した端末・宛先 |
 | `get_threat_connections` | 脅威判定された通信先（信頼度 low/high 絞り込み可） |
 | `get_alerts` | 検出ログ（脅威・新規端末・ビーコン） |
-| `get_devices` | LAN 内の全端末（MAC・ベンダー・状態・最終通信） |
+| `get_devices` | LAN 内の全端末（MAC・ベンダー・状態・最終通信）。Agent が入っている PC は、PC の名前・OS・メーカー・機種も返すので、ルーターに汎用的な名前しか無い PC も見分けられる |
 | `query_connections` | 送信元/宛先フィルター付きの通信ログ検索 |
 | `get_device_notes` | 端末のメモ一覧（src 省略で全端末、src IP 指定で1端末のメモ） |
 | `set_device_note` | src IP で端末を指定してメモを追加・更新（空文字で削除） |
