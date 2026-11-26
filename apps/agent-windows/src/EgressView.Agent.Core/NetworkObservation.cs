@@ -259,6 +259,9 @@ public sealed record CollectorSnapshot(
     long EtwEventsSeen = 0,
     long EtwEventsIgnored = 0,
     long InterfaceUnresolved = 0,
+    // How often neither end of an event was on a known interface and the
+    // list was read again for it.
+    long InterfaceRefreshesAfterMiss = 0,
     // Inbound group datagrams left out on purpose. Not a collection gap.
     long InboundMulticastIgnored = 0,
     int EtwEventsLost = 0,
