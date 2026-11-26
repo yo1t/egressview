@@ -4846,6 +4846,31 @@ try
                 false, true, false, false, true);
             Assert(inbound is { LocalAddress: local, RemoteAddress: "8.8.8.8", LocalIsSource: false },
                 "and an ordinary inbound flow names it the same way round");
+
+            // Neither end on a known interface, as when this machine's
+            // address has just changed. A TCP event names this machine's end
+            // saddr in both directions, so a TCP receive keeps the server as
+            // the remote; taking the destination put the server on this
+            // machine's side and made it a device in the Hub's list.
+            const string server = "203.0.113.203";
+            var tcpReceived = EtwNetworkCollector.SortEndpoints(local, 50123, server, 443,
+                false, false, false, false, received: true, tcp: true);
+            Assert(tcpReceived is { LocalAddress: local, LocalPort: 50123, RemoteAddress: server, RemotePort: 443, LocalIsSource: true },
+                "a TCP receive with neither end known keeps the server as the remote");
+            var tcpSent = EtwNetworkCollector.SortEndpoints(local, 50123, server, 443,
+                false, false, false, false, received: false, tcp: true);
+            Assert(tcpSent is { LocalAddress: local, RemoteAddress: server, RemotePort: 443 },
+                "and so does a TCP send");
+            // A UDP event names the sender saddr: received, the destination
+            // is this machine.
+            var udpReceived = EtwNetworkCollector.SortEndpoints(server, 53, local, 50124,
+                false, false, false, false, received: true, tcp: false);
+            Assert(udpReceived is { LocalAddress: local, LocalPort: 50124, RemoteAddress: server, RemotePort: 53, LocalIsSource: false },
+                "a UDP receive with neither end known still takes the destination as this machine");
+            var udpSent = EtwNetworkCollector.SortEndpoints(local, 50124, server, 53,
+                false, false, false, false, received: false, tcp: false);
+            Assert(udpSent is { LocalAddress: local, RemoteAddress: server, LocalIsSource: true },
+                "and a UDP send the source");
         }
 
         // A row per packet, which the store could not absorb.

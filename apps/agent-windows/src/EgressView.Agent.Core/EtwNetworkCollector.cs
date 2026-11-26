@@ -330,6 +330,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         CoalescerOverflows = coalescer.Overflows,
         CoalescerOpenFlows = coalescer.OpenFlows,
         InterfaceUnresolved = InterfaceUnresolved,
+        InterfaceRefreshesAfterMiss = InterfaceRefreshesAfterMiss,
         InboundMulticastIgnored = InboundMulticastIgnored,
         EtwEventsLost = EventsLost,
         EtwEventsLostAtStart = EventsLostAtStart,
@@ -487,10 +488,19 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         var destinationMulticast = IsMulticast(destinationAddress);
         var sourceInterface = FindInterface(sourceAddress);
         var destinationInterface = FindInterface(destinationAddress);
+        // Neither end on a known interface usually means this machine's
+        // address changed and the list has not caught up yet, so the list is
+        // read again, at most every few seconds, before the ends are sorted.
+        if (sourceInterface is null && destinationInterface is null && !sourceMulticast && !destinationMulticast && RefreshInterfacesAfterMiss())
+        {
+            sourceInterface = FindInterface(sourceAddress);
+            destinationInterface = FindInterface(destinationAddress);
+        }
+        var tcp = !e.EventName.Contains("UDP", StringComparison.OrdinalIgnoreCase);
 
         var sorted = SortEndpoints(sourceAddress, sourcePort, destinationAddress, destinationPort,
             sourceInterface is not null, destinationInterface is not null,
-            sourceMulticast, destinationMulticast, direction == Direction.Receive);
+            sourceMulticast, destinationMulticast, direction == Direction.Receive, tcp);
         if (sorted is null)
         {
             Interlocked.Increment(ref inboundMulticastIgnored);
@@ -610,6 +620,25 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     }
 
     private void OnNetworkChanged(object? sender, EventArgs e) => RefreshInterfaces();
+
+    /// How often an event with neither end on a known interface may make the
+    /// list be read again. Inbound broadcasts from other devices look the
+    /// same and keep coming, so the read is rationed rather than repeated.
+    private static readonly TimeSpan MissRefreshInterval = TimeSpan.FromSeconds(5);
+    private long lastMissRefresh = long.MinValue;
+    private long interfaceRefreshesAfterMiss;
+    public long InterfaceRefreshesAfterMiss => Interlocked.Read(ref interfaceRefreshesAfterMiss);
+
+    private bool RefreshInterfacesAfterMiss()
+    {
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref lastMissRefresh);
+        if (last != long.MinValue && now - last < (long)MissRefreshInterval.TotalMilliseconds) return false;
+        if (Interlocked.CompareExchange(ref lastMissRefresh, now, last) != last) return false;
+        RefreshInterfaces();
+        Interlocked.Increment(ref interfaceRefreshesAfterMiss);
+        return true;
+    }
     private void RefreshInterfaces()
     {
         var updated = new Dictionary<string, InterfaceInfo>(StringComparer.OrdinalIgnoreCase);
@@ -688,7 +717,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     internal static (string LocalAddress, int LocalPort, string RemoteAddress, int RemotePort, bool LocalIsSource)?
         SortEndpoints(string sourceAddress, int sourcePort, string destinationAddress, int destinationPort,
             bool sourceHasInterface, bool destinationHasInterface,
-            bool sourceMulticast, bool destinationMulticast, bool received)
+            bool sourceMulticast, bool destinationMulticast, bool received, bool tcp = false)
     {
         // Asked before the sorting, so the answer cannot depend on which side
         // the group address landed on.
@@ -702,7 +731,15 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         // traffic it sent.
         if (sourceMulticast || destinationMulticast)
             return (sourceAddress, sourcePort, destinationAddress, destinationPort, true);
-        return received
+        // Neither end is on an interface we know of. Kernel-Network's TCP
+        // events name this machine's end saddr whichever way the data went;
+        // its UDP events name the sender saddr. Measured on 2026-11-27 over
+        // 20 seconds: every TCP receive (180) and send (326) had this
+        // machine's address in saddr, while 2,021 UDP receives had it in
+        // daddr. Taking the destination for a TCP receive here put the server
+        // on this machine's side: seven servers showed up in the Hub's device
+        // list, from Windows PCs whose LAN address had changed several times.
+        return received && !tcp
             ? (destinationAddress, destinationPort, sourceAddress, sourcePort, false)
             : (sourceAddress, sourcePort, destinationAddress, destinationPort, true);
     }
