@@ -37,6 +37,7 @@ let observeManyTxn        = null;
 // Moved to src/mac.js: what a MAC can tell you is a property of the address,
 // not of this store, and the OUI lookup needs the same answer.
 const { isStableMac } = require('./mac');
+const { isPrivateIpLiteral } = require('./offline-mode');
 
 // ─── Choosing between candidates that claim the same IP ───────────────────────
 
@@ -509,6 +510,20 @@ function isAgentSideAddress(ip) {
   return /\.(1|255)$/.test(String(ip || ''));
 }
 
+/**
+ * A flow an Agent reported the wrong way round: it names a public address as
+ * the computer's own and a LAN address as the far end. On the production Hub
+ * 2026-11-26 seven device rows were Microsoft and Cloudflare servers, each made
+ * from one or two Windows flows whose destination was the PC's LAN address
+ * and its ephemeral port (P3-199). A computer that really is on a public
+ * address -- carried off the LAN -- reaches public servers, so its rows are
+ * not this shape and are kept.
+ */
+function isReversedAgentFlow(src, dst) {
+  if (!isDeviceAddress(src) || isPrivateIpLiteral(src)) return false;
+  return typeof dst === 'string' && !dst.includes(':') && isPrivateIpLiteral(dst);
+}
+
 // Sources that say only an Agent saw the address. 'nat' is not a router: it
 // is the tag the start-up seeding used to put on every row, Agent-only flows
 // included, so on the production Hub 2026-11-23 eleven virtual-adapter and
@@ -534,15 +549,37 @@ function archiveNonDevices(now = Date.now()) {
     'SELECT deviceId, ip, mac, sources FROM devices WHERE archivedAt IS NULL'
   ).all();
   const archive = db.prepare('UPDATE devices SET archivedAt = ? WHERE deviceId = ? AND archivedAt IS NULL');
+  const flowsFrom = connectionsBySource();
   let archived = 0;
   db.transaction(() => {
     for (const row of rows) {
-      const agentOnly = !row.mac && isAgentOnlySources(row.sources) && isAgentSideAddress(row.ip);
+      const agentRow = !row.mac && isAgentOnlySources(row.sources);
+      const agentOnly = agentRow && (isAgentSideAddress(row.ip) || madeOnlyFromReversedFlows(row.ip, flowsFrom));
       if (isDeviceAddress(row.ip) && !agentOnly) continue;
       archived += archive.run(now, row.deviceId).changes;
     }
   })();
   return archived;
+}
+
+// The flows recorded from an address, when this database holds the
+// connections table too (the Hub's does; some tests open devices alone).
+function connectionsBySource() {
+  try {
+    const stmt = db.prepare('SELECT dst, agentHost FROM connections WHERE src = ? LIMIT 1000');
+    return ip => stmt.all(ip);
+  } catch {
+    return null;
+  }
+}
+
+// A public row an Agent alone made, whose every recorded flow is one an Agent
+// reported the wrong way round. With no flows left there is nothing to judge
+// by, and the row is kept.
+function madeOnlyFromReversedFlows(ip, flowsFrom) {
+  if (!flowsFrom || isPrivateIpLiteral(ip)) return false;
+  const flows = flowsFrom(ip);
+  return flows.length > 0 && flows.every(flow => flow.agentHost && isReversedAgentFlow(ip, flow.dst));
 }
 
 // How long after an Agent last used an address its row may still have been
@@ -675,6 +712,8 @@ function observeDevice(d) {
   // alone does not start a row for them (P3-199). An existing row is still
   // kept current.
   if (!existingDevice && d.source === 'agent' && isAgentSideAddress(d.ip)) return null;
+  // Nor a row for a server named as the computer by a reversed flow.
+  if (!existingDevice && d.source === 'agent' && isReversedAgentFlow(d.ip, d.peer)) return null;
 
   // ── 2. Stable-MAC auto-link ───────────────────────────────────────────────
   if (!existingDevice && d.mac && isStableMac(d.mac)) {
@@ -1096,6 +1135,8 @@ function seedFromConnectionHistory(connectionHistory) {
       // about 3,950 of 4,100 visible rows were IPv6 addresses (P3-200).
       if (!isDeviceAddress(entry.src)) continue;
       if (entry.agentHost && isAgentSideAddress(entry.src)) continue;
+      const agentOnly = entry.agentHost && !(entry.observedBy || []).length;
+      if (agentOnly && isReversedAgentFlow(entry.src, entry.dst)) continue;
       upsert({
         ip:        entry.src,
         mac:       entry.srcMac      || null,
@@ -1106,7 +1147,7 @@ function seedFromConnectionHistory(connectionHistory) {
         lastSeen:  entry.lastSeen,
         // A flow no router observed came from an Agent; calling it 'nat'
         // made the row look as if a router had seen it.
-        source:    entry.agentHost && !(entry.observedBy || []).length ? 'agent' : 'nat',
+        source:    agentOnly ? 'agent' : 'nat',
       });
     }
   });
@@ -1176,6 +1217,7 @@ module.exports = {
   getDiscardedRedirects,
   chooseForIp,
   isDeviceAddress,
+  isReversedAgentFlow,
   isAgentSideAddress,
   archiveNonDevices,
   noteAgentAddress,

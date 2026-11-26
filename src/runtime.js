@@ -210,6 +210,9 @@ function _deviceObservation(entry, source) {
     mdnsName:  entry.srcMdnsName || null,
     firstSeen: entry.firstSeen,
     lastSeen:  entry.lastSeen,
+    // The far end, so an Agent flow reported the wrong way round does not
+    // make a device row for a server (devices.isReversedAgentFlow).
+    peer:      entry.dst || null,
     source,
   };
 }
