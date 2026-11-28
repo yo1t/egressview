@@ -629,7 +629,7 @@ public partial class MainWindow : Window
         {
             showCheckedCandidates = true;
             ShowOutboundCandidates(report);
-        }, () => _ = ForgetOutboundAnswersAsync());
+        }, () => _ = ForgetOutboundAnswersAsync(), LoadOutboundEvidenceAsync);
         OutboundCandidatesCard.Visibility = Visibility.Visible;
     }
 
@@ -665,6 +665,14 @@ public partial class MainWindow : Window
             System.Windows.MessageBox.Show(this, $"{LocalizationManager.Text("WorthALookAnswerFailed")}: {exception.Message}",
                 LocalizationManager.Text("WorthALook"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    /// The connections behind one candidate, read when its row asks.
+    private async Task<OutboundCandidateEvidence?> LoadOutboundEvidenceAsync(OutboundCandidate candidate)
+    {
+        var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "outbound-candidate-evidence", id = candidate.Id }), lifetime.Token);
+        using var document = JsonDocument.Parse(response);
+        return document.RootElement.TryGetProperty("data", out var data) ? data.Deserialize<OutboundCandidateEvidence>() : null;
     }
 
     private async Task ForgetOutboundAnswersAsync()

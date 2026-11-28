@@ -107,6 +107,105 @@ public sealed partial class ObservationStore
         }
     }
 
+    /// The connections behind a listed candidate, or null when no candidate
+    /// listed now has the id.
+    public OutboundCandidateEvidence? ReadOutboundCandidateEvidence(string candidateId, DateTimeOffset now)
+    {
+        OutboundCandidate? candidate;
+        lock (gate) candidate = ReadOutboundCandidatesLocked(now).Candidates.FirstOrDefault(item => item.Id == candidateId);
+        return candidate is null ? null : ReadOutboundCandidateEvidence(candidate);
+    }
+
+    /// The connections behind a candidate, from the raw history.
+    ///
+    /// Read an hour at a time, as the baseline is written, so a week of a
+    /// busy PC does not hold the lock against the collector for long. Keyed
+    /// exactly as <see cref="CaptureBaselineHourLocked"/> keys them, a nameless
+    /// row taking the one domain its application reached at that address in
+    /// the hour, so what is shown adds up to what was judged as far as the raw
+    /// history still reaches.
+    public OutboundCandidateEvidence ReadOutboundCandidateEvidence(OutboundCandidate candidate, int limit = OutboundCandidateEvidence.FlowLimit)
+    {
+        var (start, end) = OutboundCandidateEvidence.Window(candidate);
+        var flows = new Dictionary<(string Application, string? Hostname, string Address), OutboundEvidenceFlow>();
+        for (var hour = start; hour < end; hour = hour.AddHours(1))
+        {
+            var next = hour.AddHours(1) < end ? hour.AddHours(1) : end;
+            var rows = new List<(string Address, string? Hostname, string Application, ulong Sent, long Connections, long First, long Last)>();
+            lock (gate)
+            {
+                ThrowIfDisposed();
+                CheckOperation(WinSqlite.Prepare(db, "SELECT o.remote_address,COALESCE(o.remote_hostname,f.remote_hostname),COALESCE(o.process_name,''),COUNT(*)," +
+                    "COALESCE(SUM(o.bytes_sent),0),MIN(o.observed_at),MAX(o.observed_at) FROM observations o LEFT JOIN flows f ON f.rowid=o.flow_id " +
+                    $"WHERE o.observed_at >= {hour.UtcTicks} AND o.observed_at < {next.UtcTicks} GROUP BY 1,2,3", -1, out var statement, 0));
+                try
+                {
+                    while (WinSqlite.Step(statement) == WinSqlite.Row)
+                    {
+                        var address = Text(statement, 0);
+                        if (PrivateAddress.StaysOnNetwork(address)) continue;
+                        rows.Add((address, NullableTextValue(statement, 1), OutboundBaselineKeys.Application(Text(statement, 2)),
+                            (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 4)), WinSqlite.ColumnInt64(statement, 3),
+                            WinSqlite.ColumnInt64(statement, 5), WinSqlite.ColumnInt64(statement, 6)));
+                    }
+                }
+                finally { WinSqlite.Finalize(statement); }
+            }
+            // The same rule as OutboundBaselineKeys.Pairs.
+            var domains = new Dictionary<(string Address, string Application), string?>();
+            foreach (var row in rows)
+            {
+                if (string.IsNullOrWhiteSpace(row.Hostname)) continue;
+                var domain = OutboundBaselineKeys.Destination(row.Hostname, row.Address);
+                var key = (row.Address, row.Application);
+                domains[key] = !domains.TryGetValue(key, out var held) || held == domain ? domain : null;
+            }
+            foreach (var row in rows)
+            {
+                var hostname = string.IsNullOrWhiteSpace(row.Hostname) ? domains.GetValueOrDefault((row.Address, row.Application)) : row.Hostname;
+                if (candidate.Application is { } wanted && candidate.Destination is { } destination
+                    && (row.Application != wanted || OutboundBaselineKeys.Destination(hostname, row.Address) != destination)) continue;
+                var first = new DateTimeOffset(row.First, TimeSpan.Zero);
+                var last = new DateTimeOffset(row.Last, TimeSpan.Zero);
+                var flowKey = (row.Application, hostname, row.Address);
+                flows[flowKey] = flows.TryGetValue(flowKey, out var held)
+                    ? held with
+                    {
+                        BytesOut = unchecked(held.BytesOut + row.Sent), Connections = held.Connections + row.Connections,
+                        FirstAt = first < held.FirstAt ? first : held.FirstAt, LastAt = last > held.LastAt ? last : held.LastAt,
+                    }
+                    : new(row.Application, hostname, row.Address, row.Sent, row.Connections, first, last);
+            }
+        }
+
+        lock (gate)
+        {
+            var from = start.ToString("O", CultureInfo.InvariantCulture);
+            var to = end.ToString("O", CultureInfo.InvariantCulture);
+            long monitored = 0, observations = 0, withBytes = 0;
+            CheckOperation(WinSqlite.Prepare(db, "SELECT COALESCE(SUM(monitored_seconds),0),COALESCE(SUM(observations),0),COALESCE(SUM(observations_with_bytes),0) " +
+                $"FROM baseline_hours WHERE hour_start>='{from}' AND hour_start<'{to}'", -1, out var statement, 0));
+            try
+            {
+                if (WinSqlite.Step(statement) == WinSqlite.Row)
+                {
+                    monitored = WinSqlite.ColumnInt64(statement, 0);
+                    observations = WinSqlite.ColumnInt64(statement, 1);
+                    withBytes = WinSqlite.ColumnInt64(statement, 2);
+                }
+            }
+            finally { WinSqlite.Finalize(statement); }
+            var oldestRaw = NullableScalarText("SELECT CAST(MIN(observed_at) AS TEXT) FROM observations");
+            var partial = oldestRaw is null || long.Parse(oldestRaw, CultureInfo.InvariantCulture) > start.UtcTicks;
+            var sorted = flows.Values.OrderByDescending(flow => flow.BytesOut)
+                .ThenBy(flow => $"{flow.Application}|{flow.Hostname}|{flow.Address}", StringComparer.Ordinal).ToList();
+            return new(start, end, sorted.Take(Math.Max(0, limit)).ToList(), sorted.Count,
+                sorted.Aggregate(0UL, (sum, flow) => unchecked(sum + flow.BytesOut)),
+                Math.Min(monitored, (long)(end - start).TotalSeconds),
+                observations == 0 ? null : (double)withBytes / observations, partial);
+        }
+    }
+
     /// Settings > History: "Delete all answers".
     public void RemoveAllOutboundCandidateJudgments()
     {

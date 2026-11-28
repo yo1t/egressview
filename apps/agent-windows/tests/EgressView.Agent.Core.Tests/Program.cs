@@ -3886,6 +3886,51 @@ try
             Assert(!context.Contains("private", StringComparison.OrdinalIgnoreCase), "the candidates are not given to the AI");
         }
 
+        // P3-194: the connections behind a candidate, keyed as the baseline
+        // keys them.
+        {
+            var evidenceDatabase = Path.Combine(directory, "outbound-evidence.db");
+            using var store = new ObservationStore(evidenceDatabase);
+            var now = DateTimeOffset.UtcNow;
+            var start = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero).AddHours(-5);
+            NetworkObservation Sent(DateTimeOffset at, string address, long bytes, string? process, string? host = null, int port = 50_000) =>
+                new(at, 700, "TCP", "10.0.0.5", port, address, 443, bytes, 0, ObservationLayer.Logical, null, "etw", process, host);
+            var coverage = store.BeginCoverage([], start);
+            store.EndCoverage(coverage, start.AddHours(2));
+            store.WriteBatch([
+                Sent(start.AddMinutes(5), "203.0.113.5", 1_048_576, "backup", "a.cdn.example.com"),
+                Sent(start.AddMinutes(6), "203.0.113.6", 2_097_152, "backup", "b.example.com", 50_002),
+                Sent(start.AddMinutes(7), "198.51.100.7", 500, null),
+                Sent(start.AddMinutes(8), "192.168.1.20", 100L * 1024 * 1024, "System"),
+                Sent(start.AddMinutes(65), "203.0.113.5", 4_194_304, "backup", "a.cdn.example.com", 50_003),
+            ]);
+            store.CaptureBaselineHours(now, maxHours: 1000);
+            var day = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
+
+            var pair = store.ReadOutboundCandidateEvidence(new OutboundCandidate(OutboundCandidateKind.NewPair, day, "backup", "example.com", 0, null));
+            Assert(pair.Start == day.AddDays(-6) && pair.End == day.AddDays(1), "a new pair is shown over the week its bytes were added up in");
+            Assert(pair.Flows.Count == 2 && pair.FlowTotal == 2 && pair.BytesOut == 7_340_032UL,
+                "only that application and destination, with every name under the destination");
+            Assert(pair.Flows[0] is { Hostname: "a.cdn.example.com", Address: "203.0.113.5", BytesOut: 5_242_880UL, Connections: 2 }
+                   && pair.Flows[0].FirstAt == start.AddMinutes(5) && pair.Flows[0].LastAt == start.AddMinutes(65),
+                "largest first, summed over the hours, with when it was first and last seen");
+            Assert(pair.MonitoredSeconds == 7200 && pair.MayUndercount, "two monitored hours of a week: what is shown may be short of what left");
+
+            var machine = store.ReadOutboundCandidateEvidence(new OutboundCandidate(OutboundCandidateKind.Machine, day, null, null, 0, null), limit: 2);
+            Assert(machine.Start == day.AddHours(-23) && machine.FlowTotal == 3 && machine.Flows.Count == 2
+                   && machine.BytesOut == 7_340_532UL && !machine.Flows.Any(flow => flow.Address == "192.168.1.20"),
+                "the whole PC lists every application, the limit keeps the largest, and the LAN is not outbound");
+            Assert(store.ReadOutboundCandidateEvidence("aboveUsual|0.0|nobody|nowhere", now) is null, "only a listed candidate is read");
+
+            string? asked = null;
+            var shown = IpcProtocol.Handle("""{"v":1,"op":"outbound-candidate-evidence","id":"x"}""", () => "{}", _ => [],
+                outboundEvidence: id => { asked = id; return pair; });
+            Assert(asked == "x" && shown.Contains("\"ok\"") && shown.Contains("a.cdn.example.com"), "the evidence goes to the window over the pipe");
+            Assert(IpcProtocol.Handle("""{"v":1,"op":"outbound-candidate-evidence","id":"gone"}""", () => "{}", _ => [],
+                    outboundEvidence: _ => null).Contains("outbound-candidate-not-listed"),
+                "a candidate that has left the list is said to have left");
+        }
+
         // P3-194: answering a candidate, as on the Mac.
         {
             // The id is the Mac's, character for character: the Hub gets its

@@ -136,6 +136,14 @@
   <system:String x:Key="WorthALookForgetAllBody">Every candidate goes back to the list, and the notes are deleted. The candidates themselves are not changed.</system:String>
   <system:String x:Key="WorthALookAnswerFailed">The answer could not be saved</system:String>
   <system:String x:Key="WorthALookNotListed">This candidate is no longer on the list, so it cannot be answered.</system:String>
+  <system:String x:Key="WorthALookEvidence">Connections behind it</system:String>
+  <system:String x:Key="WorthALookEvidenceLoading">Reading the connections…</system:String>
+  <system:String x:Key="WorthALookEvidenceFailed">The connections could not be read.</system:String>
+  <system:String x:Key="WorthALookEvidenceNone">No connection is left in the history for this time.</system:String>
+  <system:String x:Key="WorthALookEvidenceFlowFormat">{0} sent over {1:N0} connections, {2}</system:String>
+  <system:String x:Key="WorthALookEvidenceLimitFormat">Showing the largest {0:N0} of {1:N0}.</system:String>
+  <system:String x:Key="WorthALookEvidenceMonitoredFormat">Monitored {0:P0} of {1}.</system:String>
+  <system:String x:Key="WorthALookEvidenceUndercount">Part of this time was not monitored, had no byte count, or is no longer kept connection by connection, so more may have been sent than shown.</system:String>
   <system:String x:Key="UpdateBannerFormat">Version {0} of EgressView Agent is available. This PC has {1}.</system:String>
   <system:String x:Key="UpdateBannerDismiss">Dismiss</system:String>
   <system:String x:Key="UpdateAlerts">A newer version of the Agent</system:String>

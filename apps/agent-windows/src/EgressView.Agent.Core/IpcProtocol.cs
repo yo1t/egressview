@@ -58,7 +58,8 @@ public static class IpcProtocol
         Func<GeoLookupSource, string>? setGeoLookupSource = null,
         Func<string?, bool>? setAbuseChKey = null,
         Func<string, OutboundCandidateVerdict?, string?, bool>? setOutboundAnswer = null,
-        Action? clearOutboundAnswers = null)
+        Action? clearOutboundAnswers = null,
+        Func<string, OutboundCandidateEvidence?>? outboundEvidence = null)
     {
         try
         {
@@ -103,6 +104,7 @@ public static class IpcProtocol
                 "set-abuse-ch-key" => SetAbuseChKey(root, setAbuseChKey),
                 "set-outbound-answer" => SetOutboundAnswer(root, setOutboundAnswer),
                 "clear-outbound-answers" => Invoke(clearOutboundAnswers, "outbound-answers-failed"),
+                "outbound-candidate-evidence" => OutboundEvidence(root, outboundEvidence),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
@@ -199,6 +201,22 @@ public static class IpcProtocol
                 : Reject("outbound-candidate-not-listed");
         }
         catch { return Reject("outbound-answers-failed"); }
+    }
+
+    /// The connections behind one listed candidate (P3-194). Names and
+    /// addresses, so for the window on this PC only, as the connection log is.
+    private static string OutboundEvidence(JsonElement root, Func<string, OutboundCandidateEvidence?>? read)
+    {
+        if (read is null) return Reject("operation-unavailable");
+        if (!root.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrEmpty(id.GetString()))
+            return Reject("invalid-outbound-candidate");
+        try
+        {
+            return read(id.GetString()!) is { } evidence
+                ? JsonSerializer.Serialize(new { status = "ok", data = evidence })
+                : Reject("outbound-candidate-not-listed");
+        }
+        catch { return Reject("outbound-evidence-failed"); }
     }
 
     /// Hands over the abuse.ch Auth-Key, or withdraws it when nothing is sent.
