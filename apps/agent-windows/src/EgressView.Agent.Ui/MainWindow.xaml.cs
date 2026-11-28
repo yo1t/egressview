@@ -653,6 +653,10 @@ public partial class MainWindow : Window
                     ? LocalizationManager.Text("WorthALookNotListed") : $"{LocalizationManager.Text("WorthALookAnswerFailed")} ({reason})",
                     LocalizationManager.Text("WorthALook"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+            // Read again rather than from the analysis already held, which
+            // is from before the answer: on 0.1.181 an answer was saved and
+            // the row stayed as if unanswered.
+            currentAnalysis = null;
             await RefreshInsightsAsync();
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
@@ -673,6 +677,7 @@ public partial class MainWindow : Window
             using var document = JsonDocument.Parse(response);
             EnsureAccepted(document.RootElement);
             showCheckedCandidates = false;
+            currentAnalysis = null;
             await RefreshInsightsAsync();
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
