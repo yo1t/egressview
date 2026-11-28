@@ -48,10 +48,12 @@ Related: the large-volume part of [T1041 Exfiltration Over C2 Channel](https://a
 
 Related, as leads to look into: [T1567 Exfiltration Over Web Service](https://attack.mitre.org/techniques/T1567/) and [T1030 Data Transfer Size Limits](https://attack.mitre.org/techniques/T1030/).
 
-- Rule: after 168 hours of monitoring, any of these: an app and destination pair seen for the first time sends 1 MiB or more in its first 7 days; a known pair sends 10 MiB or more in a day and at least 5 times its usual 90th percentile; the whole computer sends more than 1.5 times its usual 99th percentile in 24 hours. Shown in the Agent's Insights tab (Mac 0.5.139 or later, Windows 0.1.165 or later). No notification, and nothing is sent to the Hub.
+- Rule: after 168 hours of monitoring, any of these: an app and destination pair seen for the first time sends 1 MiB or more in its first 7 days; a known pair sends 10 MiB or more in a day and at least 5 times its usual 90th percentile; the whole computer sends more than 1.5 times its usual 99th percentile in 24 hours. Shown in the Agent's Insights tab (Mac 0.5.139 or later, Windows 0.1.165 or later). No notification.
+- Answering (Mac 0.5.141 or later; Windows not yet): each item can be answered "expected" or "investigate", with an optional note. The list and answers go to the Hub only if the person turns that on in the Agent's settings (off by default; notes have a second switch). From Mac 0.5.147, a day answered "expected" also joins that pair's usual level, so a pair whose sending has really grown stops appearing every day. One answered day does not move the 90th percentile; a few do. "Investigate" and unanswered days are kept out of it.
 - Checked: both Agents pass the shared cases in `test/fixtures/outbound-candidates-cases.json`. On one Mac the list matched a replay of the same data. Not yet checked on a real machine: a Mac list of 11 or more, small windows, and a Windows list after learning finishes.
-- Misses: new pairs under 1 MiB a week, known pairs under 10 MiB a day, browsers and virtual machines (left out on purpose), LAN destinations, and sending split so that each pair stays under the limits.
+- Misses: new pairs under 1 MiB a week, known pairs under 10 MiB a day, new pairs from browsers and virtual machines (left out on purpose), LAN destinations, and sending split so that each pair stays under the limits.
 - On one Mac over nine days, about one item a day appeared. All came from apps the owner uses.
+- On the same Mac over 14 days (2026-11-14 to 11-27), 30 items appeared, one to three a day. Of the 24 answered, all were "expected" and none "investigate". 19 of the 30 were three pairs listed day after day, which is what the change in 0.5.147 is for.
 
 ## LAN scanning by a program on this computer
 
