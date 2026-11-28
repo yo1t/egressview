@@ -859,6 +859,57 @@ for (const viewport of [{ width: 320, height: 640 }, { width: 375, height: 812 }
   expect(fatalErrors(errors), `Device detail errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
+test('Agent tab shows a Windows Agent\'s shared candidates from 0.1.184 and its LAN scan count, and why an older one has no candidates', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const now = Date.now();
+  const agents = [
+    { agentId: '00000000-0000-4000-8000-000000000011', platform: 'windows', hostName: 'new-windows-pc',
+      osVersion: 'Microsoft Windows NT 10.0.26300.0', agentVersion: '0.1.184', lastSeenAt: now - 60_000, revokedAt: null },
+    { agentId: '00000000-0000-4000-8000-000000000012', platform: 'windows', hostName: 'old-windows-pc',
+      osVersion: 'Microsoft Windows NT 10.0.26300.0', agentVersion: '0.1.173', lastSeenAt: now - 120_000, revokedAt: null },
+  ];
+  await page.route(/\/api\/agents$/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ agents }),
+  }));
+  await page.route(/\/api\/agents\/outbound-candidates$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ agents: [{
+      agentId: agents[0].agentId, hostName: agents[0].hostName, state: 'ready', total: 1,
+      generatedAt: now, receivedAt: now, notesShared: false,
+      entries: [{ candidateId: 'w1', kind: 'newPair', day: Date.UTC(2026, 10, 26),
+        application: 'wermgr', destination: 'windows.net', bytesOut: 1_193_577_387, usualBytesOut: null,
+        answer: null, note: null, answeredOn: null }],
+    }] }),
+  }));
+  await authPage(page);
+
+  await page.click('#btn-agents');
+  await expect(page.locator('#agents-container')).toBeVisible();
+  const select = page.locator('#agent-view-select');
+  await select.selectOption(agents[0].agentId);
+  await expect(page.locator('.agent-card-host')).toHaveText('new-windows-pc');
+  await expect(page.locator('#agents-container')).toContainText('wermgr');
+  await expect(page.locator('#agents-container')).not.toContainText(/Windows 0\.1\.184以降|Windows Agent 0\.1\.184 or later/);
+  // Windows counts LAN scans from 0.1.158, with no setting to turn on.
+  await expect(page.locator('#agents-container')).toContainText(/閉じたポートに届いた接続をいつも数えています|always counts what reaches its closed ports/);
+
+  await select.selectOption(agents[1].agentId);
+  await expect(page.locator('.agent-card-host')).toHaveText('old-windows-pc');
+  await expect(page.locator('#agents-container')).toContainText(/Windows 0\.1\.184以降|Windows Agent 0\.1\.184 or later/);
+
+  // The longer wording still fits a phone, upright and on its side.
+  for (const size of [{ width: 320, height: 640 }, { width: 375, height: 812 }, { width: 740, height: 360 }]) {
+    await page.setViewportSize(size);
+    for (const agent of agents) {
+      await select.selectOption(agent.agentId);
+      await expect(page.locator('.agent-card-host')).toHaveText(agent.hostName);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        `${agent.hostName} at ${size.width}x${size.height}`).toBe(true);
+    }
+  }
+});
+
 test('Agent tab fits a 320 px phone: overview, picker and the picked Agent', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
