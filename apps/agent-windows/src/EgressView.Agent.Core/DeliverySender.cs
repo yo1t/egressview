@@ -77,6 +77,11 @@ public sealed class DeliverySender
     /// takes them (P3-191).
     public InboundProbeOutbox? InboundProbes { get; set; }
 
+    /// Told what each acknowledgement says about the answers given on the
+    /// Hub (P3-194 stage 2): <c>outboundAnswersVersion</c>, or null from a Hub
+    /// that does not answer candidates.
+    public Action<int?>? AnswersVersion { get; set; }
+
     public async Task<DeliveryAttempt> SendNextAsync(ObservationStore store, AgentCredential credential,
         DeliveryMetadata metadata, CancellationToken cancellationToken = default)
     {
@@ -146,6 +151,7 @@ public sealed class DeliverySender
             if (acknowledgement.Rejected != 0)
                 return Refused(store, batch.BatchId, DeliveryAttemptKind.Rejected, status);
             store.AcknowledgeDelivery(batch.BatchId, timeProvider.GetUtcNow());
+            try { AnswersVersion?.Invoke(acknowledgement.OutboundAnswersVersion); } catch { }
             return new(DeliveryAttemptKind.Acknowledged);
         }
     }
@@ -268,5 +274,6 @@ public sealed class DeliverySender
         [property: JsonPropertyName("bundleID")] string? BundleId, string FirstObservedAt, string LastObservedAt,
         string? BytesIn, string? BytesOut, string Collector, string Confidence,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RemoteHostname);
-    private sealed record AgentIngestAcknowledgement(Guid BatchId, int Accepted, int Duplicate, int Rejected, bool Replayed);
+    private sealed record AgentIngestAcknowledgement(Guid BatchId, int Accepted, int Duplicate, int Rejected, bool Replayed,
+        int? OutboundAnswersVersion = null);
 }

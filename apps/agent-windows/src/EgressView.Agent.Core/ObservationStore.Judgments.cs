@@ -206,6 +206,72 @@ public sealed partial class ObservationStore
         }
     }
 
+    /// Takes in the answers given on the Hub (P3-194 stage 2), as the Mac's
+    /// <c>applyHubOutboundCandidateAnswers</c> does.
+    ///
+    /// An answer is matched to a candidate by the hash this PC sent for it,
+    /// and replaces this PC's answer only when it was given later: whoever
+    /// answered last wins, on either side. A Hub answer of null takes this
+    /// PC's older answer back. The note follows the Hub's only when notes are
+    /// shared (<paramref name="takesNotes"/>); otherwise the Hub never had this
+    /// PC's note and sends none, so the note here is kept. The Hub's time is
+    /// rounded up to the whole second, because the time sent back is in whole
+    /// seconds: kept as it is, it would read as older than the Hub's answer
+    /// and the Hub would keep its own copy for good.
+    /// <returns>How many answers changed here.</returns>
+    public int ApplyHubOutboundCandidateAnswers(IReadOnlyList<OutboundCandidateHubAnswer> answers, bool takesNotes, DateTimeOffset now)
+    {
+        if (answers.Count == 0) return 0;
+        lock (gate)
+        {
+            var byHash = ReadOutboundCandidatesLocked(now).Candidates
+                .ToDictionary(candidate => OutboundCandidateSharePayload.HashedId(candidate.Id), StringComparer.Ordinal);
+            var current = ReadOutboundCandidateJudgmentsLocked();
+            var changed = 0;
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                foreach (var answer in answers)
+                {
+                    if (!byHash.TryGetValue(answer.CandidateId, out var candidate)) continue;
+                    var ticks = answer.AnsweredAt.UtcTicks;
+                    var at = new DateTimeOffset(ticks + (TimeSpan.TicksPerSecond - ticks % TimeSpan.TicksPerSecond) % TimeSpan.TicksPerSecond, TimeSpan.Zero);
+                    var local = current.GetValueOrDefault(candidate.Id);
+                    if (local is not null && local.JudgedAt >= at) continue;
+                    if (OutboundCandidateJudgment.Parse(answer.Answer) is not { } verdict)
+                    {
+                        if (local is null) continue;
+                        CheckOperation(WinSqlite.Prepare(db, "DELETE FROM outbound_candidate_judgments WHERE candidate_id=?", -1, out var remove, 0));
+                        try { Bind(remove, 1, candidate.Id); CheckDone(WinSqlite.Step(remove)); }
+                        finally { WinSqlite.Finalize(remove); }
+                        changed++;
+                        continue;
+                    }
+                    var note = takesNotes ? (answer.Note ?? "") : (local?.Note ?? "");
+                    CheckOperation(WinSqlite.Prepare(db,
+                        "INSERT OR REPLACE INTO outbound_candidate_judgments(candidate_id,candidate_at,application,destination,verdict,note,judged_at,answered_on) VALUES(?,?,?,?,?,?,?,'hub')",
+                        -1, out var statement, 0));
+                    try
+                    {
+                        Bind(statement, 1, candidate.Id);
+                        Bind(statement, 2, candidate.At.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                        BindNullable(statement, 3, candidate.Application);
+                        BindNullable(statement, 4, candidate.Destination);
+                        Bind(statement, 5, OutboundCandidateJudgment.Code(verdict));
+                        Bind(statement, 6, OutboundCandidateJudgment.Clip(note));
+                        Bind(statement, 7, at.ToString("O", CultureInfo.InvariantCulture));
+                        CheckDone(WinSqlite.Step(statement));
+                    }
+                    finally { WinSqlite.Finalize(statement); }
+                    changed++;
+                }
+                Execute("COMMIT");
+            }
+            catch { TryRollback(); throw; }
+            return changed;
+        }
+    }
+
     /// Settings > History: "Delete all answers".
     public void RemoveAllOutboundCandidateJudgments()
     {

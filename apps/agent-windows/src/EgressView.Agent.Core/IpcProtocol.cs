@@ -59,7 +59,9 @@ public static class IpcProtocol
         Func<string?, bool>? setAbuseChKey = null,
         Func<string, OutboundCandidateVerdict?, string?, bool>? setOutboundAnswer = null,
         Action? clearOutboundAnswers = null,
-        Func<string, OutboundCandidateEvidence?>? outboundEvidence = null)
+        Func<string, OutboundCandidateEvidence?>? outboundEvidence = null,
+        Func<OutboundCandidateSharingState>? outboundSharing = null,
+        Func<bool, bool, OutboundCandidateSharingState>? setOutboundSharing = null)
     {
         try
         {
@@ -105,6 +107,9 @@ public static class IpcProtocol
                 "set-outbound-answer" => SetOutboundAnswer(root, setOutboundAnswer),
                 "clear-outbound-answers" => Invoke(clearOutboundAnswers, "outbound-answers-failed"),
                 "outbound-candidate-evidence" => OutboundEvidence(root, outboundEvidence),
+                "outbound-sharing-status" => outboundSharing is null ? Reject("operation-unavailable")
+                    : JsonSerializer.Serialize(new { status = "ok", data = SharingView(outboundSharing()) }),
+                "set-outbound-sharing" => SetOutboundSharing(root, setOutboundSharing),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
@@ -201,6 +206,24 @@ public static class IpcProtocol
                 : Reject("outbound-candidate-not-listed");
         }
         catch { return Reject("outbound-answers-failed"); }
+    }
+
+    /// The two switches and how the last send went. Not the hashes or the
+    /// Hub's answer version: the window has no use for them.
+    private static object SharingView(OutboundCandidateSharingState state) => new
+    {
+        enabled = state.Enabled, includesNotes = state.IncludesNotes, state = state.Status, at = state.StatusAt,
+        statusCode = state.StatusCode, lastSentAt = state.LastSentAt,
+    };
+
+    private static string SetOutboundSharing(JsonElement root, Func<bool, bool, OutboundCandidateSharingState>? set)
+    {
+        if (set is null) return Reject("operation-unavailable");
+        if (!root.TryGetProperty("enabled", out var enabled) || enabled.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+            || !root.TryGetProperty("includesNotes", out var notes) || notes.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            return Reject("invalid-outbound-sharing");
+        try { return JsonSerializer.Serialize(new { status = "ok", data = SharingView(set(enabled.GetBoolean(), notes.GetBoolean())) }); }
+        catch { return Reject("outbound-sharing-failed"); }
     }
 
     /// The connections behind one listed candidate (P3-194). Names and
