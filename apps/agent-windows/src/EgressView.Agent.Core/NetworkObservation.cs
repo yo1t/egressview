@@ -264,6 +264,9 @@ public sealed record CollectorSnapshot(
     long InterfaceRefreshesAfterMiss = 0,
     // Inbound group datagrams left out on purpose. Not a collection gap.
     long InboundMulticastIgnored = 0,
+    // Inbound broadcasts left out on purpose (another device's, or this
+    // machine's own coming back). Not a collection gap.
+    long InboundBroadcastIgnored = 0,
     int EtwEventsLost = 0,
     int EtwEventsLostAtStart = 0,
     string? CollectorError = null,

@@ -32,12 +32,26 @@ public sealed class DeliveryHistory(string dataDirectory)
     /// minute fills it in a few hours, and the newest are what is asked about.
     public const int Kept = 200;
 
+    /// How recently the Hub must have taken a batch for its 429 to be pacing
+    /// rather than news.
+    ///
+    /// While a backlog drains, the Hub takes a batch, answers 429 to the next,
+    /// and takes the one after a minute later. Each of those was a change, so
+    /// on 2026-11-26 the recovery wrote "acknowledged" and "rate-limited" by
+    /// turns every minute, and the six lines in Settings > Hub showed nothing
+    /// but that, with the outage before it pushed out of sight. A 429 a few
+    /// minutes after an acknowledgement is the Hub keeping its own pace; one
+    /// with no acknowledgement for longer is written as before, and carries
+    /// when the Hub last took a batch.
+    public static readonly TimeSpan PacingWindow = TimeSpan.FromMinutes(5);
+
     private readonly object gate = new();
     private DeliveryEvent? last = Read(dataDirectory).LastOrDefault();
 
     /// Records the outcome of an attempt if it differs from the last one
     /// recorded: success to failure, one failure to another, a different
-    /// status code, or back. The queue and the network are read only when an
+    /// status code, or back. A 429 soon after the Hub took a batch is not
+    /// one (PacingWindow). The queue and the network are read only when an
     /// event is written, so an attempt that changes nothing costs nothing.
     /// Returns whether it wrote one.
     public bool Observe(DateTimeOffset at, string state, int? statusCode,
@@ -50,6 +64,9 @@ public sealed class DeliveryHistory(string dataDirectory)
             if (last is not null && Outcome(last.State) == outcome && last.StatusCode == statusCode) return false;
             var failed = DeliveryNotificationTracker.IsFailure(state);
             var (pending, lastAcknowledgedAt) = queue();
+            if (state == "rate-limited" && last is not null && Outcome(last.State) == "ok"
+                && lastAcknowledgedAt is { } taken && at - taken < PacingWindow)
+                return false;
             Append(new DeliveryEvent(at, state, statusCode, pending, lastAcknowledgedAt,
                 failed ? WindowsNetwork.Code(network()) : null));
             return true;

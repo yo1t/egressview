@@ -101,9 +101,12 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private readonly DnsNameCache dnsNames = new();
     private readonly object interfaceGate = new();
     private Dictionary<string, InterfaceInfo> interfaces = new(StringComparer.OrdinalIgnoreCase);
+    // The directed-broadcast address of each IPv4 subnet this machine is on,
+    // read with the interfaces.
+    private HashSet<string> broadcasts = new(StringComparer.OrdinalIgnoreCase);
     private TraceEventSession? session;
     private Task? processing;
-    private long eventsSeen, eventsIgnored, interfaceUnresolved, inboundMulticastIgnored;
+    private long eventsSeen, eventsIgnored, interfaceUnresolved, inboundMulticastIgnored, inboundBroadcastIgnored;
     private long connectionAttempted, connectionAccepted, connectionDisconnected, connectionClosed;
     private readonly ConnectionEndAudit connectionEnds = new();
     /// LAN senders turned away from this PC's closed ports (P3-191).
@@ -142,6 +145,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     /// on purpose, so the choice stays visible instead of looking like a
     /// collection gap.
     public long InboundMulticastIgnored => Interlocked.Read(ref inboundMulticastIgnored);
+    public long InboundBroadcastIgnored => Interlocked.Read(ref inboundBroadcastIgnored);
     public int EventsLost
     {
         get
@@ -332,6 +336,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         InterfaceUnresolved = InterfaceUnresolved,
         InterfaceRefreshesAfterMiss = InterfaceRefreshesAfterMiss,
         InboundMulticastIgnored = InboundMulticastIgnored,
+        InboundBroadcastIgnored = InboundBroadcastIgnored,
         EtwEventsLost = EventsLost,
         EtwEventsLostAtStart = EventsLostAtStart,
         CollectorError = Error,
@@ -486,12 +491,14 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         var bytes = LongValue(Raw(e, "size"));
         var sourceMulticast = IsMulticast(sourceAddress);
         var destinationMulticast = IsMulticast(destinationAddress);
+        var destinationBroadcast = IsBroadcast(destinationAddress);
         var sourceInterface = FindInterface(sourceAddress);
         var destinationInterface = FindInterface(destinationAddress);
         // Neither end on a known interface usually means this machine's
         // address changed and the list has not caught up yet, so the list is
         // read again, at most every few seconds, before the ends are sorted.
-        if (sourceInterface is null && destinationInterface is null && !sourceMulticast && !destinationMulticast && RefreshInterfacesAfterMiss())
+        if (sourceInterface is null && destinationInterface is null && !sourceMulticast && !destinationMulticast && !destinationBroadcast
+            && RefreshInterfacesAfterMiss())
         {
             sourceInterface = FindInterface(sourceAddress);
             destinationInterface = FindInterface(destinationAddress);
@@ -500,10 +507,11 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
 
         var sorted = SortEndpoints(sourceAddress, sourcePort, destinationAddress, destinationPort,
             sourceInterface is not null, destinationInterface is not null,
-            sourceMulticast, destinationMulticast, direction == Direction.Receive, tcp);
+            sourceMulticast, destinationMulticast, direction == Direction.Receive, tcp, destinationBroadcast);
         if (sorted is null)
         {
-            Interlocked.Increment(ref inboundMulticastIgnored);
+            if (sourceMulticast || destinationMulticast) Interlocked.Increment(ref inboundMulticastIgnored);
+            else Interlocked.Increment(ref inboundBroadcastIgnored);
             return;
         }
         var (localAddress, localPort, remoteAddress, remotePort, localIsSource) = sorted.Value;
@@ -642,6 +650,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private void RefreshInterfaces()
     {
         var updated = new Dictionary<string, InterfaceInfo>(StringComparer.OrdinalIgnoreCase);
+        var updatedBroadcasts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
@@ -651,11 +660,14 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
                     || nic.Description.Contains("Tailscale", StringComparison.OrdinalIgnoreCase)
                     || nic.Description.Contains("WireGuard", StringComparison.OrdinalIgnoreCase);
                 foreach (var address in nic.GetIPProperties().UnicastAddresses)
+                {
                     try { updated[Canonical(address.Address)] = new InterfaceInfo(nic.Id, isVirtual); } catch { }
+                    try { if (DirectedBroadcast(address.Address, address.PrefixLength) is { } broadcast) updatedBroadcasts.Add(broadcast); } catch { }
+                }
             }
         }
         catch { }
-        lock (interfaceGate) interfaces = updated;
+        lock (interfaceGate) { interfaces = updated; broadcasts = updatedBroadcasts; }
     }
 
     /// How long a stop waits for the trace session's processing loop.
@@ -709,26 +721,35 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     /// svchost, chrome and ChatGPT alike, which is what made an application
     /// look like it was moving half a gigabyte.
     ///
+    /// A received UDP broadcast is left out for the same reason. Every
+    /// listener is handed it, and it is another device's traffic, or this
+    /// machine's own broadcast coming back. With neither end on an interface
+    /// the broadcast address was stored as this machine's end: measured on one
+    /// PC on 2026-11-28, 183 flows whose local address was a broadcast
+    /// address, and 324 flows of this machine's own broadcasts with the echo
+    /// added as received bytes.
+    ///
     /// <returns>
     /// The local end, the remote end, and whether the local end was the
-    /// source; null when the event is an inbound group datagram and belongs to
-    /// nobody on this machine.
+    /// source; null when the event is an inbound group datagram or broadcast
+    /// and belongs to nobody on this machine.
     /// </returns>
     internal static (string LocalAddress, int LocalPort, string RemoteAddress, int RemotePort, bool LocalIsSource)?
         SortEndpoints(string sourceAddress, int sourcePort, string destinationAddress, int destinationPort,
             bool sourceHasInterface, bool destinationHasInterface,
-            bool sourceMulticast, bool destinationMulticast, bool received, bool tcp = false)
+            bool sourceMulticast, bool destinationMulticast, bool received, bool tcp = false, bool destinationBroadcast = false)
     {
         // Asked before the sorting, so the answer cannot depend on which side
         // the group address landed on.
         if (received && (sourceMulticast || destinationMulticast)) return null;
+        if (received && destinationBroadcast && !tcp) return null;
 
         if (sourceHasInterface && !destinationHasInterface && !sourceMulticast)
             return (sourceAddress, sourcePort, destinationAddress, destinationPort, true);
         if (destinationHasInterface && !sourceHasInterface && !destinationMulticast)
             return (destinationAddress, destinationPort, sourceAddress, sourcePort, false);
-        // Outbound multicast is kept: this machine announcing itself is
-        // traffic it sent.
+        // Outbound multicast and broadcast are kept: this machine announcing
+        // itself is traffic it sent.
         if (sourceMulticast || destinationMulticast)
             return (sourceAddress, sourcePort, destinationAddress, destinationPort, true);
         // Neither end is on an interface we know of. Kernel-Network's TCP
@@ -759,5 +780,23 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private static long LongValue(object? value) => value is null || !long.TryParse(value.ToString(), out var parsed) ? 0 : parsed;
     private static string Canonical(string address) => IPAddress.TryParse(address, out var ip) ? Canonical(ip) : address;
     private static string Canonical(IPAddress ip) => ip.AddressFamily == AddressFamily.InterNetworkV6 && ip.ScopeId != 0 ? new IPAddress(ip.GetAddressBytes()).ToString() : ip.ToString();
+    private bool IsBroadcast(string address)
+    {
+        if (!IPAddress.TryParse(address, out var ip) || ip.AddressFamily != AddressFamily.InterNetwork) return false;
+        if (ip.Equals(IPAddress.Broadcast)) return true;
+        lock (interfaceGate) return broadcasts.Contains(ip.ToString());
+    }
+
+    /// The directed-broadcast address of an IPv4 address's subnet, or null
+    /// for IPv6, and for /31 and /32, which have none (RFC 3021).
+    internal static string? DirectedBroadcast(IPAddress address, int prefixLength)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetwork || prefixLength is < 1 or > 30) return null;
+        var bytes = address.GetAddressBytes();
+        var value = (uint)bytes[0] << 24 | (uint)bytes[1] << 16 | (uint)bytes[2] << 8 | bytes[3];
+        value |= uint.MaxValue >> prefixLength;
+        return new IPAddress(new[] { (byte)(value >> 24), (byte)(value >> 16), (byte)(value >> 8), (byte)value }).ToString();
+    }
+
     private static bool IsMulticast(string address) { if (!IPAddress.TryParse(address, out var ip)) return false; return ip.AddressFamily == AddressFamily.InterNetworkV6 ? ip.IsIPv6Multicast : ip.GetAddressBytes()[0] is >= 224 and <= 239; }
 }
