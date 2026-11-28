@@ -51,11 +51,16 @@ public sealed class InboundProbeCounter
     public long CountedPackets { get { lock (gate) return countedPackets; } }
     public long SendersReported { get { lock (gate) return sendersReported; } }
 
-    public void Record(string protocol, string? sourceAddress, string? localAddress, int localPort, DateTimeOffset at)
+    /// `localIsSubnetBroadcast` says the drop was addressed to the broadcast
+    /// address of a subnet this PC is on. The address alone cannot say so
+    /// when the subnet is not a /24 or wider -- a /25's broadcast ends .127 --
+    /// so the collector, which knows the subnets, answers it.
+    public void Record(string protocol, string? sourceAddress, string? localAddress, int localPort, DateTimeOffset at,
+        bool localIsSubnetBroadcast = false)
     {
         if (localPort is <= 0 or >= EphemeralFloor) return;
         if (Normal(sourceAddress) is not { } source || Normal(localAddress) is not { } local || source == local) return;
-        if (!IsLanUnicast(source) || IsBroadcastOrMulticast(local)) return;
+        if (!IsLanUnicast(source) || IsBroadcastOrMulticast(local) || localIsSubnetBroadcast) return;
         var window = at.ToUnixTimeSeconds() / WindowSeconds * WindowSeconds;
         lock (gate)
         {

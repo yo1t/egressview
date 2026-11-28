@@ -568,7 +568,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         if (protocol is null || IntValue(Raw(e, "Reason"), 0) != DropReasonNoListener) return;
         var (local, localPort) = SockAddr(Raw(e, "LocalSockAddr"));
         var (remote, _) = SockAddr(Raw(e, "RemoteSockAddr"));
-        InboundProbes.Record(protocol, remote, local, localPort, At(e));
+        InboundProbes.Record(protocol, remote, local, localPort, At(e), local is not null && IsBroadcast(local));
     }
 
     /// A SOCKADDR as Microsoft-Windows-TCPIP writes it: family, port in network
@@ -782,7 +782,10 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private static string Canonical(IPAddress ip) => ip.AddressFamily == AddressFamily.InterNetworkV6 && ip.ScopeId != 0 ? new IPAddress(ip.GetAddressBytes()).ToString() : ip.ToString();
     private bool IsBroadcast(string address)
     {
-        if (!IPAddress.TryParse(address, out var ip) || ip.AddressFamily != AddressFamily.InterNetwork) return false;
+        if (!IPAddress.TryParse(address, out var ip)) return false;
+        // Microsoft-Windows-TCPIP can write an IPv4 address mapped into IPv6.
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+        if (ip.AddressFamily != AddressFamily.InterNetwork) return false;
         if (ip.Equals(IPAddress.Broadcast)) return true;
         lock (interfaceGate) return broadcasts.Contains(ip.ToString());
     }
