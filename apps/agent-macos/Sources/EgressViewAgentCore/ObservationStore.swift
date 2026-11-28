@@ -2776,7 +2776,19 @@ public final class ObservationStore: @unchecked Sendable {
                     destination: String(cString: sqlite3_column_text(pairRows, 1))
                 )] = sqlite3_column_double(pairRows, 2)
             }
-            return OutboundCandidateRules.evaluate(hours: hours, pairDays: days, firstSeen: firstSeen, now: now)
+            // Answered "expected" here or on the Hub: those days join their
+            // pair's usual level (see OutboundCandidateRules.evaluate).
+            var expected: Set<String> = []
+            let expectedRows = try prepare(
+                "SELECT candidate_id FROM outbound_candidate_judgments WHERE verdict = 'expected'"
+            )
+            defer { sqlite3_finalize(expectedRows) }
+            while sqlite3_step(expectedRows) == SQLITE_ROW {
+                if let id = text(expectedRows, 0) { expected.insert(id) }
+            }
+            return OutboundCandidateRules.evaluate(
+                hours: hours, pairDays: days, firstSeen: firstSeen, now: now, expected: expected
+            )
         }
     }
 
