@@ -1144,7 +1144,7 @@ try
             $"{prefix}-app-{index}", $"203.0.113.{index}", $"{prefix}-destination-{index}.example", index + 1, (index + 1) * 100, 0)).ToArray(), []);
     var aiContext = AiInsightContextBuilder.Build(AiAnalysis(120, "current"), AiAnalysis(90, "previous"), aiFrom.AddHours(7));
     var aiPreview = AiInsightContextBuilder.Preview(aiContext);
-    Assert(aiContext.SchemaVersion == 1 && aiContext.TopApplications.Count == 10 && aiContext.TopDestinations.Count == 10,
+    Assert(aiContext.SchemaVersion == 2 && aiContext.TopApplications.Count == 10 && aiContext.TopDestinations.Count == 10,
         "AI context uses the versioned bounded facts contract and limits ranked names");
     Assert(!aiPreview.Contains("203.0.113", StringComparison.Ordinal) && !aiPreview.Contains("credential", StringComparison.OrdinalIgnoreCase),
         "AI context excludes raw addresses and credentials");
@@ -3876,14 +3876,20 @@ try
                    && !OutboundCandidateRules.IsUnattributable("chromedriver"),
                 "an application that only starts like a browser is judged");
 
-            // The list stays on this PC.
+            // P3-194, as the Mac's #905: the list and the person's answers go
+            // with a question, shown first in the preview.
+            var listed = new OutboundCandidate(OutboundCandidateKind.NewPair, DateTimeOffset.UnixEpoch, "listed-app", "listed.example", 1, null);
             var kept = new PeriodAnalysis(DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddHours(1), 0, 0, 0, 0, 0, 1, null, 0, [], [])
             {
-                OutboundCandidates = new(OutboundCandidateState.Ready, 200, 1,
-                    [new(OutboundCandidateKind.NewPair, DateTimeOffset.UnixEpoch, "private-app", "private.example", 1, null)], 1),
+                OutboundCandidates = new(OutboundCandidateState.Ready, 200, 1, [listed], 1)
+                {
+                    Judgments = [new(listed.Id, listed.At, OutboundCandidateVerdict.Expected, "  my sync  ", DateTimeOffset.UnixEpoch)],
+                },
             };
             var context = AiInsightContextBuilder.Preview(AiInsightContextBuilder.Build(kept, kept));
-            Assert(!context.Contains("private", StringComparison.OrdinalIgnoreCase), "the candidates are not given to the AI");
+            Assert(context.Contains("\"listed-app\"") && context.Contains("\"answer\": \"expected\"") && context.Contains("\"note\": \"my sync\"")
+                   && context.Contains("\"kind\": \"newPair\"") && !context.Contains(listed.Id),
+                "the candidates go to the AI with the answer and the note, and without the id");
         }
 
         // P3-194: the connections behind a candidate, keyed as the baseline
@@ -3908,7 +3914,8 @@ try
             var day = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
 
             var pair = store.ReadOutboundCandidateEvidence(new OutboundCandidate(OutboundCandidateKind.NewPair, day, "backup", "example.com", 0, null));
-            Assert(pair.Start == day.AddDays(-6) && pair.End == day.AddDays(1), "a new pair is shown over the week its bytes were added up in");
+            Assert(pair.Start == day.AddDays(-6) && pair.End <= now && pair.End >= start.AddHours(2),
+                "a new pair is shown over the week its bytes were added up in, up to the hours the baseline has read and not into the rest of today");
             Assert(pair.Flows.Count == 2 && pair.FlowTotal == 2 && pair.BytesOut == 7_340_032UL,
                 "only that application and destination, with every name under the destination");
             Assert(pair.Flows[0] is { Hostname: "a.cdn.example.com", Address: "203.0.113.5", BytesOut: 5_242_880UL, Connections: 2 }
@@ -3917,10 +3924,22 @@ try
             Assert(pair.MonitoredSeconds == 7200 && pair.MayUndercount, "two monitored hours of a week: what is shown may be short of what left");
 
             var machine = store.ReadOutboundCandidateEvidence(new OutboundCandidate(OutboundCandidateKind.Machine, day, null, null, 0, null), limit: 2);
-            Assert(machine.Start == day.AddHours(-23) && machine.FlowTotal == 3 && machine.Flows.Count == 2
+            Assert(machine.Start == day.AddHours(-23) && machine.End == pair.End && machine.FlowTotal == 3 && machine.Flows.Count == 2
                    && machine.BytesOut == 7_340_532UL && !machine.Flows.Any(flow => flow.Address == "192.168.1.20"),
                 "the whole PC lists every application, the limit keeps the largest, and the LAN is not outbound");
             Assert(store.ReadOutboundCandidateEvidence("aboveUsual|0.0|nobody|nowhere", now) is null, "only a listed candidate is read");
+
+            // An anomaly says what the person last answered about the pair
+            // that sent most of it, without the note (P3-194, #905).
+            Assert(store.ReadOutboundAnomalyBreakdown(start, 0).PreviousAnswer is null, "no answer given, none said");
+            store.ExecuteForTesting("INSERT INTO outbound_candidate_judgments(candidate_id,candidate_at,application,destination,verdict,note,judged_at) " +
+                $"VALUES('aboveUsual|1.0|backup|example.com','{day.AddDays(-2):O}','backup','example.com','expected','secret note','{day.AddDays(-2):O}')");
+            var previous = store.ReadOutboundAnomalyBreakdown(start, 0).PreviousAnswer;
+            Assert(previous is { Application: "backup", Destination: "example.com", Verdict: "expected" } && previous.JudgedAt == day.AddDays(-2)
+                   && !store.ReadOutboundAnomalyBreakdown(start, 0).ToJson().Contains("secret note"),
+                "the pair that sent most of the window, keyed as the baseline keys it, brings its last answer and not its note");
+            store.WriteBatch([Sent(start.AddMinutes(9), "198.51.100.9", 8L * 1024 * 1024, "other", "other.example")]);
+            Assert(store.ReadOutboundAnomalyBreakdown(start, 0).PreviousAnswer is null, "an answered pair that sent less than half is not said to explain it");
 
             string? asked = null;
             var shown = IpcProtocol.Handle("""{"v":1,"op":"outbound-candidate-evidence","id":"x"}""", () => "{}", _ => [],
