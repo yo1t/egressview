@@ -161,7 +161,7 @@ async function saveAnswer(report, entry, answer, note, status) {
 
 /**
  * The administrator's controls for one candidate: the two answers and taking
- * an answer back, and the note when this Mac shares notes. A note goes to the
+ * an answer back, and the note when this computer shares notes. A note goes to the
  * Mac too, so it is offered only where the person agreed to notes travelling.
  */
 function answerControls(report, entry) {

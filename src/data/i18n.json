@@ -991,7 +991,7 @@
     "tab.agents": "💻 Agent",
     "agents.refresh": "更新",
     "agents.about": "この画面について",
-    "agents.hint": "Hubに登録したAgentの全体と、選んだAgentの届き具合・Agentの利用者が共有した調べる候補を表示します。調べる候補は各Agentが自分の普段の通信と比べて見つけたもので、判定ではありません。答えはそのMacの利用者か、このHubの管理者が付けたものです。期間の選択には関係しません。登録・承認・取り消しは設定の「L3/L4」で行います。",
+    "agents.hint": "Hubに登録したAgentの全体と、選んだAgentの届き具合・Agentの利用者が共有した調べる候補を表示します。調べる候補は各Agentが自分の普段の通信と比べて見つけたもので、判定ではありません。答えはそのコンピューターの利用者か、このHubの管理者が付けたものです。期間の選択には関係しません。登録・承認・取り消しは設定の「L3/L4」で行います。",
     "agents.none": "登録済みのAgentはありません。",
     "agents.loadFailed": "Agentの一覧を読み込めませんでした。",
     "agents.status.delivering": "届いています（最後: {time}）",
@@ -1024,12 +1024,12 @@
     "agents.overview.probes": "Agentに向けたLANスキャン",
     "agents.overview.probesSub": "送り元の数（{agents}台が対象）",
     "agents.table.probes": "LANスキャン",
-    "agents.probes.title": "このMacに向けたLANスキャン（直近14日）",
-    "agents.probes.hint": "LAN内の機器が、短い時間にこのMacの{ports}個以上のポートを試したものです。検出ログと同じ基準で、プリンターや管理ツールの正常な動作のこともあります。",
+    "agents.probes.title": "このコンピューターに向けたLANスキャン（直近14日）",
+    "agents.probes.hint": "LAN内の機器が、短い時間にこのコンピューターの{ports}個以上のポートを試したものです。検出ログと同じ基準で、プリンターや管理ツールの正常な動作のこともあります。",
     "agents.probes.none": "直近14日はありません。MacのAgentの設定「パケットのヘッダーから数える」がオンのときだけ数えます。",
     "agents.probes.noneWindows": "直近14日はありません。WindowsのAgentは、閉じたポートに届いた接続をいつも数えています。",
     "agents.probes.unsupported": "この版の{platform}のAgentは、LANスキャンを数えません。数えるのはmacOSのAgentと、Windows 0.1.158以降のAgentです。",
-    "agents.probes.target": "{source} → このMac（{local}）",
+    "agents.probes.target": "{source} → このコンピューター（{local}）",
     "agents.probes.line": "{protocol}で最大{ports}ポート・{windows}回・最後: {time}",
     "agents.probes.sample": "試したポートの例: {ports}",
     "agents.probes.more": "ほかに{count}件の送り元があります。",
@@ -1097,7 +1097,7 @@
     "agents.candidates.saveNote": "メモを保存",
     "agents.candidates.saving": "保存しています…",
     "agents.candidates.saveFailed": "保存できませんでした。",
-    "agents.candidates.notesNotShared": "このMacはメモをHubと共有していないため、Hubではメモを書けません。"
+    "agents.candidates.notesNotShared": "このコンピューターはメモをHubと共有していないため、Hubではメモを書けません。"
   },
   "en": {
     "tab.graph": "📊 Graph Map",
@@ -2091,7 +2091,7 @@
     "tab.agents": "💻 Agent",
     "agents.refresh": "Refresh",
     "agents.about": "About this screen",
-    "agents.hint": "An overview of the Agents enrolled with this Hub, then, for the Agent you pick, whether it is delivering and what its user chose to share of its \"worth a look\" list. Each Agent finds those against its own usual traffic; they are places to start looking, not verdicts, and the answers are the ones the person at that Mac or an administrator of this Hub gave. The period selector does not apply here. Enrolment, approval and revocation are in Settings > L3/L4.",
+    "agents.hint": "An overview of the Agents enrolled with this Hub, then, for the Agent you pick, whether it is delivering and what its user chose to share of its \"worth a look\" list. Each Agent finds those against its own usual traffic; they are places to start looking, not verdicts, and the answers are the ones the person at that computer or an administrator of this Hub gave. The period selector does not apply here. Enrolment, approval and revocation are in Settings > L3/L4.",
     "agents.none": "No Agents are enrolled.",
     "agents.loadFailed": "Could not load the Agents.",
     "agents.status.delivering": "Delivering (last: {time})",
@@ -2124,12 +2124,12 @@
     "agents.overview.probes": "LAN scans at Agents",
     "agents.overview.probesSub": "Senders ({agents} computers probed)",
     "agents.table.probes": "LAN scans",
-    "agents.probes.title": "LAN scans aimed at this Mac (last 14 days)",
-    "agents.probes.hint": "A device on the LAN tried {ports} or more of this Mac's ports in a short time. This is the detection log's threshold; printers and management tools can do this as part of normal work.",
+    "agents.probes.title": "LAN scans aimed at this computer (last 14 days)",
+    "agents.probes.hint": "A device on the LAN tried {ports} or more of this computer's ports in a short time. This is the detection log's threshold; printers and management tools can do this as part of normal work.",
     "agents.probes.none": "None in the last 14 days. Counted only while \"Count them from packet headers\" is on in the Mac Agent's settings.",
     "agents.probes.noneWindows": "None in the last 14 days. The Windows Agent always counts what reaches its closed ports.",
     "agents.probes.unsupported": "This version of the {platform} Agent does not count LAN scans. The macOS Agent and the Windows Agent 0.1.158 or later do.",
-    "agents.probes.target": "{source} → this Mac ({local})",
+    "agents.probes.target": "{source} → this computer ({local})",
     "agents.probes.line": "Up to {ports} {protocol} ports · {windows} times · last {time}",
     "agents.probes.sample": "Ports tried, for example: {ports}",
     "agents.probes.more": "{count} more senders.",
@@ -2197,6 +2197,6 @@
     "agents.candidates.saveNote": "Save note",
     "agents.candidates.saving": "Saving…",
     "agents.candidates.saveFailed": "Could not save.",
-    "agents.candidates.notesNotShared": "This Mac does not share notes with the Hub, so a note cannot be written here."
+    "agents.candidates.notesNotShared": "This computer does not share notes with the Hub, so a note cannot be written here."
   }
 }
