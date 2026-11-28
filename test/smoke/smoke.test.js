@@ -893,6 +893,8 @@ test('Agent tab shows a Windows Agent\'s shared candidates from 0.1.184 and its 
   await expect(page.locator('#agents-container')).not.toContainText(/Windows 0\.1\.184以降|Windows Agent 0\.1\.184 or later/);
   // Windows counts LAN scans from 0.1.158, with no setting to turn on.
   await expect(page.locator('#agents-container')).toContainText(/閉じたポートに届いた接続をいつも数えています|always counts what reaches its closed ports/);
+  // The Agent tab speaks of any computer, not a Mac, since Windows Agents appear on it too.
+  await expect(page.locator('#agents-container')).not.toContainText(/このMac|そのMac|this Mac|that Mac/);
 
   await select.selectOption(agents[1].agentId);
   await expect(page.locator('.agent-card-host')).toHaveText('old-windows-pc');
