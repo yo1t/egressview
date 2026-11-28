@@ -11,16 +11,59 @@ public sealed record AiInsightItem(string Name, long Connections, long MeasuredB
 public sealed record AiInsightContext(
     int SchemaVersion, DateTimeOffset GeneratedAt, DateTimeOffset PeriodStart, DateTimeOffset PeriodEnd,
     AiInsightCounts Current, AiInsightCounts Previous,
-    IReadOnlyList<AiInsightItem> TopApplications, IReadOnlyList<AiInsightItem> TopDestinations);
+    IReadOnlyList<AiInsightItem> TopApplications, IReadOnlyList<AiInsightItem> TopDestinations)
+{
+    /// Traffic worth a look over the last 14 days, with the person's answers
+    /// (P3-194, as the Mac's #905). Absent when it could not be read.
+    public AiInsightCandidateList? OutboundCandidates { get; init; }
+}
+
+/// The candidate list as an AI provider sees it: what stood out, against
+/// what, and what the person said about it. A note is the person's own words
+/// and goes as data, shown in the preview first. The same fields as the Mac's
+/// <c>AgentLocalInsightCandidateList</c>.
+public sealed record AiInsightCandidate(string Kind, DateTimeOffset Day, string? Application, string? Destination,
+    ulong BytesOut, ulong? UsualBytesOut, string? Answer, string? Note);
+
+/// <param name="State">learning, lowByteCoverage or ready. While learning the
+/// list is empty because nothing can be judged, not because nothing stood out.</param>
+public sealed record AiInsightCandidateList(string State, int Total, IReadOnlyList<AiInsightCandidate> Entries)
+{
+    public const int EntryLimit = 20;
+
+    public static AiInsightCandidateList From(OutboundCandidateReport report)
+    {
+        var judgments = report.Judgments.ToDictionary(judgment => judgment.CandidateId, StringComparer.Ordinal);
+        string? Clip(string? value) => value is null ? null : value[..Math.Min(value.Length, AiInsightContextBuilder.NameCharacterLimit)];
+        return new(report.State switch
+            {
+                OutboundCandidateState.Learning => "learning",
+                OutboundCandidateState.LowByteCoverage => "lowByteCoverage",
+                _ => "ready",
+            }, report.Total,
+            report.Candidates.Take(EntryLimit).Select(candidate =>
+            {
+                var judgment = judgments.GetValueOrDefault(candidate.Id);
+                var note = judgment?.Note.Trim() ?? "";
+                return new AiInsightCandidate(OutboundCandidateRules.KindCode(candidate.Kind), candidate.At, Clip(candidate.Application),
+                    Clip(candidate.Destination), candidate.BytesOut, candidate.UsualBytesOut,
+                    judgment is null ? null : OutboundCandidateJudgment.Code(judgment.Verdict), note.Length == 0 ? null : note);
+            }).ToList());
+    }
+}
 
 public static class AiInsightContextBuilder
 {
     public const int ItemLimit = 10;
     public const int NameCharacterLimit = 255;
 
+    /// Version 2 carries the "worth a look" list, as the Mac's does.
     public static AiInsightContext Build(PeriodAnalysis current, PeriodAnalysis previous, DateTimeOffset? generatedAt = null) => new(
-        1, generatedAt ?? DateTimeOffset.UtcNow, current.From, current.To,
-        Counts(current), Counts(previous), Ranked(current, link => link.Application), Ranked(current, link => link.DestinationName));
+        2, generatedAt ?? DateTimeOffset.UtcNow, current.From, current.To,
+        Counts(current), Counts(previous), Ranked(current, link => link.Application), Ranked(current, link => link.DestinationName))
+    {
+        OutboundCandidates = current.OutboundCandidates is { } report ? AiInsightCandidateList.From(report) : null,
+    };
 
     public static string Preview(AiInsightContext context) => JsonSerializer.Serialize(context, JsonOptions);
 

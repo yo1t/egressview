@@ -1317,6 +1317,12 @@ public partial class MainWindow : Window
         OutboundAnomalyRecord? record = null;
         try { if (anomaly.TryGetProperty("details", out var details)) record = details.Deserialize<OutboundAnomalyRecord>(); }
         catch (JsonException) { }
+        // The earlier answer goes in without the names, as the rest of the
+        // notice does (P3-194).
+        if (record?.Breakdown?.PreviousAnswer is { } previous)
+            body += " " + string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text(previous.Verdict == "expected" ? "NoticePreviousExpectedFormat" : "NoticePreviousInvestigateFormat"),
+                previous.JudgedAt.ToLocalTime().ToString("d", CultureInfo.CurrentCulture));
         app.Notifications.Notify("OutboundAnomaly", $"outbound-anomaly-{windowStart:O}", "EgressView Agent", body, app.ShowNotification,
             anomaly: record);
     }

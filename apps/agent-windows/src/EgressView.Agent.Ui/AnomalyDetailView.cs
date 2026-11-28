@@ -135,6 +135,10 @@ internal static class AnomalyDetailView
         // largest destination need not be the same connection.
         if (breakdown.Pairs is { Count: > 0 } pairs)
             panel.Children.Add(Pairs(pairs));
+        // What the person said before about the pair that sent most of it
+        // (P3-194). Said, never used to hold the notice back.
+        if (breakdown.PreviousAnswer is { } previous)
+            panel.Children.Add(Secondary(PreviousAnswerText(previous), 6));
         if (breakdown.Applications.Count > 0)
             panel.Children.Add(Contributors(LocalizationManager.Text("AppsSentMost"), breakdown.Applications));
         if (breakdown.Destinations.Count > 0)
@@ -239,6 +243,10 @@ internal static class AnomalyDetailView
         }
         return panel;
     }
+
+    internal static string PreviousAnswerText(OutboundPreviousAnswer previous) => string.Format(CultureInfo.CurrentCulture,
+        LocalizationManager.Text(previous.Verdict == "expected" ? "AnomalyPreviousExpectedFormat" : "AnomalyPreviousInvestigateFormat"),
+        previous.Application, previous.Destination, previous.JudgedAt.ToLocalTime().ToString("d", CultureInfo.CurrentCulture));
 
     private static FrameworkElement Pairs(IReadOnlyList<OutboundPair> pairs)
     {
