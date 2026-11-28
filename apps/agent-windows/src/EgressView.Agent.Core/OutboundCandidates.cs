@@ -23,7 +23,15 @@ public sealed record OutboundCandidate(
     string? Application,
     string? Destination,
     ulong BytesOut,
-    ulong? UsualBytesOut);
+    ulong? UsualBytesOut)
+{
+    /// The Mac's id for the same candidate, character for character:
+    /// `kind|seconds|application|destination`, the seconds as Swift writes a
+    /// whole Double ("1699920000.0"). An answer is kept under it and the Hub
+    /// gets its SHA-256, so the two Agents must spell it the same way
+    /// (`protocol/agent-outbound-candidates/v1/golden.json`).
+    public string Id => $"{OutboundCandidateRules.KindCode(Kind)}|{At.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)}.0|{Application}|{Destination}";
+}
 
 public enum OutboundCandidateState
 {
@@ -44,7 +52,12 @@ public sealed record OutboundCandidateReport(
     double MonitoredHours,
     double ByteCoverageShare,
     IReadOnlyList<OutboundCandidate> Candidates,
-    int Total);
+    int Total)
+{
+    /// What the person answered, for the candidates listed. Kept apart from
+    /// them and never changing them (P3-194).
+    public IReadOnlyList<OutboundCandidateJudgment> Judgments { get; init; } = [];
+}
 
 /// The same rules as `OutboundCandidates.swift`, held to the same cases in
 /// `test/fixtures/outbound-candidates-cases.json`. Times are Unix seconds, as
@@ -98,8 +111,17 @@ public static class OutboundCandidateRules
             || UnattributablePrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <param name="expected">The ids of candidates the person answered
+    /// "expected". Such a day of an above-usual pair is still listed, and it
+    /// also joins that pair's usual level, so a pair whose level has really
+    /// moved stops being listed every day (P3-194, decided 2026-11-28 from
+    /// the Mac: 19 of 30 candidates in 14 days were three pairs listed day
+    /// after day, every one answered "expected"). Only that pair and that
+    /// day; there is no "always expected for this app". The yardstick is a
+    /// percentile, so one answered day does not move it.</param>
     public static OutboundCandidateReport Evaluate(
-        IEnumerable<Hour> hours, IEnumerable<PairDay> pairDays, IReadOnlyDictionary<PairKey, double> firstSeen, DateTimeOffset now)
+        IEnumerable<Hour> hours, IEnumerable<PairDay> pairDays, IReadOnlyDictionary<PairKey, double> firstSeen, DateTimeOffset now,
+        IReadOnlySet<string>? expected = null)
     {
         var ordered = hours.OrderBy(hour => hour.Start).ToList();
         long monitored = 0;
@@ -117,7 +139,7 @@ public static class OutboundCandidateRules
             return new(OutboundCandidateState.Learning, monitored / 3600.0, 0, [], 0);
 
         var days = pairDays.GroupBy(day => day.Pair).ToDictionary(group => group.Key, group => group.OrderBy(day => day.Day).ToList());
-        var found = NewPairs(days, firstSeen, learnedAt).Concat(AboveUsual(days, learnedAt)).Concat(Machine(ordered, learnedAt));
+        var found = NewPairs(days, firstSeen, learnedAt).Concat(AboveUsual(days, learnedAt, expected ?? new HashSet<string>())).Concat(Machine(ordered, learnedAt));
         var cutoff = now.ToUnixTimeSeconds() - ListWindow;
         var recent = found.Where(candidate => candidate.At.ToUnixTimeSeconds() >= cutoff)
             .OrderByDescending(candidate => candidate.At)
@@ -133,16 +155,19 @@ public static class OutboundCandidateRules
     }
 
     /// The names are the Mac's, so a tie falls the same way on both.
-    private static string TieBreak(OutboundCandidate candidate)
+    private static string TieBreak(OutboundCandidate candidate) =>
+        $"{KindCode(candidate.Kind)}|{candidate.Application}|{candidate.Destination}";
+
+    public static string KindCode(OutboundCandidateKind kind) => kind switch
     {
-        var kind = candidate.Kind switch
-        {
-            OutboundCandidateKind.NewPair => "newPair",
-            OutboundCandidateKind.AboveUsual => "aboveUsual",
-            _ => "machine",
-        };
-        return $"{kind}|{candidate.Application}|{candidate.Destination}";
-    }
+        OutboundCandidateKind.NewPair => "newPair",
+        OutboundCandidateKind.AboveUsual => "aboveUsual",
+        _ => "machine",
+    };
+
+    /// An answer is kept this long after its candidate leaves the list, so a
+    /// candidate that returns after a short gap keeps its answer.
+    public const double JudgmentRetention = 30 * DaySeconds;
 
     private static DateTimeOffset Time(double seconds) => DateTimeOffset.FromUnixTimeSeconds((long)seconds);
 
@@ -166,8 +191,9 @@ public static class OutboundCandidateRules
 
     /// Against the 90th percentile, and without the days already listed: with
     /// the largest day as the yardstick, one 8.6 GiB send hid everything under
-    /// 25 GiB from then on.
-    private static IEnumerable<OutboundCandidate> AboveUsual(Dictionary<PairKey, List<PairDay>> pairs, double learnedAt)
+    /// 25 GiB from then on. A listed day the person answered "expected" is the
+    /// exception and joins the usual level (see <see cref="Evaluate"/>).
+    private static IEnumerable<OutboundCandidate> AboveUsual(Dictionary<PairKey, List<PairDay>> pairs, double learnedAt, IReadOnlySet<string> expected)
     {
         foreach (var (pair, days) in pairs)
         {
@@ -180,8 +206,9 @@ public static class OutboundCandidateRules
                     if (yardstick <= ulong.MaxValue / AboveUsualFactor
                         && day.BytesOut >= AboveUsualBytes && day.BytesOut >= yardstick * AboveUsualFactor)
                     {
-                        yield return new(OutboundCandidateKind.AboveUsual, Time(day.Day), pair.Application, pair.Destination, day.BytesOut, yardstick);
-                        continue;
+                        var candidate = new OutboundCandidate(OutboundCandidateKind.AboveUsual, Time(day.Day), pair.Application, pair.Destination, day.BytesOut, yardstick);
+                        yield return candidate;
+                        if (!expected.Contains(candidate.Id)) continue;
                     }
                 }
                 usual.Add(day.BytesOut);

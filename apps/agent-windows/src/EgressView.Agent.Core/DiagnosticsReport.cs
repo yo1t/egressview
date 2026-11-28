@@ -194,6 +194,9 @@ public static class DiagnosticsReport
                     byteCoverageShare = Math.Round(candidates.ByteCoverageShare, 3),
                     total = candidates.Total,
                     listed = candidates.Candidates.Count,
+                    // How many are answered, never what or the note (P3-194).
+                    answeredExpected = candidates.Judgments.Count(judgment => judgment.Verdict == OutboundCandidateVerdict.Expected),
+                    answeredInvestigate = candidates.Judgments.Count(judgment => judgment.Verdict == OutboundCandidateVerdict.Investigate),
                 },
             };
         }
