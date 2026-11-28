@@ -38,7 +38,8 @@ internal static class OutboundCandidatesView
     }
 
     internal static FrameworkElement Build(OutboundCandidateReport report, bool showsAll, Action showAll,
-        Answer? answer = null, bool showsChecked = false, Action? showChecked = null, Action? forgetAll = null)
+        Answer? answer = null, bool showsChecked = false, Action? showChecked = null, Action? forgetAll = null,
+        Func<OutboundCandidate, Task<OutboundCandidateEvidence?>>? loadEvidence = null)
     {
         var panel = new StackPanel();
         panel.Children.Add(new TextBlock
@@ -66,7 +67,7 @@ internal static class OutboundCandidatesView
             panel.Children.Add(Note(LocalizationManager.Text("WorthALookAllAnswered"), 9));
 
         var visible = showsAll ? open : open.Take(CollapsedCount).ToList();
-        foreach (var candidate in visible) panel.Children.Add(Row(candidate, null, answer));
+        foreach (var candidate in visible) panel.Children.Add(Row(candidate, null, answer, loadEvidence));
         if (visible.Count < open.Count)
             panel.Children.Add(Link(Format("WorthALookShowAllFormat", open.Count), showAll, 9));
         else if (report.Total > report.Candidates.Count)
@@ -81,7 +82,7 @@ internal static class OutboundCandidatesView
                     Text = Format("WorthALookCheckedFormat", answered.Count), FontSize = 14, FontWeight = FontWeights.SemiBold,
                     Margin = new Thickness(0, 16, 0, 0), TextWrapping = TextWrapping.Wrap,
                 });
-                foreach (var candidate in answered) panel.Children.Add(Row(candidate, judgments[candidate.Id], answer));
+                foreach (var candidate in answered) panel.Children.Add(Row(candidate, judgments[candidate.Id], answer, loadEvidence));
             }
             else panel.Children.Add(Link(Format("WorthALookCheckedFormat", answered.Count) + " ▸", showChecked, 16));
         }
@@ -92,7 +93,8 @@ internal static class OutboundCandidatesView
     }
 
     /// One candidate: what it is, the two answers, and the note.
-    private static FrameworkElement Row(OutboundCandidate candidate, OutboundCandidateJudgment? judgment, Answer? answer)
+    private static FrameworkElement Row(OutboundCandidate candidate, OutboundCandidateJudgment? judgment, Answer? answer,
+        Func<OutboundCandidate, Task<OutboundCandidateEvidence?>>? loadEvidence = null)
     {
         var row = new StackPanel();
         row.Children.Add(Selectable(Title(candidate)));
@@ -115,6 +117,33 @@ internal static class OutboundCandidatesView
             () => answer(candidate, OutboundCandidateVerdict.Expected, editor.IsVisible ? note.Text : null)));
         buttons.Children.Add(VerdictButton(OutboundCandidateVerdict.Investigate, judgment?.Verdict,
             () => answer(candidate, OutboundCandidateVerdict.Investigate, editor.IsVisible ? note.Text : null)));
+        if (loadEvidence is not null)
+        {
+            var evidence = new StackPanel { Visibility = Visibility.Collapsed };
+            var evidenceButton = SmallButton(LocalizationManager.Text("WorthALookEvidence"));
+            var loaded = false;
+            evidenceButton.Click += async (_, _) =>
+            {
+                evidence.Visibility = evidence.IsVisible ? Visibility.Collapsed : Visibility.Visible;
+                if (loaded || !evidence.IsVisible) return;
+                loaded = true;
+                evidence.Children.Clear();
+                evidence.Children.Add(Note(LocalizationManager.Text("WorthALookEvidenceLoading"), 6));
+                OutboundCandidateEvidence? value = null;
+                try { value = await loadEvidence(candidate); } catch { }
+                evidence.Children.Clear();
+                if (value is null)
+                {
+                    loaded = false;
+                    evidence.Children.Add(Note(LocalizationManager.Text("WorthALookEvidenceFailed"), 6));
+                    return;
+                }
+                foreach (var line in EvidenceLines(candidate, value)) evidence.Children.Add(line);
+            };
+            buttons.Children.Add(evidenceButton);
+            row.Children.Add(buttons);
+            row.Children.Add(evidence);
+        }
         var noteButton = SmallButton(LocalizationManager.Text(judgment is null ? "WorthALookAddNote" : "WorthALookEditNote"));
         noteButton.Click += (_, _) => editor.Visibility = editor.IsVisible ? Visibility.Collapsed : Visibility.Visible;
         buttons.Children.Add(noteButton);
@@ -130,9 +159,48 @@ internal static class OutboundCandidatesView
             editor.Children.Add(save);
         }
         else editor.Children.Add(Note(LocalizationManager.Text("WorthALookNoteHint"), 3));
-        row.Children.Add(buttons);
+        if (!row.Children.Contains(buttons)) row.Children.Add(buttons);
         row.Children.Add(editor);
         return row;
+    }
+
+    /// What the connections behind a candidate were: each name and address,
+    /// how much went over how many connections and when, then how much of the
+    /// time was watched. The whole PC lists every application.
+    private static IEnumerable<FrameworkElement> EvidenceLines(OutboundCandidate candidate, OutboundCandidateEvidence evidence)
+    {
+        var heading = new TextBlock
+        {
+            Text = LocalizationManager.Text("WorthALookEvidence"), FontSize = 12, FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap,
+        };
+        heading.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        yield return heading;
+        if (evidence.Flows.Count == 0) yield return Note(LocalizationManager.Text("WorthALookEvidenceNone"), 3);
+        foreach (var flow in evidence.Flows)
+        {
+            var name = flow.Hostname is { } hostname ? $"{hostname} ({flow.Address})" : flow.Address;
+            yield return Selectable((candidate.Application is null ? $"{flow.Application} \u2192 " : "") + name, 4);
+            yield return Note(Format("WorthALookEvidenceFlowFormat", AnomalyDetailView.Bytes(flow.BytesOut), flow.Connections,
+                Span(flow.FirstAt, flow.LastAt)), 0);
+        }
+        if (evidence.FlowTotal > evidence.Flows.Count)
+            yield return Note(Format("WorthALookEvidenceLimitFormat", evidence.Flows.Count, evidence.FlowTotal), 4);
+        var share = evidence.MonitoredSeconds / Math.Max(1, (evidence.End - evidence.Start).TotalSeconds);
+        yield return Note(Format("WorthALookEvidenceMonitoredFormat", share, Span(evidence.Start, evidence.End)), 6);
+        if (evidence.MayUndercount) yield return Note(LocalizationManager.Text("WorthALookEvidenceUndercount"), 3);
+    }
+
+    /// In local time: these are when things happened, unlike the candidate's
+    /// day, which is the UTC day the baseline counts by.
+    private static string Span(DateTimeOffset from, DateTimeOffset to)
+    {
+        var start = from.ToLocalTime();
+        var end = to.ToLocalTime();
+        var pattern = CultureInfo.CurrentCulture.DateTimeFormat.ShortTimePattern;
+        var head = start.ToString("M/d ", CultureInfo.InvariantCulture) + start.ToString(pattern, CultureInfo.CurrentCulture);
+        var tail = (start.Date == end.Date ? "" : end.ToString("M/d ", CultureInfo.InvariantCulture)) + end.ToString(pattern, CultureInfo.CurrentCulture);
+        return $"{head}\u2013{tail}";
     }
 
     /// The chosen answer stays filled in: blue for expected, orange for look
@@ -201,14 +269,14 @@ internal static class OutboundCandidatesView
         string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text(key), values);
 
     /// A name here is what gets searched for or passed on next.
-    private static System.Windows.Controls.TextBox Selectable(string text)
+    private static System.Windows.Controls.TextBox Selectable(string text, double top = 9)
     {
         var box = new System.Windows.Controls.TextBox
         {
             Text = text, IsReadOnly = true, BorderThickness = new Thickness(0), Padding = new Thickness(0),
             Background = System.Windows.Media.Brushes.Transparent, TextWrapping = TextWrapping.Wrap,
             // A text box keeps two pixels inside its edge; the lines around it do not.
-            Margin = new Thickness(-2, 9, 0, 0),
+            Margin = new Thickness(-2, top, 0, 0),
         };
         box.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "TextPrimaryBrush");
         return box;
