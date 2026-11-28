@@ -3931,6 +3931,95 @@ try
                 "a candidate that has left the list is said to have left");
         }
 
+        // P3-194: sending the list to the Hub, as the Mac does (#906).
+        {
+            var shareDay = DateTimeOffset.FromUnixTimeSeconds(1_699_920_000);
+            var backup = new OutboundCandidate(OutboundCandidateKind.AboveUsual, shareDay, "com.example.backup", "example.net", 9_500_000_000, 400_000_000);
+            var shareReport = new OutboundCandidateReport(OutboundCandidateState.Ready, 200, 1, [
+                backup,
+                new(OutboundCandidateKind.NewPair, shareDay.AddDays(-1), "curl", "example.org", 120_000_000, null),
+                new(OutboundCandidateKind.Machine, shareDay.AddDays(-1), null, null, 12_300_000_000, 8_100_000_000),
+            ], 3);
+            var shareJudgments = new Dictionary<string, OutboundCandidateJudgment>
+            {
+                [backup.Id] = new(backup.Id, shareDay, OutboundCandidateVerdict.Expected, "My weekly backup", shareDay.AddHours(1)),
+            };
+            var built = OutboundCandidateSharePayload.Build(shareReport, shareJudgments, includesNotes: true, hubTakesAnswers: true,
+                OutboundCandidateSharePayload.LegacyEntryLimit, shareDay.AddHours(2));
+            var goldenPath = Path.GetFullPath(Path.Combine(windowsRoot, "..", "..", "protocol", "agent-outbound-candidates", "v1", "golden.json"));
+            var goldenNode = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(goldenPath));
+            Assert(System.Text.Json.Nodes.JsonNode.DeepEquals(built, goldenNode),
+                $"the list is the shared golden file, field for field: {built.ToJsonString()}");
+
+            var withoutNotes = OutboundCandidateSharePayload.Build(shareReport, shareJudgments, includesNotes: false, hubTakesAnswers: false, 20, shareDay);
+            Assert(withoutNotes["notesShared"] is null && !withoutNotes.ToJsonString().Contains("My weekly backup")
+                   && withoutNotes["entries"]![0]!["answer"]!.GetValue<string>() == "expected",
+                "without the second switch the answer goes and the note does not; an older Hub is not told notesShared");
+            Assert(OutboundCandidateSharePayload.ContentHash(withoutNotes)
+                   == OutboundCandidateSharePayload.ContentHash(OutboundCandidateSharePayload.Build(shareReport, shareJudgments, false, false, 20, shareDay.AddHours(5))),
+                "the content hash does not change with the time of sending");
+            Assert(OutboundCandidateSharePayload.Build(shareReport, shareJudgments, false, false, 2, shareDay) is var cut
+                   && cut["entries"]!.AsArray().Count == 2 && cut["total"]!.GetValue<int>() == 3, "the list is cut at the limit and total still counts all");
+            Assert(OutboundCandidateSharePayload.EntryLimit(null) == 20 && OutboundCandidateSharePayload.EntryLimit(150) == 150
+                   && OutboundCandidateSharePayload.EntryLimit(500) == 150 && OutboundCandidateSharePayload.EntryLimit(10) == 20,
+                "20 unless the Hub says more, and never over 150");
+            Assert(OutboundCandidateSharePayload.Clip("ab\U0001F600c", 3) == "ab" && OutboundCandidateSharePayload.Clip("ab\U0001F600c", 4) == "ab\U0001F600",
+                "a name is cut in UTF-16 units, as the Hub counts, and never inside a character");
+            var off = OutboundCandidateSharePayload.Off(shareDay);
+            Assert(off["sharing"]!.GetValue<bool>() == false && off["entries"]!.AsArray().Count == 0 && off["state"] is null, "off deletes, with nothing in it");
+
+            Assert(OutboundCandidateSharePlanner.Decide(false, false, null, null, null, shareDay) == OutboundCandidateSharePlan.Nothing
+                   && OutboundCandidateSharePlanner.Decide(false, true, "h", shareDay, null, shareDay) == OutboundCandidateSharePlan.SendOff
+                   && OutboundCandidateSharePlanner.Decide(true, false, null, null, "h", shareDay) == OutboundCandidateSharePlan.SendList
+                   && OutboundCandidateSharePlanner.Decide(true, true, "h", shareDay, "h", shareDay.AddHours(5)) == OutboundCandidateSharePlan.Nothing
+                   && OutboundCandidateSharePlanner.Decide(true, true, "h", shareDay, "h", shareDay.AddHours(6)) == OutboundCandidateSharePlan.SendList
+                   && OutboundCandidateSharePlanner.Decide(true, true, "h", shareDay, "g", shareDay.AddMinutes(1)) == OutboundCandidateSharePlan.SendList,
+                "sent on a change or after six hours; off owes the Hub a delete only if it may hold the list");
+
+            var answersPath = Path.GetFullPath(Path.Combine(windowsRoot, "..", "..", "protocol", "agent-outbound-candidates", "v1", "answers-golden.json"));
+            var hubAnswers = OutboundCandidateHubAnswers.Parse(File.ReadAllText(answersPath));
+            Assert(hubAnswers.Version == 2 && hubAnswers.Answers.Count == 2 && hubAnswers.Answers[0].Answer == "investigate"
+                   && hubAnswers.Answers[0].Note == "Ask who ran curl" && hubAnswers.Answers[0].AnsweredAt.ToUnixTimeMilliseconds() == 1_699_930_800_250
+                   && hubAnswers.Answers[1].Answer is null,
+                "the Hub's answers are read as the shared golden file writes them, milliseconds and all");
+
+            // The whole round, against a Hub that is not there: a handler
+            // that answers as the Hub would and keeps what it was sent.
+            var sharingDirectory = Path.Combine(directory, "sharing");
+            Directory.CreateDirectory(sharingDirectory);
+            using var sharingStore = new ObservationStore(Path.Combine(sharingDirectory, "sharing.db"));
+            var hub = new FakeHub();
+            var enrolled = new AgentCredential(new Uri("https://hub.example"), Guid.NewGuid(), "token", DateTimeOffset.UtcNow);
+            var sharer = new OutboundCandidateSharer(sharingStore, sharingDirectory, () => enrolled, new OutboundCandidateHubClient(new HttpClient(hub)));
+            sharer.RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Assert(hub.Puts.Count == 0 && sharer.State.Status == "off", "nothing is sent until the person turns it on");
+            sharer.SetSwitches(true, false);
+            sharer.RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Assert(hub.Puts.Count == 1 && hub.Puts[0].Contains("\"sharing\":true") && sharer.State is { Status: "sent", HubMayHoldList: true },
+                "turned on, the list goes to a Hub that takes it");
+            Assert(hub.Requests.All(request => request.Headers.Authorization?.Parameter == "token"), "every request carries the Agent's token");
+            sharer.RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Assert(hub.Puts.Count == 1, "an unchanged list is not sent again within six hours");
+            Assert(OutboundCandidateSharingState.Read(sharingDirectory) is { Enabled: true, HubMayHoldList: true }, "what was sent survives a restart");
+            sharer.SetSwitches(false, false);
+            sharer.RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Assert(hub.Puts.Count == 2 && hub.Puts[1].Contains("\"sharing\":false") && sharer.State is { Status: "removed", HubMayHoldList: false },
+                "turned off, the Hub is told to delete the list");
+            hub.TakesCandidates = false;
+            sharer.SetSwitches(true, false);
+            sharer.RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Assert(hub.Puts.Count == 2 && sharer.State.Status == "hub-too-old", "a Hub whose capabilities do not say it takes the list is not sent it");
+            hub.TakesCandidates = true;
+            hub.PutStatus = HttpStatusCode.ServiceUnavailable;
+            sharer.RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Assert(sharer.State is { Status: "failed", StatusCode: 503, HubMayHoldList: false }, "a failed send says what the Hub answered and is tried again later");
+            var insecure = new OutboundCandidateSharer(sharingStore, sharingDirectory, () => enrolled with { HubUrl = new Uri("http://hub.example") },
+                new OutboundCandidateHubClient(new HttpClient(hub)));
+            var sentBefore = hub.Requests.Count;
+            insecure.RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+            Assert(hub.Requests.Count == sentBefore && insecure.State.Status == "insecure-url", "nothing goes to a Hub that is not HTTPS");
+        }
+
         // P3-194: answering a candidate, as on the Mac.
         {
             // The id is the Mac's, character for character: the Hub gets its
@@ -4025,6 +4114,21 @@ try
                 store.SetOutboundCandidateJudgment(candidate.Id, OutboundCandidateVerdict.Expected, "mine", DateTimeOffset.UtcNow);
             store.RemoveAllOutboundCandidateJudgments();
             Assert(store.ReadOutboundCandidateJudgments().Count == 0, "all answers can be forgotten at once");
+
+            // Answers given on the Hub: whoever answered last wins (stage 2).
+            var hashed = OutboundCandidateSharePayload.HashedId(newest.Id);
+            var mine = DateTimeOffset.UtcNow;
+            store.SetOutboundCandidateJudgment(newest.Id, OutboundCandidateVerdict.Expected, "mine", mine);
+            Assert(store.ApplyHubOutboundCandidateAnswers([new(hashed, "investigate", "theirs", mine.AddMinutes(-1))], takesNotes: true, mine) == 0,
+                "an older answer on the Hub does not replace a newer one here");
+            Assert(store.ApplyHubOutboundCandidateAnswers([new(hashed, "investigate", "theirs", mine.AddMinutes(1).AddMilliseconds(250))], takesNotes: false, mine) == 1
+                   && store.ReadOutboundCandidateJudgments()[newest.Id] is { Verdict: OutboundCandidateVerdict.Investigate, Note: "mine", AnsweredOnHub: true } hub
+                   && hub.JudgedAt.Millisecond == 0 && hub.JudgedAt > mine.AddMinutes(1),
+                "a later answer on the Hub wins, keeps the note here when notes are not shared, and its time is rounded up to the second");
+            Assert(store.ApplyHubOutboundCandidateAnswers([new(hashed, null, null, mine.AddMinutes(2))], takesNotes: true, mine) == 1
+                   && store.ReadOutboundCandidateJudgments().Count == 0, "taken back on the Hub, taken back here");
+            Assert(store.ApplyHubOutboundCandidateAnswers([new("not-a-candidate", "expected", null, mine.AddMinutes(3))], takesNotes: true, mine) == 0,
+                "an answer for a candidate not listed here is left alone");
 
             store.SetOutboundCandidateJudgment(newest.Id, OutboundCandidateVerdict.Expected, "mine", DateTimeOffset.UtcNow);
             var oldest = report.Candidates[^1];
@@ -5967,4 +6071,31 @@ file sealed class HangingHandler : HttpMessageHandler
         await Task.Delay(Timeout.Infinite, cancellationToken);
         throw new InvalidOperationException("unreachable");
     }
+}
+
+/// Answers as the Hub does for P3-194, and keeps what it was sent.
+sealed class FakeHub : HttpMessageHandler
+{
+    public bool TakesCandidates { get; set; } = true;
+    public HttpStatusCode PutStatus { get; set; } = HttpStatusCode.OK;
+    public List<HttpRequestMessage> Requests { get; } = [];
+    public List<string> Puts { get; } = [];
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        Requests.Add(request);
+        var path = request.RequestUri!.AbsolutePath;
+        if (path == "/api/agent/capabilities")
+            return Json(TakesCandidates ? """{"schemaVersions":[1],"outboundCandidates":true,"outboundCandidateAnswers":true,"maxOutboundCandidates":150}""" : """{"schemaVersions":[1]}""");
+        if (path == "/api/agent/outbound-candidates/answers") return Json("""{"version":1,"answers":[]}""");
+        if (path == "/api/agent/outbound-candidates" && request.Method == HttpMethod.Put)
+        {
+            Puts.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            return new HttpResponseMessage(PutStatus) { Content = new StringContent("{}") };
+        }
+        return new HttpResponseMessage(HttpStatusCode.NotFound);
+    }
+
+    private static HttpResponseMessage Json(string body) =>
+        new(HttpStatusCode.OK) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
 }

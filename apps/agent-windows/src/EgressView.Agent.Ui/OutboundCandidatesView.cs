@@ -100,6 +100,7 @@ internal static class OutboundCandidatesView
         row.Children.Add(Selectable(Title(candidate)));
         row.Children.Add(Note(Detail(candidate), 1));
         if (judgment is { Note.Length: > 0 }) row.Children.Add(Note(Format("WorthALookNoteFormat", judgment.Note), 3));
+        if (judgment is { AnsweredOnHub: true }) row.Children.Add(Note(LocalizationManager.Text("WorthALookAnsweredOnHub"), 3));
         if (answer is null) return row;
 
         var buttons = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };

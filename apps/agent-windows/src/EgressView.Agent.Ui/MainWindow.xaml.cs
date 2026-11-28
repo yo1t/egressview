@@ -263,6 +263,7 @@ public partial class MainWindow : Window
     private async Task RefreshNetworkAndDeliveryAsync()
     {
         await RefreshDeliveryStatusAsync();
+        if (HubSettingsSection.IsVisible) await RefreshOutboundSharingAsync();
         await RefreshNetworkAsync();
     }
 
@@ -668,6 +669,70 @@ public partial class MainWindow : Window
     }
 
     /// The connections behind one candidate, read when its row asks.
+    /// Settings > Hub: the two switches for sharing the list (P3-194), and
+    /// how the last send went.
+    private async Task RefreshOutboundSharingAsync()
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "outbound-sharing-status" }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            if (document.RootElement.TryGetProperty("data", out var data)) ShowOutboundSharing(data);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { OutboundSharingStatus.Text = ""; }
+    }
+
+    private bool showingOutboundSharing;
+
+    private void ShowOutboundSharing(JsonElement data)
+    {
+        showingOutboundSharing = true;
+        try
+        {
+            var enabled = data.GetProperty("enabled").GetBoolean();
+            OutboundSharingEnabled.IsChecked = enabled;
+            OutboundSharingNotes.IsChecked = data.GetProperty("includesNotes").GetBoolean();
+            OutboundSharingNotes.IsEnabled = enabled;
+            var at = data.TryGetProperty("at", out var when) && when.ValueKind == JsonValueKind.String
+                ? when.GetDateTimeOffset().ToLocalTime().ToString("g", CultureInfo.CurrentCulture) : "";
+            var code = data.TryGetProperty("statusCode", out var status) && status.ValueKind == JsonValueKind.Number ? status.GetInt32().ToString(CultureInfo.InvariantCulture) : "";
+            OutboundSharingStatus.Text = data.GetProperty("state").GetString() switch
+            {
+                "sent" => string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("WorthALookShareSentFormat"), at),
+                "waiting" => LocalizationManager.Text("WorthALookShareWaiting"),
+                "removing" => LocalizationManager.Text("WorthALookShareRemoving"),
+                "removed" => LocalizationManager.Text("WorthALookShareRemoved"),
+                "not-enrolled" => LocalizationManager.Text("WorthALookShareNotEnrolled"),
+                "hub-too-old" => LocalizationManager.Text("WorthALookShareHubTooOld"),
+                "insecure-url" => LocalizationManager.Text("WorthALookShareInsecure"),
+                "failed" when code.Length > 0 => string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("WorthALookShareHttpFormat"), code),
+                "failed" => LocalizationManager.Text("WorthALookShareUnreachable"),
+                _ => LocalizationManager.Text("WorthALookShareOff"),
+            };
+        }
+        finally { showingOutboundSharing = false; }
+    }
+
+    private async void OutboundSharing_Click(object sender, RoutedEventArgs e)
+    {
+        if (showingOutboundSharing) return;
+        var enabled = OutboundSharingEnabled.IsChecked == true;
+        var notes = enabled && OutboundSharingNotes.IsChecked == true;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "set-outbound-sharing", enabled, includesNotes = notes }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            ShowOutboundSharing(document.RootElement.GetProperty("data"));
+            // The list is sent from the service in a moment; read how it went.
+            await Task.Delay(TimeSpan.FromSeconds(3), lifetime.Token);
+            await RefreshOutboundSharingAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception) { OutboundSharingStatus.Text = exception.Message; await RefreshOutboundSharingAsync(); }
+    }
+
     private async Task<OutboundCandidateEvidence?> LoadOutboundEvidenceAsync(OutboundCandidate candidate)
     {
         var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "outbound-candidate-evidence", id = candidate.Id }), lifetime.Token);

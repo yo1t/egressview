@@ -9,7 +9,7 @@ namespace EgressView.Agent.Service;
 internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnapshot> snapshot, string allowedSid,
     WindowsCredentialStore credentialStore, Func<bool> monitoringEnabled, Func<bool, bool> setMonitoringEnabled,
     Func<bool> readsHostnames, Func<bool, bool> setReadsHostnames,
-    DeliveryController delivery, EnrichmentController enrichment) : IAsyncDisposable
+    DeliveryController delivery, EnrichmentController enrichment, OutboundSharingController? sharing = null) : IAsyncDisposable
 {
     public const string PipeName = "egressview-agent-v1";
 
@@ -265,9 +265,16 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         enrichment.SetPublicFeedsEnabled, SetCountryTableAccount, enrichment.SetCountryTableEnabled,
         () => _ = enrichment.FetchPublicFeedsOnceAsync(CancellationToken.None),
         enrichment.SetLookupSource, enrichment.SetAbuseChKey,
-        (id, verdict, note) => store.SetOutboundCandidateJudgment(id, verdict, note, DateTimeOffset.UtcNow),
-        store.RemoveAllOutboundCandidateJudgments,
-        id => inFlight.Run($"outbound-evidence/{id}", () => store.ReadOutboundCandidateEvidence(id, DateTimeOffset.UtcNow)));
+        (id, verdict, note) =>
+        {
+            var answered = store.SetOutboundCandidateJudgment(id, verdict, note, DateTimeOffset.UtcNow);
+            sharing?.Changed();
+            return answered;
+        },
+        () => { store.RemoveAllOutboundCandidateJudgments(); sharing?.Changed(); },
+        id => inFlight.Run($"outbound-evidence/{id}", () => store.ReadOutboundCandidateEvidence(id, DateTimeOffset.UtcNow)),
+        sharing is null ? null : () => sharing.Sharer.State,
+        sharing is null ? null : (enabled, notes) => { sharing.SetSwitches(enabled, notes); return sharing.Sharer.State; });
 
     /// Either the text of a GeoIP.conf, or nothing at all to withdraw.
     private bool SetCountryTableAccount(string? configuration)

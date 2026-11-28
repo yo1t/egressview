@@ -29,6 +29,7 @@ internal sealed class DeliveryController : IDisposable
     internal DeliveryRuntimeStatus Status { get { lock (stateGate) return status; } }
     internal DeliveryHistory? History => history;
     internal DeliveryCapabilityStatus CapabilityStatus => sender.CapabilityStatus;
+    internal Action<int?>? AnswersVersion { set => sender.AnswersVersion = value; }
 
     internal void RequestNow()
     {

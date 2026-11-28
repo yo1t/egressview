@@ -310,9 +310,11 @@ internal sealed class AgentWindowsService : ServiceBase
             Path.Combine(root, "country", GeoLite2Updater.EditionId + ".mmdb"),
             Path.Combine(root, "country-table.enabled"),
             Path.Combine(root, "geo-lookup-source.txt"));
+        using var sharing = new OutboundSharingController(store, DataDirectory, credentialStore);
+        deliveryController.AnswersVersion = sharing.HubAnswersVersion;
         await using var ipc = new AgentIpcServer(store, monitoring.Snapshot, ReadAllowedUserSid(), credentialStore,
             () => monitoring.Enabled, monitoring.SetEnabled, () => monitoring.ReadsHostnames, monitoring.SetReadsHostnames,
-            deliveryController, enrichmentController);
+            deliveryController, enrichmentController, sharing);
         ipc.Start();
         // Written once per start, because a machine that answers nothing for
         // two minutes after a reboot looks like a machine that did not come
@@ -329,6 +331,7 @@ internal sealed class AgentWindowsService : ServiceBase
         }
         catch { /* Timing the start must never be what stops it. */ }
         var delivery = deliveryController.RunAsync(cancellationToken);
+        var outboundSharing = sharing.RunAsync(cancellationToken);
         var geoCache = enrichmentController.RunGeoAsync(cancellationToken);
         var threatIntel = enrichmentController.RunThreatAsync(cancellationToken);
         var countryTable = enrichmentController.RunCountryTableAsync(cancellationToken);
@@ -365,6 +368,7 @@ internal sealed class AgentWindowsService : ServiceBase
         await coverage;
         await runHeartbeat;
         await delivery;
+        await outboundSharing;
         await geoCache;
         await threatIntel;
         await countryTable;
