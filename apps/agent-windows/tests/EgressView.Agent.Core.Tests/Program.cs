@@ -374,6 +374,17 @@ try
         Assert(probes.CountedPackets == countedBefore && probes.TakeCompleted(w0.AddSeconds(1200)).Count == 0,
             "datagrams to a broadcast or multicast address are not probes of this PC");
 
+        // A /25's broadcast ends .127, which the address alone cannot tell
+        // from a host; the collector, which knows the subnets, says so.
+        for (var port = 1; port <= 12; port++)
+            probes.Record("udp", "192.168.20.35", "192.168.20.127", port, w0.AddSeconds(1300 + port), localIsSubnetBroadcast: true);
+        Assert(probes.CountedPackets == countedBefore && probes.TakeCompleted(w0.AddSeconds(1500)).Count == 0,
+            "a broadcast to a subnet that is not a /24 is not a probe of this PC either");
+        for (var port = 1; port <= 12; port++)
+            probes.Record("udp", "192.168.20.35", "192.168.20.127", port, w0.AddSeconds(1600 + port));
+        Assert(probes.TakeCompleted(w0.AddSeconds(1800)) is [{ DistinctPorts: 12, LocalAddress: "192.168.20.127" }],
+            "while the same address, when it is a host, still counts");
+
         var (v4, v4Port) = EtwNetworkCollector.SockAddr(new byte[] { 2, 0, 0, 80, 192, 168, 20, 105, 0, 0, 0, 0, 0, 0, 0, 0 });
         var mapped = new byte[28];
         mapped[0] = 23; mapped[2] = 0xF7; mapped[3] = 0xFA;
