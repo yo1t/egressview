@@ -8,6 +8,12 @@ public sealed record OutboundContributor(string Name, ulong BytesOut);
 /// One application and one destination, and what the first sent the second.
 public sealed record OutboundPair(string Application, string Destination, ulong BytesOut);
 
+/// What the person last answered about the application and destination that
+/// sent most of an anomalous window (P3-194, as the Mac's #905). Only said,
+/// never used to hold a notice back: an app the person trusts is exactly what
+/// a careful sender would use (P3-193).
+public sealed record OutboundPreviousAnswer(string Application, string Destination, string Verdict, DateTimeOffset JudgedAt);
+
 /// What explains an anomaly: the usual level it was compared with, and who
 /// sent the most.
 ///
@@ -25,7 +31,8 @@ public sealed record OutboundAnomalyBreakdown(
     IReadOnlyList<OutboundContributor> Applications,
     IReadOnlyList<OutboundContributor> Destinations,
     int SendingDestinationCount,
-    IReadOnlyList<OutboundPair>? Pairs = null)
+    IReadOnlyList<OutboundPair>? Pairs = null,
+    OutboundPreviousAnswer? PreviousAnswer = null)
 {
     /// The most applications and destinations kept, each.
     public const int ContributorLimit = 5;

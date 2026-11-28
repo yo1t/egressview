@@ -2438,7 +2438,33 @@ public sealed partial class ObservationStore : IDisposable
             .Select(row => new OutboundPair(row.Application, Destination(row.Address, row.Hostname), row.BytesOut))
             .ToList();
         var sendingDestinations = sending.Select(row => row.Address).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-        return new(usualBytesOut, applications, destinations, sendingDestinations, pairs);
+        return new(usualBytesOut, applications, destinations, sendingDestinations, pairs, PreviousAnswer(sending));
+    }
+
+    /// The pair that sent at least half of the window, keyed as the baseline
+    /// keys it, and the newest answer given to any candidate of it.
+    private OutboundPreviousAnswer? PreviousAnswer(IReadOnlyCollection<OutboundRow> sending)
+    {
+        var total = SumBytes(sending);
+        var top = OutboundBaselineKeys.Pairs(sending.Select(row => (row.Address, row.Hostname, OutboundBaselineKeys.Application(row.Application), row.BytesOut)).ToList())
+            .OrderByDescending(pair => pair.Value).FirstOrDefault();
+        if (top.Value == 0 || top.Value * 2 < total) return null;
+        var (application, destination) = top.Key;
+        lock (gate)
+        {
+            CheckOperation(WinSqlite.Prepare(db, "SELECT verdict,judged_at FROM outbound_candidate_judgments WHERE application=? AND destination=? " +
+                "ORDER BY judged_at DESC LIMIT 1", -1, out var statement, 0));
+            try
+            {
+                Bind(statement, 1, application);
+                Bind(statement, 2, destination);
+                if (WinSqlite.Step(statement) != WinSqlite.Row) return null;
+                // The note stays behind: this goes toward a notice.
+                return new(application, destination, Text(statement, 0),
+                    DateTimeOffset.Parse(Text(statement, 1), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal));
+            }
+            finally { WinSqlite.Finalize(statement); }
+        }
     }
 
     /// The newest window that was judged unusual, so the window can notice a

@@ -127,6 +127,14 @@ public sealed partial class ObservationStore
     public OutboundCandidateEvidence ReadOutboundCandidateEvidence(OutboundCandidate candidate, int limit = OutboundCandidateEvidence.FlowLimit)
     {
         var (start, end) = OutboundCandidateEvidence.Window(candidate);
+        // Not past what the baseline has read: the candidate was judged on
+        // those hours, and the rest of today has not happened yet. Taking the
+        // whole of today, a candidate listed at lunchtime read as 17%
+        // monitored and "more may have been sent" (2026-11-28).
+        string? through;
+        lock (gate) through = NullableScalarText("SELECT captured_through FROM baseline_state WHERE id=1");
+        if (through is not null && DateTimeOffset.Parse(through, CultureInfo.InvariantCulture) is var captured && captured < end && captured > start)
+            end = captured;
         var flows = new Dictionary<(string Application, string? Hostname, string Address), OutboundEvidenceFlow>();
         for (var hour = start; hour < end; hour = hour.AddHours(1))
         {
