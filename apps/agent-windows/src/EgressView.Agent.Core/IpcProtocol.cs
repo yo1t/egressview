@@ -56,7 +56,9 @@ public static class IpcProtocol
         Func<bool, bool>? setCountryTableEnabled = null,
         Action? fetchPublicFeedsOnce = null,
         Func<GeoLookupSource, string>? setGeoLookupSource = null,
-        Func<string?, bool>? setAbuseChKey = null)
+        Func<string?, bool>? setAbuseChKey = null,
+        Func<string, OutboundCandidateVerdict?, string?, bool>? setOutboundAnswer = null,
+        Action? clearOutboundAnswers = null)
     {
         try
         {
@@ -99,6 +101,8 @@ public static class IpcProtocol
                 "fetch-public-feeds-once" => Invoke(fetchPublicFeedsOnce, "public-feeds-unavailable"),
                 "set-geo-lookup-source" => SetGeoLookupSource(root, setGeoLookupSource),
                 "set-abuse-ch-key" => SetAbuseChKey(root, setAbuseChKey),
+                "set-outbound-answer" => SetOutboundAnswer(root, setOutboundAnswer),
+                "clear-outbound-answers" => Invoke(clearOutboundAnswers, "outbound-answers-failed"),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
@@ -164,6 +168,37 @@ public static class IpcProtocol
                 : Reject("no-maxmind-account");
         }
         catch { return Reject("country-table-account-failed"); }
+    }
+
+    /// Records the person's answer to one listed candidate (P3-194), or takes
+    /// it back when no verdict is sent. The candidate is named by its id and
+    /// looked up among those listed now: one that has left the list cannot be
+    /// answered, and the reply says so.
+    private static string SetOutboundAnswer(JsonElement root, Func<string, OutboundCandidateVerdict?, string?, bool>? set)
+    {
+        if (set is null) return Reject("operation-unavailable");
+        if (!root.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrEmpty(id.GetString()))
+            return Reject("invalid-outbound-answer");
+        OutboundCandidateVerdict? verdict = null;
+        if (root.TryGetProperty("verdict", out var given) && given.ValueKind != JsonValueKind.Null)
+        {
+            if (given.ValueKind != JsonValueKind.String || OutboundCandidateJudgment.Parse(given.GetString()) is not { } parsed)
+                return Reject("invalid-outbound-answer");
+            verdict = parsed;
+        }
+        string? note = null;
+        if (root.TryGetProperty("note", out var text) && text.ValueKind != JsonValueKind.Null)
+        {
+            if (text.ValueKind != JsonValueKind.String) return Reject("invalid-outbound-answer");
+            note = text.GetString();
+        }
+        try
+        {
+            return set(id.GetString()!, verdict, note)
+                ? JsonSerializer.Serialize(new { status = "ok" })
+                : Reject("outbound-candidate-not-listed");
+        }
+        catch { return Reject("outbound-answers-failed"); }
     }
 
     /// Hands over the abuse.ch Auth-Key, or withdraws it when nothing is sent.

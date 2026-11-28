@@ -1600,7 +1600,7 @@ try
         ObservationStore.CreateVersion1FixtureForTesting(watched);
         var reported = new List<MigrationProgress>();
         using (var migrating = new ObservationStore(watched, reported.Add))
-            Assert(migrating.SchemaVersion == 35, "the fixture migrated");
+            Assert(migrating.SchemaVersion == 36, "the fixture migrated");
 
         // One per migration that rewrites the table: v26 moved the flow off
         // the row and v27 the time, and each says so before it starts.
@@ -2026,7 +2026,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 35, "v1 database migrates through v2-v35");
+        Assert(migrated.SchemaVersion == 36, "v1 database migrates through v2-v36");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
 
@@ -2078,7 +2078,7 @@ try
     Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v29.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 35, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 36, "migration is idempotent on restart");
 
     // The backup that survives a migration is the one whose migration
     // succeeded, and nothing used to delete it. It is the size of the
@@ -3716,7 +3716,7 @@ try
             var baselineDatabase = Path.Combine(directory, "baseline.db");
             using (var store = new ObservationStore(baselineDatabase))
             {
-                Assert(store.SchemaVersion == 35 && store.ReadOutboundBaselineSummary().HoursRecorded == 0,
+                Assert(store.SchemaVersion == 36 && store.ReadOutboundBaselineSummary().HoursRecorded == 0,
                     "a new database starts with an empty baseline");
                 var now = DateTimeOffset.UtcNow;
                 var start = Hour(now).AddHours(-5);
@@ -3806,7 +3806,7 @@ try
             Assert(PairDayBytes("two.example") == 2300, "the fixture holds the merged sum");
             using (var store = new ObservationStore(rebuildDatabase))
             {
-                Assert(store.SchemaVersion == 35, "the baseline moves to v33");
+                Assert(store.SchemaVersion == 36, "the baseline moves to v33");
                 var known = store.ReadOutboundBaselineSummary();
                 store.CaptureBaselineHours(rebuildNow, maxHours: 1000);
                 Assert(store.ReadOutboundBaselineSummary() is { } after && after.PairsKnown == known.PairsKnown
@@ -3884,6 +3884,133 @@ try
             };
             var context = AiInsightContextBuilder.Preview(AiInsightContextBuilder.Build(kept, kept));
             Assert(!context.Contains("private", StringComparison.OrdinalIgnoreCase), "the candidates are not given to the AI");
+        }
+
+        // P3-194: answering a candidate, as on the Mac.
+        {
+            // The id is the Mac's, character for character: the Hub gets its
+            // SHA-256, and these are the hashes in the shared golden file.
+            static string Hash(string value) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+            var golden = Path.GetFullPath(Path.Combine(windowsRoot, "..", "..", "protocol", "agent-outbound-candidates", "v1", "golden.json"));
+            using (var document = JsonDocument.Parse(File.ReadAllText(golden)))
+            {
+                foreach (var entry in document.RootElement.GetProperty("entries").EnumerateArray())
+                {
+                    var kind = entry.GetProperty("kind").GetString() switch
+                    {
+                        "newPair" => OutboundCandidateKind.NewPair,
+                        "aboveUsual" => OutboundCandidateKind.AboveUsual,
+                        _ => OutboundCandidateKind.Machine,
+                    };
+                    var candidate = new OutboundCandidate(kind, entry.GetProperty("day").GetDateTimeOffset(),
+                        entry.TryGetProperty("application", out var app) ? app.GetString() : null,
+                        entry.TryGetProperty("destination", out var dest) ? dest.GetString() : null,
+                        entry.GetProperty("bytesOut").GetUInt64(), null);
+                    Assert(Hash(candidate.Id) == entry.GetProperty("candidateId").GetString(),
+                        $"the candidate id hashes as on the Mac: {candidate.Id}");
+                }
+            }
+
+            // #970: a pair whose level really moved was listed every day, and
+            // answering "expected" changed nothing.
+            const double start = 1_699_920_000;
+            const ulong answerMib = 1 << 20;
+            var pair = new OutboundCandidateRules.PairKey("backup.exe", "one.example");
+            var hours = Enumerable.Range(0, 12 * 24).Select(index =>
+                new OutboundCandidateRules.Hour(start + index * 3600.0, 3600, 0, 10, 10)).ToList();
+            var days = Enumerable.Range(0, 8).Select(day => new OutboundCandidateRules.PairDay(start + day * 86_400.0, pair, answerMib))
+                .Concat(Enumerable.Range(8, 4).Select(day => new OutboundCandidateRules.PairDay(start + day * 86_400.0, pair, 30 * answerMib))).ToList();
+            var firstSeen = new Dictionary<OutboundCandidateRules.PairKey, double> { [pair] = start };
+            var at12 = DateTimeOffset.FromUnixTimeSeconds((long)(start + 12 * 86_400));
+            DateTimeOffset Day(int day) => DateTimeOffset.FromUnixTimeSeconds((long)(start + day * 86_400));
+            var before = OutboundCandidateRules.Evaluate(hours, days, firstSeen, at12);
+            Assert(before.Candidates.Count == 4, "unanswered, every raised day stays listed");
+            var first = before.Candidates.Single(candidate => candidate.At == Day(8));
+            var second = before.Candidates.Single(candidate => candidate.At == Day(9));
+            Assert(OutboundCandidateRules.Evaluate(hours, days, firstSeen, at12, new HashSet<string> { first.Id }).Candidates.Count == 4,
+                "one answered day does not move a 90th percentile: a single expected burst is not a new level");
+            var two = OutboundCandidateRules.Evaluate(hours, days, firstSeen, at12, new HashSet<string> { first.Id, second.Id });
+            Assert(two.Candidates.Select(candidate => candidate.At).SequenceEqual([Day(9), Day(8)]),
+                "with two answered, the answered days stay listed and the rest are usual now");
+            Assert(two.Candidates.Select(candidate => candidate.Id).ToHashSet().SetEquals([first.Id, second.Id]),
+                "the ids do not move, so the answers stay attached");
+            var other = new OutboundCandidateRules.PairKey("curl.exe", "two.example");
+            var both = days.Take(10).Concat(days.Take(10).Select(day => day with { Pair = other })).ToList();
+            var bothFirst = new Dictionary<OutboundCandidateRules.PairKey, double> { [pair] = start, [other] = start };
+            var at10 = DateTimeOffset.FromUnixTimeSeconds((long)(start + 10 * 86_400));
+            var listed = OutboundCandidateRules.Evaluate(hours.Take(10 * 24), both, bothFirst, at10);
+            Assert(listed.Candidates.Count == 4, "two pairs, two raised days each");
+            var lastDay = listed.Candidates.Single(candidate => candidate.Destination == "two.example" && candidate.At == Day(9));
+            Assert(OutboundCandidateRules.Evaluate(hours.Take(10 * 24), both, bothFirst, at10,
+                    new HashSet<string> { lastDay.Id, "aboveUsual|0.0|curl.exe|one.example" }).Candidates.Count == 4,
+                "an answer on the last day, or for a day never listed, moves nothing");
+
+            // The store: an answer is kept apart, read back with the list, and
+            // follows the history's retention and deletion.
+            var answersDatabase = Path.Combine(directory, "outbound-answers.db");
+            using var store = new ObservationStore(answersDatabase);
+            var today = new DateTimeOffset(DateTimeOffset.UtcNow.UtcDateTime.Date, TimeSpan.Zero);
+            var origin = today.AddDays(-12);
+            var seed = new StringBuilder("BEGIN;");
+            for (var hour = 0; hour < 12 * 24; hour++)
+                seed.Append($"INSERT INTO baseline_hours VALUES('{origin.AddHours(hour):O}',3600,0,10,10,10);");
+            for (var day = 0; day < 12; day++)
+                seed.Append($"INSERT INTO baseline_pair_days VALUES('{origin.AddDays(day):O}','backup.exe','one.example',{(day < 8 ? answerMib : 30 * answerMib)});");
+            seed.Append($"INSERT INTO baseline_pairs VALUES('backup.exe','one.example','{origin:O}','{today:O}');COMMIT;");
+            store.ExecuteForTesting(seed.ToString());
+            var report = store.ReadOutboundCandidates(DateTimeOffset.UtcNow);
+            Assert(report.Candidates.Count == 4 && report.Judgments.Count == 0, "four raised days, none answered");
+            var newest = report.Candidates[0];
+            Assert(store.SetOutboundCandidateJudgment(newest.Id, OutboundCandidateVerdict.Investigate, "  " + new string('x', 600) + "  ", DateTimeOffset.UtcNow),
+                "a listed candidate can be answered");
+            var judged = store.ReadOutboundCandidates(DateTimeOffset.UtcNow).Judgments.Single();
+            Assert(judged.CandidateId == newest.Id && judged.Verdict == OutboundCandidateVerdict.Investigate && judged.Note.Length == 500 && !judged.AnsweredOnHub,
+                "the answer is read back with the list, its note trimmed and cut to 500 characters");
+            store.SetOutboundCandidateJudgment(newest.Id, OutboundCandidateVerdict.Expected, null, DateTimeOffset.UtcNow);
+            Assert(store.ReadOutboundCandidateJudgments()[newest.Id] is { Verdict: OutboundCandidateVerdict.Expected, Note.Length: 500 },
+                "answering again without the note keeps the note");
+            Assert(store.ReadOutboundCandidates(DateTimeOffset.UtcNow).Candidates.Count == 4,
+                "the answered candidate stays listed: an answer never changes the list it answers");
+            Assert(!store.SetOutboundCandidateJudgment("aboveUsual|0.0|nobody|nowhere", OutboundCandidateVerdict.Expected, null, DateTimeOffset.UtcNow),
+                "a candidate that is not listed cannot be answered");
+            store.SetOutboundCandidateJudgment(newest.Id, null, null, DateTimeOffset.UtcNow);
+            Assert(store.ReadOutboundCandidateJudgments().Count == 0, "an answer can be taken back");
+
+            foreach (var candidate in report.Candidates)
+                store.SetOutboundCandidateJudgment(candidate.Id, OutboundCandidateVerdict.Expected, "mine", DateTimeOffset.UtcNow);
+            store.RemoveAllOutboundCandidateJudgments();
+            Assert(store.ReadOutboundCandidateJudgments().Count == 0, "all answers can be forgotten at once");
+
+            store.SetOutboundCandidateJudgment(newest.Id, OutboundCandidateVerdict.Expected, "mine", DateTimeOffset.UtcNow);
+            var oldest = report.Candidates[^1];
+            store.SetOutboundCandidateJudgment(oldest.Id, OutboundCandidateVerdict.Expected, "mine", DateTimeOffset.UtcNow);
+            store.DeleteLocalHistory(oldest.At.AddHours(1), DateTimeOffset.UtcNow);
+            Assert(store.ReadOutboundCandidateJudgments().Keys.SequenceEqual([newest.Id]),
+                "deleting history before a day deletes the answers about it, and keeps the later ones");
+            store.ExecuteForTesting($"INSERT INTO outbound_candidate_judgments(candidate_id,candidate_at,verdict,judged_at) VALUES('old','{today.AddDays(-45):O}','expected','{today.AddDays(-45):O}')");
+            store.SetRetentionDays(90);
+            store.PruneRetentionBatch(DateTimeOffset.UtcNow);
+            Assert(!store.ReadOutboundCandidateJudgments().ContainsKey("old") && store.ReadOutboundCandidateJudgments().ContainsKey(newest.Id),
+                "an answer goes 30 days after its candidate leaves the 14-day list, however long the history is kept");
+            store.DeleteLocalHistory(null, DateTimeOffset.UtcNow);
+            Assert(store.ReadOutboundCandidateJudgments().Count == 0, "deleting all history deletes every answer");
+
+            // Over the pipe: the answer is checked before it reaches the store.
+            string? givenId = null; OutboundCandidateVerdict? givenVerdict = OutboundCandidateVerdict.Expected; string? givenNote = "unset";
+            string Ask(string json) => IpcProtocol.Handle(json, () => "{}", _ => [],
+                setOutboundAnswer: (id, verdict, note) => { givenId = id; givenVerdict = verdict; givenNote = note; return id != "gone"; },
+                clearOutboundAnswers: () => { });
+            Assert(Ask("""{"v":1,"op":"set-outbound-answer","id":"a|1.0||","verdict":"investigate","note":"n"}""").Contains("\"ok\"")
+                   && givenId == "a|1.0||" && givenVerdict == OutboundCandidateVerdict.Investigate && givenNote == "n",
+                "an answer arrives with its verdict and note");
+            Assert(Ask("""{"v":1,"op":"set-outbound-answer","id":"a|1.0||","verdict":null}""").Contains("\"ok\"") && givenVerdict is null && givenNote is null,
+                "no verdict takes the answer back, and no note keeps the note");
+            Assert(Ask("""{"v":1,"op":"set-outbound-answer","id":"a|1.0||","verdict":"maybe"}""").Contains("invalid-outbound-answer"),
+                "only the two answers are taken");
+            Assert(Ask("""{"v":1,"op":"set-outbound-answer","verdict":"expected"}""").Contains("invalid-outbound-answer"), "an answer names its candidate");
+            Assert(Ask("""{"v":1,"op":"set-outbound-answer","id":"gone","verdict":"expected"}""").Contains("outbound-candidate-not-listed"),
+                "a candidate that has left the list is said to have left");
+            Assert(Ask("""{"v":1,"op":"clear-outbound-answers"}""").Contains("\"ok\""), "all answers can be forgotten over the pipe");
         }
 
         // The fifteen-minute windows are kept and compared by monitored time
@@ -5321,7 +5448,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 35 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 36 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
