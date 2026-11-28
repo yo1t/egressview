@@ -79,8 +79,9 @@ describe('shared i18n catalog', () => {
     // Grew by 3 on 2026-11-22: what an Agent says of its computer in the device list (P3-199).
     // Grew by 3 on 2026-11-22: the IPv6 count under the address and each address's kind (its own column went).
     // Grew by 3 on 2026-11-23: saying why a device has no IPv6 address (P3-200).
-    assert.equal(jaKeys.size, 1097);
-    assert.equal(enKeys.size, 1097);
+    // Grew by 1 on 2026-11-28: no LAN scans on a Windows Agent, which needs no setting (P3-191).
+    assert.equal(jaKeys.size, 1098);
+    assert.equal(enKeys.size, 1098);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 

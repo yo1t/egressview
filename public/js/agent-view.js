@@ -74,11 +74,23 @@ function candidateLine(entry) {
   return tVars('agents.candidates.aboveUsual', vars);
 }
 
-// Only the macOS Agent builds a "worth a look" list (P3-194). Saying "not
-// shared" for a Windows Agent would send its user looking for a switch
-// that does not exist.
+// The Agents that can share a "worth a look" list (P3-194): macOS, and
+// Windows from 0.1.184 (#976). Saying "not shared" for an older Windows Agent
+// would send its user looking for a switch that version does not have.
+const WINDOWS_SHARES_CANDIDATES_FROM = [0, 1, 184];
+
+function versionAtLeast(version, minimum) {
+  const parts = String(version || '').split('.').map(part => Number.parseInt(part, 10));
+  if (parts.length < minimum.length || parts.some(Number.isNaN)) return false;
+  for (let i = 0; i < minimum.length; i += 1) {
+    if (parts[i] !== minimum[i]) return parts[i] > minimum[i];
+  }
+  return true;
+}
+
 function listsCandidates(agent) {
-  return agent.platform === 'macos';
+  if (agent.platform === 'macos') return true;
+  return agent.platform === 'windows' && versionAtLeast(agent.agentVersion, WINDOWS_SHARES_CANDIDATES_FROM);
 }
 
 const PLATFORM_NAMES = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
@@ -288,10 +300,14 @@ function renderCandidates(agent, report) {
   return section;
 }
 
-// Only the macOS Agent counts devices probing its computer, and only while
-// its user has packet-header counting on (P3-191).
+// The Agents that count devices probing their computer (P3-191): macOS, only
+// while its user has packet-header counting on, and Windows from 0.1.158
+// (#841), always, from the closed-port drops Windows reports.
+const WINDOWS_COUNTS_PROBES_FROM = [0, 1, 158];
+
 function countsProbes(agent) {
-  return agent.platform === 'macos';
+  if (agent.platform === 'macos') return true;
+  return agent.platform === 'windows' && versionAtLeast(agent.agentVersion, WINDOWS_COUNTS_PROBES_FROM);
 }
 
 function renderProbes(agent, probes, minPorts) {
@@ -305,7 +321,8 @@ function renderProbes(agent, probes, minPorts) {
   }
   const senders = Array.isArray(probes?.senders) ? probes.senders : [];
   if (!senders.length) {
-    section.appendChild(textElement('div', t('agents.probes.none'), 'agent-card-empty'));
+    section.appendChild(textElement('div',
+      t(agent.platform === 'windows' ? 'agents.probes.noneWindows' : 'agents.probes.none'), 'agent-card-empty'));
     return section;
   }
   section.appendChild(textElement('div', tVars('agents.probes.hint', { ports: minPorts }), 'agent-card-meta'));
