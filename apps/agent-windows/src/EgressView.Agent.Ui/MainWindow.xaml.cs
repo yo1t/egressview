@@ -566,6 +566,7 @@ public partial class MainWindow : Window
     }
 
     private bool showAllCandidates;
+    private bool showCheckedCandidates;
     private string? shownCandidates;
 
     private async Task RefreshInsightsAsync()
@@ -617,15 +618,69 @@ public partial class MainWindow : Window
             shownCandidates = null;
             return;
         }
-        var shown = $"{LocalizationManager.Text("WorthALook")}|{showAllCandidates}|{JsonSerializer.Serialize(report)}";
+        var shown = $"{LocalizationManager.Text("WorthALook")}|{showAllCandidates}|{showCheckedCandidates}|{JsonSerializer.Serialize(report)}";
         if (shown == shownCandidates) return;
         shownCandidates = shown;
         OutboundCandidatesCard.Child = OutboundCandidatesView.Build(report, showAllCandidates, () =>
         {
             showAllCandidates = true;
             ShowOutboundCandidates(report);
-        });
+        }, (candidate, verdict, note) => _ = AnswerOutboundCandidateAsync(candidate, verdict, note), showCheckedCandidates, () =>
+        {
+            showCheckedCandidates = true;
+            ShowOutboundCandidates(report);
+        }, () => _ = ForgetOutboundAnswersAsync());
         OutboundCandidatesCard.Visibility = Visibility.Visible;
+    }
+
+    /// P3-194: one answer, then the list again, which is where the answer
+    /// shows. A failure is said where the list is, not in a dialog.
+    private async Task AnswerOutboundCandidateAsync(OutboundCandidate candidate, OutboundCandidateVerdict? verdict, string? note)
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new
+            {
+                v = 1, op = "set-outbound-answer", id = candidate.Id,
+                verdict = verdict is { } given ? OutboundCandidateJudgment.Code(given) : null, note,
+            }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (root.TryGetProperty("status", out var status) && status.GetString() == "rejected")
+            {
+                var reason = root.TryGetProperty("reason", out var value) ? value.GetString() : null;
+                System.Windows.MessageBox.Show(this, reason == "outbound-candidate-not-listed"
+                    ? LocalizationManager.Text("WorthALookNotListed") : $"{LocalizationManager.Text("WorthALookAnswerFailed")} ({reason})",
+                    LocalizationManager.Text("WorthALook"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            await RefreshInsightsAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            System.Windows.MessageBox.Show(this, $"{LocalizationManager.Text("WorthALookAnswerFailed")}: {exception.Message}",
+                LocalizationManager.Text("WorthALook"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async Task ForgetOutboundAnswersAsync()
+    {
+        if (System.Windows.MessageBox.Show(this, LocalizationManager.Text("WorthALookForgetAllBody"), LocalizationManager.Text("WorthALookForgetAllTitle"),
+                MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "clear-outbound-answers" }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            showCheckedCandidates = false;
+            await RefreshInsightsAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            System.Windows.MessageBox.Show(this, $"{LocalizationManager.Text("WorthALookAnswerFailed")}: {exception.Message}",
+                LocalizationManager.Text("WorthALook"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void OutboundAnomalyCard_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e) => OpenCandidates();

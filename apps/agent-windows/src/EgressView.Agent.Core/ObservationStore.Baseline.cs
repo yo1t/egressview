@@ -318,6 +318,7 @@ public sealed partial class ObservationStore
         Execute($"DELETE FROM baseline_pair_days WHERE day<'{pairDayCutoff}'");
         Execute($"DELETE FROM baseline_pairs WHERE last_seen<'{value}'");
         Execute($"UPDATE baseline_pairs SET first_seen='{value}' WHERE first_seen<'{value}'");
+        PruneJudgmentsLocked(cutoff);
 
         static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
     }
@@ -331,6 +332,7 @@ public sealed partial class ObservationStore
         if (before is not { } cutoff)
         {
             Execute("DELETE FROM baseline_hours; DELETE FROM baseline_pair_days; DELETE FROM baseline_pairs;");
+            DeleteJudgmentsLocked(null);
             // Nothing left to read back to, so the next hour starts afresh.
             Execute($"UPDATE baseline_state SET captured_through='{FloorHour(DateTimeOffset.UtcNow):O}' WHERE id=1");
             return;
@@ -339,6 +341,7 @@ public sealed partial class ObservationStore
         Execute($"DELETE FROM baseline_hours WHERE hour_start<'{value}'");
         Execute($"DELETE FROM baseline_pair_days WHERE day<'{value}'");
         Execute($"DELETE FROM baseline_pairs WHERE first_seen<'{value}'");
+        DeleteJudgmentsLocked(cutoff);
     }
 
     public OutboundBaselineSummary ReadOutboundBaselineSummary()
@@ -415,7 +418,15 @@ public sealed partial class ObservationStore
                 firstSeen[new(Text(statement, 0), Text(statement, 1))] = Seconds(Text(statement, 2));
         }
         finally { WinSqlite.Finalize(statement); }
-        return OutboundCandidateRules.Evaluate(hours, days, firstSeen, now);
+
+        var judgments = ReadOutboundCandidateJudgmentsLocked();
+        var expected = judgments.Values.Where(judgment => judgment.Verdict == OutboundCandidateVerdict.Expected)
+            .Select(judgment => judgment.CandidateId).ToHashSet(StringComparer.Ordinal);
+        var report = OutboundCandidateRules.Evaluate(hours, days, firstSeen, now, expected);
+        return report with
+        {
+            Judgments = report.Candidates.Select(candidate => judgments.GetValueOrDefault(candidate.Id)).OfType<OutboundCandidateJudgment>().ToList(),
+        };
     }
 
     private static DateTimeOffset FloorHour(DateTimeOffset value)
