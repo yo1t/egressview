@@ -95,6 +95,50 @@ final class OutboundCandidatesTests: XCTestCase {
         XCTAssertEqual(report.candidates.count, 2)
     }
 
+    /// P3-194: a pair whose level really moved was listed every day, and
+    /// answering "expected" changed nothing.
+    func testADayAnsweredExpectedJoinsThePairsUsualLevel() {
+        var days = (0..<8).map { Rules.PairDay(day: day($0), pair: pair, bytesOut: mib) }
+        days += (8..<12).map { Rules.PairDay(day: day($0), pair: pair, bytesOut: 30 * mib) }
+        let before = evaluate(hours: hours(days: 12), days: days, firstSeen: [pair: day(0)], now: now(12))
+        XCTAssertEqual(before.candidates.count, 4, "unanswered, every raised day stays listed")
+
+        // The yardstick is the 90th percentile, so one answered day does not
+        // move it: a single expected burst is not a new level.
+        let first = before.candidates.first { $0.at == now(8) }!
+        let one = Rules.evaluate(
+            hours: hours(days: 12), pairDays: days, firstSeen: [pair: day(0)], now: now(12),
+            expected: [first.id]
+        )
+        XCTAssertEqual(one.candidates.count, 4)
+
+        let second = before.candidates.first { $0.at == now(9) }!
+        let two = Rules.evaluate(
+            hours: hours(days: 12), pairDays: days, firstSeen: [pair: day(0)], now: now(12),
+            expected: [first.id, second.id]
+        )
+        XCTAssertEqual(two.candidates.map(\.at), [now(9), now(8)], "the answered days stay listed, the rest are usual now")
+        XCTAssertEqual(Set(two.candidates.map(\.id)), [first.id, second.id], "the ids do not move, so the answers stay attached")
+    }
+
+    func testAnswersOnOtherDaysOrOtherPairsDoNotRaiseTheUsualLevel() {
+        let other = Rules.PairKey(application: "curl", destination: "two.example")
+        var days = (0..<8).map { Rules.PairDay(day: day($0), pair: pair, bytesOut: mib) }
+        days += (8..<10).map { Rules.PairDay(day: day($0), pair: pair, bytesOut: 30 * mib) }
+        days += (0..<8).map { Rules.PairDay(day: day($0), pair: other, bytesOut: mib) }
+        days += (8..<10).map { Rules.PairDay(day: day($0), pair: other, bytesOut: 30 * mib) }
+        let before = evaluate(
+            hours: hours(days: 10), days: days, firstSeen: [pair: day(0), other: day(0)], now: now(10)
+        )
+        XCTAssertEqual(before.candidates.count, 4)
+        let answered = before.candidates.first { $0.destination == "two.example" && $0.at == now(9) }!
+        let after = Rules.evaluate(
+            hours: hours(days: 10), pairDays: days, firstSeen: [pair: day(0), other: day(0)], now: now(10),
+            expected: [answered.id, "aboveUsual|0.0|curl|one.example"]
+        )
+        XCTAssertEqual(after.candidates.count, 4, "an answer on the last day, or for a day never listed, moves nothing")
+    }
+
     func testTheMachineIsListedOncePerDayForItsLargestWindow() {
         var all = hours(days: 12)
         all[10 * 24 + 5].bytesOut = 500 * mib

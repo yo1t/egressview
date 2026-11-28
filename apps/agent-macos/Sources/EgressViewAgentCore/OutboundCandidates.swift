@@ -141,8 +141,18 @@ public enum OutboundCandidateRules {
             || unattributablePrefixes.contains { application.hasPrefix($0) }
     }
 
+    /// `expected` holds the ids of candidates the person answered "expected"
+    /// (here or on the Hub). Such a day of an above-usual pair is still
+    /// listed, and it also joins that pair's usual level, so a pair whose
+    /// level has really moved stops being listed every day (P3-194, decided
+    /// 2026-11-28: on the one Mac sharing answers, 19 of 30 candidates in 14
+    /// days were three pairs listed day after day, every one answered
+    /// "expected"). Only that pair and that day: there is no "always expected
+    /// for this app". The yardstick is a percentile, so one answered day does
+    /// not move it; a level moves once enough answered days are in it.
     public static func evaluate(
-        hours: [Hour], pairDays: [PairDay], firstSeen: [PairKey: Double], now: Date
+        hours: [Hour], pairDays: [PairDay], firstSeen: [PairKey: Double], now: Date,
+        expected: Set<String> = []
     ) -> OutboundCandidateReport {
         let ordered = hours.sorted { $0.start < $1.start }
         var monitored = 0
@@ -158,7 +168,7 @@ public enum OutboundCandidateRules {
             return OutboundCandidateReport(state: .learning(monitoredHours: Double(monitored) / 3600))
         }
         var found = newPairs(pairDays, firstSeen: firstSeen, learnedAt: learnedAt)
-        found += aboveUsual(pairDays, learnedAt: learnedAt)
+        found += aboveUsual(pairDays, learnedAt: learnedAt, expected: expected)
         found += machine(ordered, learnedAt: learnedAt)
         let cutoff = now.timeIntervalSince1970 - listWindow
         let recent = found.filter { $0.at.timeIntervalSince1970 >= cutoff }
@@ -202,8 +212,11 @@ public enum OutboundCandidateRules {
 
     /// Against the 90th percentile, and without the days already listed: with
     /// the largest day as the yardstick, one 8.6 GiB send hid everything under
-    /// 25 GiB from then on.
-    private static func aboveUsual(_ pairDays: [PairDay], learnedAt: Double) -> [OutboundCandidate] {
+    /// 25 GiB from then on. A listed day the person answered "expected" is the
+    /// exception and joins the usual level (see `evaluate`).
+    private static func aboveUsual(
+        _ pairDays: [PairDay], learnedAt: Double, expected: Set<String>
+    ) -> [OutboundCandidate] {
         var found: [OutboundCandidate] = []
         for (pair, days) in grouped(pairDays) {
             var usual: [UInt64] = []
@@ -212,12 +225,13 @@ public enum OutboundCandidateRules {
                     let yardstick = percentile(usual.sorted(), 0.9)
                     let (limit, overflow) = yardstick.multipliedReportingOverflow(by: aboveUsualFactor)
                     if !overflow, day.bytesOut >= aboveUsualBytes, day.bytesOut >= limit {
-                        found.append(OutboundCandidate(
+                        let candidate = OutboundCandidate(
                             kind: .aboveUsual, at: Date(timeIntervalSince1970: day.day),
                             application: pair.application, destination: pair.destination,
                             bytesOut: day.bytesOut, usualBytesOut: yardstick
-                        ))
-                        continue
+                        )
+                        found.append(candidate)
+                        if !expected.contains(candidate.id) { continue }
                     }
                 }
                 usual.append(day.bytesOut)
