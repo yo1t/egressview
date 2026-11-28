@@ -360,4 +360,38 @@ final class OutboundCandidateTriageTests: XCTestCase {
         XCTAssertFalse(judgment.answeredOnHub)
     }
 
+    /// P3-194 (2026-11-28): a day answered "expected" joins its pair's usual
+    /// level, whether answered here or on the Hub; "investigate" does not.
+    func test想定内と答えた日はその組の普段の量に入る() throws {
+        store = nil
+        var raw: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &raw), SQLITE_OK)
+        var sql = ""
+        for hour in 0..<(12 * 24) {
+            let start = day.timeIntervalSince1970 + Double(hour) * 3600
+            sql += "INSERT INTO baseline_hours VALUES (\(start), 3600, 1048576, 100, 99, 99);"
+        }
+        for n in 0..<12 {
+            let at = day.timeIntervalSince1970 + Double(n) * 86_400
+            sql += "INSERT INTO baseline_pair_days VALUES (\(at), 'curl', 'one.example', \(n < 8 ? mib : 30 * mib));"
+        }
+        sql += "INSERT INTO baseline_pairs VALUES ('curl', 'one.example', \(day.timeIntervalSince1970), \(day.timeIntervalSince1970 + 11 * 86_400));"
+        XCTAssertEqual(sqlite3_exec(raw, sql, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(raw)
+        store = try ObservationStore(fileURL: url)
+        let now = day.addingTimeInterval(12 * 86_400)
+
+        let before = try store.outboundCandidates(now: now).candidates
+        XCTAssertEqual(before.count, 4)
+        let oldest = before.sorted { $0.at < $1.at }
+        try store.setOutboundCandidateJudgment(oldest[0], verdict: .investigate)
+        try store.setOutboundCandidateJudgment(oldest[1], verdict: .investigate)
+        XCTAssertEqual(try store.outboundCandidates(now: now).candidates.count, 4, "要調査は普段の量に入れない")
+
+        try store.setOutboundCandidateJudgment(oldest[0], verdict: .expected)
+        try store.setOutboundCandidateJudgment(oldest[1], verdict: .expected)
+        let after = try store.outboundCandidates(now: now).candidates
+        XCTAssertEqual(Set(after.map(\.id)), [oldest[0].id, oldest[1].id], "答えた2日は残り、その後の日は普段の量になる")
+    }
+
 }
