@@ -3011,7 +3011,16 @@ public final class ObservationStore: @unchecked Sendable {
     public func outboundCandidateEvidence(
         for candidate: OutboundCandidate, limit: Int = OutboundCandidateEvidence.flowLimit
     ) throws -> OutboundCandidateEvidence {
-        let window = OutboundCandidateRules.evidenceWindow(for: candidate)
+        var window = OutboundCandidateRules.evidenceWindow(for: candidate)
+        // Not past what the baseline has read: the candidate was judged on
+        // those hours, and the rest of today has not happened yet. Taking the
+        // whole of today, a candidate listed at lunchtime read as 17%
+        // monitored and "more may have been sent" (2026-11-28).
+        if let through = try lock.withLock({
+            try scalarDouble("SELECT captured_through FROM baseline_state WHERE id = 1")
+        }), through > window.start.timeIntervalSince1970, through < window.end.timeIntervalSince1970 {
+            window = DateInterval(start: window.start, end: Date(timeIntervalSince1970: through))
+        }
         let start = window.start.timeIntervalSince1970
         let end = window.end.timeIntervalSince1970
         struct Key: Hashable { let application: String; let hostname: String?; let address: String }
