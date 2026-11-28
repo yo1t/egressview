@@ -133,6 +133,24 @@ final class OutboundCandidateTriageTests: XCTestCase {
         XCTAssertEqual(window.end, day.addingTimeInterval(86_400))
     }
 
+    func test今日の候補は基準が読んだ時刻までで監視の割合を出す() throws {
+        try store.beginCoverageSession(at: day)
+        try observe(at: day, bytesOut: 3_000)
+        try observe(at: day.addingTimeInterval(3 * 3600), bytesOut: 2_000)
+        let noon = day.addingTimeInterval(12 * 3600)
+        try store.captureBaselineHours(now: noon.addingTimeInterval(300), maxHours: 10_000)
+
+        let evidence = try store.outboundCandidateEvidence(for: candidate())
+        XCTAssertEqual(evidence.window, DateInterval(start: day, end: noon))
+        XCTAssertEqual(evidence.bytesOut, 5_000)
+        XCTAssertEqual(evidence.monitoredSeconds, 12 * 3600)
+        XCTAssertFalse(evidence.mayUndercount)
+
+        // A day the baseline has read past keeps its whole 24 hours.
+        let before = try store.outboundCandidateEvidence(for: candidate(at: day.addingTimeInterval(-86_400)))
+        XCTAssertEqual(before.window, DateInterval(start: day.addingTimeInterval(-86_400), duration: 86_400))
+    }
+
     func test監視していない時間があれば少なく見えるかもしれないと言う() throws {
         try observe(at: day.addingTimeInterval(600), bytesOut: 3_000)
         let unwatched = try store.outboundCandidateEvidence(for: candidate())
