@@ -293,7 +293,7 @@ public static class DiagnosticsReport
         value.TcpConnectFailures, value.InboundProbePackets, value.InboundProbeSendersReported,
         value.InboundProbesPending, value.InboundProbesSent, value.InboundProbesDropped,
         tcpipSourceError = SafeCode(value.TcpipSourceError),
-        value.InterfaceUnresolved, value.InterfaceRefreshesAfterMiss, value.InboundMulticastIgnored, value.EtwEventsLost, value.EtwEventsLostAtStart,
+        value.InterfaceUnresolved, value.InterfaceRefreshesAfterMiss, value.InboundMulticastIgnored, value.InboundBroadcastIgnored, value.EtwEventsLost, value.EtwEventsLostAtStart,
         collectorError = SafeCode(value.CollectorError), persistenceError = SafeCode(value.PersistenceError),
         value.NamesFromStartEvents, value.NamesFromCache, value.NamesFromLiveQueries, value.NamesNeverSeen, value.NamesNeverSeenAtStartup,
         value.NamesNeverSeenAfterStartup, value.NamesNeverSeenAfterStartProbeMiss, value.NamesNeverSeenWithoutStartEvent,

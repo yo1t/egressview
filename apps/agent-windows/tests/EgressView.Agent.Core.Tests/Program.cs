@@ -1110,6 +1110,34 @@ try
     for (var i = 0; i < 300; i++) floodLog.Observe(logAt.AddSeconds(i), i % 2 == 0 ? "retryable" : "acknowledged", null, Queue, Network);
     Assert(DeliveryHistory.Read(Path.Combine(directory, "delivery-history-flood")).Count == DeliveryHistory.Kept,
         "a flapping Hub cannot grow the file past its bound");
+    // A backlog draining against a Hub that paces it: taken, 429, taken a
+    // minute later, and so on. Only the first acknowledgement is news.
+    var pacedDirectory = Path.Combine(directory, "delivery-history-paced");
+    var pacedLog = new DeliveryHistory(pacedDirectory);
+    var drainAt = logAt;
+    var lastTaken = drainAt;
+    (long, DateTimeOffset?) PacedQueue() => (5000, lastTaken);
+    pacedLog.Started(drainAt, 13000, drainAt.AddHours(-2));
+    for (var minute = 0; minute < 10; minute++)
+    {
+        lastTaken = drainAt.AddMinutes(minute);
+        pacedLog.Observe(lastTaken, "acknowledged", null, PacedQueue, Network);
+        pacedLog.Observe(lastTaken.AddSeconds(3), "rate-limited", 429, PacedQueue, Network);
+    }
+    Assert(DeliveryHistory.Read(pacedDirectory).Select(item => item.State).SequenceEqual(["start", "acknowledged"]),
+        "a Hub pacing a backlog it keeps taking does not fill the history with 429s");
+    // A 429 with nothing taken for longer than the window is written, with
+    // when the Hub last took a batch.
+    Assert(pacedLog.Observe(lastTaken.Add(DeliveryHistory.PacingWindow), "rate-limited", 429, PacedQueue, Network)
+           && DeliveryHistory.Read(pacedDirectory)[^1] is { State: "rate-limited", StatusCode: 429 } paced && paced.LastAcknowledgedAt == lastTaken,
+        "a Hub that stops taking anything is still written down");
+    // Another failure soon after an acknowledgement is news as before.
+    var otherDirectory = Path.Combine(directory, "delivery-history-other");
+    var otherLog = new DeliveryHistory(otherDirectory);
+    lastTaken = drainAt;
+    otherLog.Observe(drainAt, "acknowledged", null, PacedQueue, Network);
+    Assert(otherLog.Observe(drainAt.AddSeconds(3), "retryable", 503, PacedQueue, Network), "only 429 is read as pacing");
+
     var historyZone = TimeZoneInfo.CreateCustomTimeZone("test+9", TimeSpan.FromHours(9), "test+9", "test+9");
     var outageAt = new DateTimeOffset(2026, 11, 21, 12, 48, 44, TimeSpan.Zero);
     var outageLine = DeliveryOutageText.HistoryLine(new DeliveryEvent(outageAt, "retryable", null, 6187, outageAt.AddMinutes(-4), "local-only"), true, historyZone);
@@ -5166,6 +5194,36 @@ try
                 false, false, false, false, received: false, tcp: false);
             Assert(udpSent is { LocalAddress: local, RemoteAddress: server, LocalIsSource: true },
                 "and a UDP send the source");
+
+            // Broadcasts. Another device's, received: neither end is on an
+            // interface, and before this the broadcast address was stored as
+            // this machine's end.
+            const string subnetBroadcast = "192.168.0.255";
+            Assert(EtwNetworkCollector.SortEndpoints("192.168.0.9", 137, subnetBroadcast, 137,
+                    false, false, false, false, received: true, tcp: false, destinationBroadcast: true) is null,
+                "another device's subnet broadcast is not this machine's traffic");
+            Assert(EtwNetworkCollector.SortEndpoints("192.168.0.9", 68, "255.255.255.255", 67,
+                    false, false, false, false, true, false, true) is null,
+                "nor is a limited broadcast");
+            // This machine's own broadcast coming back is not received bytes.
+            Assert(EtwNetworkCollector.SortEndpoints(local, 137, subnetBroadcast, 137,
+                    true, false, false, false, true, false, true) is null,
+                "this machine's own broadcast coming back is not counted as received");
+            // What this machine sends to the broadcast address is kept.
+            Assert(EtwNetworkCollector.SortEndpoints(local, 137, subnetBroadcast, 137,
+                    true, false, false, false, received: false, tcp: false, destinationBroadcast: true)
+                    is { LocalAddress: local, RemoteAddress: subnetBroadcast, LocalIsSource: true },
+                "a broadcast this machine sends is traffic it sent, and is kept");
+
+            Assert(EtwNetworkCollector.DirectedBroadcast(System.Net.IPAddress.Parse("192.168.0.50"), 24) == "192.168.0.255"
+                   && EtwNetworkCollector.DirectedBroadcast(System.Net.IPAddress.Parse("10.1.2.3"), 20) == "10.1.15.255"
+                   && EtwNetworkCollector.DirectedBroadcast(System.Net.IPAddress.Parse("100.64.0.1"), 31) is null
+                   && EtwNetworkCollector.DirectedBroadcast(System.Net.IPAddress.Parse("100.64.0.1"), 32) is null
+                   && EtwNetworkCollector.DirectedBroadcast(System.Net.IPAddress.Parse("fe80::1"), 64) is null,
+                "the broadcast address is read from each subnet, and /31, /32 and IPv6 have none");
+            // An address ending .255 is an ordinary machine in a /16.
+            Assert(EtwNetworkCollector.DirectedBroadcast(System.Net.IPAddress.Parse("172.16.4.255"), 16) == "172.16.255.255",
+                "x.x.x.255 is only a broadcast when the subnet says so");
         }
 
         // A row per packet, which the store could not absorb.
